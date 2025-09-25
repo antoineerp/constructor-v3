@@ -71,7 +71,7 @@ importers:
         version: 5.39.6
       svelte-check:
         specifier: ^4.0.0
-        version: 4.3.2(picomatch@2.3.1)(svelte@5.39.6)(typescript@5.9.2)
+        version: 4.3.2(picomatch@4.0.3)(svelte@5.39.6)(typescript@5.9.2)
       tailwindcss:
         specifier: ^3.4.0
         version: 3.4.17
@@ -93,6 +93,9 @@ importers:
       monaco-editor:
         specifier: ^0.52.0
         version: 0.52.2
+      openai:
+        specifier: ^4.67.0
+        version: 4.104.0(ws@8.18.3)(zod@3.25.76)
       socket.io-client:
         specifier: ^4.8.0
         version: 4.8.1
@@ -144,7 +147,7 @@ importers:
         version: 5.39.6
       svelte-check:
         specifier: ^4.0.0
-        version: 4.3.2(picomatch@2.3.1)(svelte@5.39.6)(typescript@5.9.2)
+        version: 4.3.2(picomatch@4.0.3)(svelte@5.39.6)(typescript@5.9.2)
       tailwindcss:
         specifier: ^3.4.17
         version: 3.4.17
@@ -202,7 +205,7 @@ importers:
         version: 5.39.6
       svelte-check:
         specifier: ^4.0.0
-        version: 4.3.2(picomatch@2.3.1)(svelte@5.39.6)(typescript@5.9.2)
+        version: 4.3.2(picomatch@4.0.3)(svelte@5.39.6)(typescript@5.9.2)
       tailwindcss:
         specifier: ^3.4.0
         version: 3.4.17
@@ -275,7 +278,7 @@ importers:
         version: 5.39.6
       svelte-check:
         specifier: ^4.0.0
-        version: 4.3.2(picomatch@2.3.1)(svelte@5.39.6)(typescript@5.9.2)
+        version: 4.3.2(picomatch@4.0.3)(svelte@5.39.6)(typescript@5.9.2)
       typescript:
         specifier: ^5.0.0
         version: 5.9.2
@@ -3426,9 +3429,9 @@ snapshots:
     dependencies:
       reusify: 1.1.0
 
-  fdir@6.5.0(picomatch@2.3.1):
+  fdir@6.5.0(picomatch@4.0.3):
     optionalDependencies:
-      picomatch: 2.3.1
+      picomatch: 4.0.3
 
   file-entry-cache@8.0.0:
     dependencies:
@@ -4066,11 +4069,11 @@ snapshots:
 
   supports-preserve-symlinks-flag@1.0.0: {}
 
-  svelte-check@4.3.2(picomatch@2.3.1)(svelte@5.39.6)(typescript@5.9.2):
+  svelte-check@4.3.2(picomatch@4.0.3)(svelte@5.39.6)(typescript@5.9.2):
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       chokidar: 4.0.3
-      fdir: 6.5.0(picomatch@2.3.1)
+      fdir: 6.5.0(picomatch@4.0.3)
       picocolors: 1.1.1
       sade: 1.8.1
       svelte: 5.39.6

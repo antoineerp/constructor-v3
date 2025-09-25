@@ -1,27 +1,39 @@
 <script>
   import { supabase } from '$lib/supabase.js';
   import DynamicComponent from '$lib/DynamicComponent.svelte';
-  import { componentGenerator } from '$lib/componentGenerator.js';
-  
+
   let userPrompt = '';
   let messages = [];
   let generatedComponents = [];
   let activeTab = 'chat';
   let loading = false;
-  
-  // Onglets simplifiés
+  let isGenerating = false;
+
+  // Onglets
   const tabs = [
     { id: 'chat', label: 'Chat', icon: 'fas fa-comments' },
     { id: 'components', label: 'Composants', icon: 'fas fa-puzzle-piece' },
     { id: 'preview', label: 'Aperçu', icon: 'fas fa-eye' }
   ];
-  
-  // Envoi de message et génération de composant
+
+  // Détecter le type de composant
+  function detectComponentType(prompt) {
+    const lower = prompt.toLowerCase();
+    if (lower.includes('bouton') || lower.includes('button')) return 'button';
+    if (lower.includes('carte') || lower.includes('card')) return 'card';
+    if (lower.includes('input') || lower.includes('champ') || lower.includes('formulaire')) return 'input';
+    if (lower.includes('modal') || lower.includes('popup')) return 'modal';
+    if (lower.includes('navigation') || lower.includes('menu')) return 'navigation';
+    return 'generic';
+  }
+
+  // Envoyer un message et générer avec OpenAI
   async function sendMessage() {
     if (!userPrompt.trim() || loading) return;
     
     loading = true;
-    
+    isGenerating = true;
+
     // Ajouter le message utilisateur
     const userMessage = {
       id: Date.now().toString(),
@@ -30,145 +42,169 @@
       timestamp: new Date()
     };
     messages = [...messages, userMessage];
-    
+
     const currentPrompt = userPrompt;
     userPrompt = '';
-    
+
     try {
-      // Analyser le prompt pour déterminer le type de composant
       const componentType = detectComponentType(currentPrompt);
       
-      // Générer le composant
-      const componentCode = await componentGenerator.generateComponent(
-        currentPrompt,
-        componentType,
-        { style: 'modern', responsive: true }
-      );
-      
-      // Ajouter la réponse IA avec le composant
+      // Appeler l'API OpenAI
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          prompt: currentPrompt,
+          type: componentType
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Erreur HTTP: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Erreur lors de la génération');
+      }
+
+      // Ajouter la réponse IA avec le composant généré
       const aiResponse = {
         id: (Date.now() + 1).toString(),
         type: 'ai',
-        content: `J'ai généré un composant ${componentType} basé sur votre demande.`,
+        content: `✨ J'ai généré un composant ${componentType} avec OpenAI pour vous :`,
         component: {
           type: componentType,
           description: currentPrompt,
-          code: componentCode
+          code: result.code
         },
         timestamp: new Date()
       };
-      
+
       messages = [...messages, aiResponse];
       generatedComponents = [...generatedComponents, aiResponse.component];
-      
-      // Sauvegarder en base
-      await saveToDatabase(componentType, currentPrompt, componentCode);
-      
+
+      // Sauvegarder dans Supabase
+      try {
+        await saveToSupabase(componentType, currentPrompt, result.code);
+      } catch (error) {
+        console.warn('Sauvegarde Supabase échouée:', error);
+      }
+
     } catch (error) {
+      console.error('Erreur génération:', error);
       const errorMessage = {
         id: (Date.now() + 1).toString(),
         type: 'ai',
-        content: `Désolé, j'ai rencontré une erreur : ${error.message}`,
+        content: `❌ Erreur lors de la génération: ${error.message}`,
         timestamp: new Date()
       };
       messages = [...messages, errorMessage];
     } finally {
       loading = false;
+      isGenerating = false;
     }
   }
-  
-  function detectComponentType(prompt) {
-    const lowerPrompt = prompt.toLowerCase();
-    
-    if (lowerPrompt.includes('bouton') || lowerPrompt.includes('button')) return 'button';
-    if (lowerPrompt.includes('carte') || lowerPrompt.includes('card')) return 'card';
-    if (lowerPrompt.includes('input') || lowerPrompt.includes('champ') || lowerPrompt.includes('formulaire')) return 'input';
-    if (lowerPrompt.includes('modal') || lowerPrompt.includes('popup') || lowerPrompt.includes('dialogue')) return 'modal';
-    if (lowerPrompt.includes('navigation') || lowerPrompt.includes('navbar') || lowerPrompt.includes('menu')) return 'navigation';
-    if (lowerPrompt.includes('liste') || lowerPrompt.includes('tableau') || lowerPrompt.includes('grid')) return 'list';
-    
-    return 'generic';
-  }
-  
-  async function saveToDatabase(type, description, code) {
+
+  // Sauvegarder dans Supabase
+  async function saveToSupabase(type, description, code) {
     try {
       const { data, error } = await supabase
         .from('components')
         .insert({
-          name: `Generated ${type} - ${Date.now()}`,
+          name: `OpenAI ${type} - ${Date.now()}`,
           type: type,
-          category: 'generated',
           description: description,
           code: code,
+          category: 'ai-generated',
           created_at: new Date().toISOString()
         });
-        
-      if (error) throw error;
       
+      if (error) throw error;
+      console.log('✅ Composant sauvegardé:', data);
     } catch (error) {
-      console.error('Erreur sauvegarde:', error);
+      console.warn('⚠️ Erreur sauvegarde Supabase:', error);
     }
   }
-  
+
+  // Gestion des touches
   function handleKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
   }
-  
-  // Charger les composants existants au démarrage
+
+  // Charger les composants existants
   async function loadExistingComponents() {
     try {
-      const components = await componentGenerator.loadFromDatabase();
-      generatedComponents = components.map(c => ({
-        type: c.type,
-        description: c.description,
-        code: c.code
-      }));
+      const { data, error } = await supabase
+        .from('components')
+        .select('*')
+        .in('category', ['generated', 'ai-generated'])
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (!error && data) {
+        const components = data.map(c => ({
+          type: c.type || 'generic',
+          description: c.description || '',
+          code: c.code || ''
+        }));
+        generatedComponents = [...components];
+      }
     } catch (error) {
-      console.error('Erreur chargement composants:', error);
+      console.warn('⚠️ Erreur chargement composants:', error);
     }
   }
-  
-  // Charger au démarrage
+
+  // Initialiser au démarrage
   loadExistingComponents();
 </script>
 
 <svelte:head>
-  <title>Constructor v3 - Générateur de Composants IA</title>
+  <title>Constructor v3 - Générateur IA OpenAI</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </svelte:head>
 
-<div class="min-h-screen bg-gray-50">
+<div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
   <!-- Header -->
-  <header class="bg-white border-b border-gray-200">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="flex justify-between items-center h-16">
-        <div class="flex items-center space-x-3">
-          <div class="w-8 h-8 bg-blue-600 rounded flex items-center justify-center">
-            <i class="fas fa-cube text-white text-sm"></i>
-          </div>
+  <header class="bg-white shadow-sm border-b">
+    <div class="max-w-7xl mx-auto px-4 py-4">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
+          <i class="fas fa-robot text-white"></i>
+        </div>
+        <div>
           <h1 class="text-xl font-bold text-gray-900">Constructor v3</h1>
-          <span class="text-sm text-gray-500 bg-green-100 px-2 py-1 rounded">IA Générative</span>
+          <p class="text-sm text-gray-500">Générateur de composants avec OpenAI GPT</p>
         </div>
       </div>
     </div>
   </header>
 
-  <!-- Navigation des onglets -->
-  <div class="bg-white border-b border-gray-200">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <nav class="flex space-x-8" aria-label="Tabs">
+  <!-- Navigation tabs -->
+  <div class="bg-white border-b">
+    <div class="max-w-7xl mx-auto px-4">
+      <nav class="flex space-x-8">
         {#each tabs as tab}
           <button
-            class="py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 {activeTab === tab.id 
-              ? 'border-blue-500 text-blue-600' 
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+            class="py-4 px-1 border-b-2 font-medium text-sm transition-colors
+              {activeTab === tab.id 
+                ? 'border-blue-500 text-blue-600' 
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
             on:click={() => activeTab = tab.id}
           >
             <i class="{tab.icon} mr-2"></i>
             {tab.label}
+            {#if tab.id === 'components' && generatedComponents.length > 0}
+              <span class="ml-2 bg-blue-100 text-blue-600 px-2 py-1 rounded-full text-xs">
+                {generatedComponents.length}
+              </span>
+            {/if}
           </button>
         {/each}
       </nav>
@@ -176,203 +212,190 @@
   </div>
 
   <!-- Contenu principal -->
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <main class="max-w-7xl mx-auto px-4 py-6">
     {#if activeTab === 'chat'}
       <!-- Interface de chat -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <!-- Zone de chat -->
-        <div class="lg:col-span-2 space-y-6">
-          <!-- Messages -->
-          <div class="bg-white rounded-lg border border-gray-200 h-96 overflow-y-auto p-4 space-y-4">
-            {#if messages.length === 0}
-              <div class="text-center text-gray-500 mt-20">
-                <i class="fas fa-robot text-4xl mb-4"></i>
-                <p class="text-lg">Décrivez le composant que vous souhaitez créer</p>
-                <p class="text-sm">Exemples: "Crée un bouton bleu avec icône", "Une carte produit moderne", etc.</p>
+      <div class="bg-white rounded-xl shadow-lg border h-[600px] flex flex-col">
+        <!-- Messages -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-4">
+          {#if messages.length === 0}
+            <div class="text-center py-12">
+              <div class="w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i class="fas fa-magic text-white text-2xl"></i>
               </div>
-            {/if}
-            
-            {#each messages as message}
-              <div class="flex {message.type === 'user' ? 'justify-end' : 'justify-start'}">
-                <div class="max-w-xs lg:max-w-md px-4 py-2 rounded-lg {message.type === 'user' 
-                  ? 'bg-blue-600 text-white' 
-                  : 'bg-gray-100 text-gray-900'}">
-                  <p class="text-sm">{message.content}</p>
-                  {#if message.component}
-                    <div class="mt-3 p-3 bg-white rounded border text-gray-900">
-                      <div class="text-xs text-gray-500 mb-2">Aperçu du composant:</div>
-                      <DynamicComponent 
-                        description={message.component.description}
-                        type={message.component.type}
-                        fallback="<div class='p-2 border rounded'>Composant généré</div>"
-                      />
-                    </div>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-            
-            {#if loading}
-              <div class="flex justify-start">
-                <div class="bg-gray-100 rounded-lg px-4 py-2">
-                  <div class="flex items-center space-x-2">
-                    <div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></div>
-                    <div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style="animation-delay: 0.1s;"></div>
-                    <div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style="animation-delay: 0.2s;"></div>
-                  </div>
-                </div>
-              </div>
-            {/if}
-          </div>
-          
-          <!-- Input utilisateur -->
-          <div class="bg-white rounded-lg border border-gray-200 p-4">
-            <div class="flex space-x-3">
-              <textarea
-                bind:value={userPrompt}
-                placeholder="Décrivez votre composant... (Entrée pour envoyer, Shift+Entrée pour nouvelle ligne)"
-                class="flex-1 resize-none border-0 focus:ring-0 text-sm placeholder-gray-400"
-                rows="3"
-                on:keydown={handleKeyDown}
-                disabled={loading}
-              ></textarea>
-              <button
-                on:click={sendMessage}
-                disabled={!userPrompt.trim() || loading}
-                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {#if loading}
-                  <i class="fas fa-spinner fa-spin"></i>
-                {:else}
-                  <i class="fas fa-paper-plane"></i>
-                {/if}
-              </button>
-            </div>
-          </div>
-        </div>
-        
-        <!-- Panneau latéral -->
-        <div class="space-y-6">
-          <div class="bg-white rounded-lg border border-gray-200 p-6">
-            <h3 class="text-lg font-semibold text-gray-900 mb-4">
-              <i class="fas fa-lightbulb mr-2 text-yellow-500"></i>
-              Suggestions
-            </h3>
-            <div class="space-y-2">
-              {#each ['Bouton call-to-action moderne', 'Carte produit avec image', 'Formulaire de contact', 'Navigation responsive'] as suggestion}
-                <button
-                  class="w-full text-left px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded border border-gray-200 transition-colors"
-                  on:click={() => userPrompt = suggestion}
-                  disabled={loading}
+              <h3 class="text-xl font-semibold text-gray-900 mb-2">Générateur OpenAI</h3>
+              <p class="text-gray-600 mb-6">Décrivez le composant que vous voulez créer avec l'IA</p>
+              
+              <div class="flex flex-wrap justify-center gap-3">
+                <button 
+                  class="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100 transition-colors"
+                  on:click={() => userPrompt = 'Crée un bouton moderne avec effet de hover et icône'}
                 >
-                  {suggestion}
+                  <i class="fas fa-hand-pointer mr-2"></i>Bouton moderne
                 </button>
-              {/each}
-            </div>
-          </div>
-          
-          <div class="bg-white rounded-lg border border-gray-200 p-6">
-            <h3 class="text-lg font-semibold text-gray-900 mb-4">
-              <i class="fas fa-chart-bar mr-2 text-green-500"></i>
-              Statistiques
-            </h3>
-            <div class="space-y-3">
-              <div class="flex justify-between">
-                <span class="text-sm text-gray-600">Composants générés:</span>
-                <span class="text-sm font-medium">{generatedComponents.length}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-sm text-gray-600">Messages échangés:</span>
-                <span class="text-sm font-medium">{messages.length}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      
-    {:else if activeTab === 'components'}
-      <!-- Liste des composants générés -->
-      <div class="space-y-6">
-        <div class="flex items-center justify-between">
-          <h2 class="text-2xl font-bold text-gray-900">Composants Générés</h2>
-          <button 
-            class="px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors"
-            on:click={() => componentGenerator.clearCache()}
-          >
-            <i class="fas fa-trash mr-2"></i>
-            Vider le cache
-          </button>
-        </div>
-        
-        {#if generatedComponents.length === 0}
-          <div class="text-center py-12">
-            <i class="fas fa-puzzle-piece text-gray-400 text-5xl mb-4"></i>
-            <h3 class="text-lg font-medium text-gray-900 mb-2">Aucun composant généré</h3>
-            <p class="text-gray-500">Commencez une conversation pour générer vos premiers composants.</p>
-          </div>
-        {:else}
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {#each generatedComponents as component, index}
-              <div class="bg-white rounded-lg border border-gray-200 p-6">
-                <div class="flex items-center justify-between mb-4">
-                  <span class="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded">
-                    {component.type}
-                  </span>
-                </div>
-                
-                <h4 class="font-medium text-gray-900 mb-2">Composant #{index + 1}</h4>
-                <p class="text-sm text-gray-600 mb-4 line-clamp-2">{component.description}</p>
-                
-                <!-- Aperçu du composant -->
-                <div class="border border-gray-200 rounded p-3 mb-4">
-                  <DynamicComponent 
-                    description={component.description}
-                    type={component.type}
-                    fallback="<div class='text-xs text-gray-500'>Aperçu non disponible</div>"
-                  />
-                </div>
-                
-                <button class="w-full px-3 py-2 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded transition-colors">
-                  <i class="fas fa-code mr-1"></i>
-                  Voir le code
+                <button 
+                  class="px-4 py-2 bg-green-50 text-green-700 rounded-lg text-sm hover:bg-green-100 transition-colors"
+                  on:click={() => userPrompt = 'Carte produit avec image, titre, prix et bouton d\'achat'}
+                >
+                  <i class="fas fa-shopping-cart mr-2"></i>Carte produit
+                </button>
+                <button 
+                  class="px-4 py-2 bg-purple-50 text-purple-700 rounded-lg text-sm hover:bg-purple-100 transition-colors"
+                  on:click={() => userPrompt = 'Formulaire de contact avec validation visuelle'}
+                >
+                  <i class="fas fa-envelope mr-2"></i>Formulaire
                 </button>
               </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
-      
-    {:else if activeTab === 'preview'}
-      <!-- Aperçu global -->
-      <div class="space-y-6">
-        <h2 class="text-2xl font-bold text-gray-900">Aperçu en Temps Réel</h2>
-        
-        <div class="bg-white rounded-lg border border-gray-200 p-8 min-h-96">
-          {#if generatedComponents.length === 0}
-            <div class="text-center py-20">
-              <i class="fas fa-eye text-gray-400 text-5xl mb-4"></i>
-              <h3 class="text-lg font-medium text-gray-900 mb-2">Aucun aperçu disponible</h3>
-              <p class="text-gray-500">Générez des composants pour les voir ici.</p>
             </div>
-          {:else}
-            <div class="space-y-8">
-              {#each generatedComponents as component, index}
-                <div class="border border-gray-200 rounded-lg p-6">
-                  <div class="flex items-center justify-between mb-4">
-                    <h4 class="font-medium text-gray-900">Composant {index + 1} - {component.type}</h4>
-                    <span class="text-xs text-gray-500">{component.description}</span>
+          {/if}
+
+          {#each messages as message}
+            <div class="flex {message.type === 'user' ? 'justify-end' : 'justify-start'}">
+              <div class="max-w-4xl {message.type === 'user' 
+                ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white' 
+                : 'bg-gray-50 border'} rounded-xl px-4 py-3">
+                
+                <p class="text-sm whitespace-pre-wrap">{message.content}</p>
+                
+                {#if message.component}
+                  <div class="mt-4 p-4 bg-white rounded-lg border shadow-sm">
+                    <div class="flex items-center justify-between mb-3">
+                      <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                        Aperçu généré par OpenAI
+                      </span>
+                      <span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                        {message.component.type}
+                      </span>
+                    </div>
+                    
+                    <div class="border rounded-lg p-4 bg-gray-50">
+                      <DynamicComponent code={message.component.code} />
+                    </div>
+                    
+                    <details class="mt-3">
+                      <summary class="text-xs text-gray-600 cursor-pointer hover:text-gray-800 select-none">
+                        <i class="fas fa-code mr-1"></i>Voir le code source
+                      </summary>
+                      <pre class="mt-2 text-xs bg-gray-900 text-green-400 p-3 rounded overflow-x-auto"><code>{message.component.code}</code></pre>
+                    </details>
                   </div>
-                  
-                  <DynamicComponent 
-                    description={component.description}
-                    type={component.type}
-                    options={{style: 'preview', responsive: true}}
-                  />
+                {/if}
+              </div>
+            </div>
+          {/each}
+
+          {#if isGenerating}
+            <div class="flex justify-start">
+              <div class="bg-gray-50 border rounded-xl px-4 py-3">
+                <div class="flex items-center space-x-3">
+                  <div class="flex space-x-1">
+                    <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                    <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style="animation-delay: 0.1s"></div>
+                    <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+                  </div>
+                  <span class="text-sm text-gray-600">OpenAI génère votre composant...</span>
                 </div>
-              {/each}
+              </div>
             </div>
           {/if}
         </div>
+
+        <!-- Zone de saisie -->
+        <div class="border-t p-4">
+          <div class="flex space-x-3">
+            <input
+              bind:value={userPrompt}
+              on:keydown={handleKeyDown}
+              placeholder="Décrivez votre composant en détail (ex: bouton rouge avec icône et animation)..."
+              class="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50"
+              disabled={loading}
+            />
+            <button
+              on:click={sendMessage}
+              disabled={!userPrompt.trim() || loading}
+              class="px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl hover:from-blue-600 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 transition-all"
+            >
+              {#if loading}
+                <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              {:else}
+                <i class="fas fa-magic"></i>
+              {/if}
+              <span>Générer</span>
+            </button>
+          </div>
+          <p class="text-xs text-gray-500 mt-2">
+            <i class="fas fa-lightbulb mr-1"></i>
+            Astuce: Soyez précis dans votre description pour de meilleurs résultats
+          </p>
+        </div>
+      </div>
+
+    {:else if activeTab === 'components'}
+      <!-- Liste des composants générés -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {#each generatedComponents as component, i}
+          <div class="bg-white rounded-xl shadow-sm border p-5 hover:shadow-md transition-shadow">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="font-semibold text-gray-900">Composant #{i + 1}</h3>
+              <div class="flex items-center space-x-2">
+                <span class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                  {component.type}
+                </span>
+                <span class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                  <i class="fas fa-robot mr-1"></i>OpenAI
+                </span>
+              </div>
+            </div>
+            <p class="text-sm text-gray-600 mb-4 line-clamp-2">{component.description}</p>
+            <div class="border rounded-lg p-3 bg-gray-50">
+              <DynamicComponent code={component.code} />
+            </div>
+          </div>
+        {:else}
+          <div class="col-span-full text-center py-12">
+            <i class="fas fa-cube text-4xl text-gray-400 mb-4"></i>
+            <h3 class="text-lg font-medium text-gray-900 mb-2">Aucun composant généré</h3>
+            <p class="text-gray-500">Utilisez le chat pour créer vos premiers composants avec OpenAI</p>
+          </div>
+        {/each}
+      </div>
+
+    {:else if activeTab === 'preview'}
+      <!-- Aperçu global -->
+      <div class="bg-white rounded-xl shadow-sm border p-6">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-2xl font-bold text-gray-900">Aperçu global</h2>
+          <span class="text-sm text-gray-500">
+            {generatedComponents.length} composant{generatedComponents.length !== 1 ? 's' : ''}
+          </span>
+        </div>
+        
+        {#if generatedComponents.length > 0}
+          <div class="space-y-8">
+            {#each generatedComponents as component, i}
+              <div class="border-l-4 border-blue-500 pl-6">
+                <div class="flex items-center space-x-3 mb-3">
+                  <h3 class="font-semibold text-gray-800">
+                    {component.type.charAt(0).toUpperCase() + component.type.slice(1)} #{i + 1}
+                  </h3>
+                  <span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                    <i class="fas fa-robot mr-1"></i>OpenAI
+                  </span>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">{component.description}</p>
+                <div class="border rounded-lg p-6 bg-gradient-to-br from-gray-50 to-white">
+                  <DynamicComponent code={component.code} />
+                </div>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="text-center py-16">
+            <i class="fas fa-eye-slash text-4xl text-gray-400 mb-4"></i>
+            <h3 class="text-lg font-medium text-gray-900 mb-2">Aucun aperçu disponible</h3>
+            <p class="text-gray-500">Générez des composants pour les voir ici</p>
+          </div>
+        {/if}
       </div>
     {/if}
   </main>
@@ -385,130 +408,22 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
-</style>
-
-<div class="min-h-screen bg-gray-50">
-  <!-- Interface principale style Bolt.new -->
-  <div class="flex h-screen">
-    <!-- Chat à gauche -->
-    <div class="w-1/2 bg-white border-r border-gray-200 flex flex-col">
-      <!-- Header du chat -->
-      <div class="p-4 border-b border-gray-200">
-        <h2 class="text-xl font-semibold text-gray-900">Assistant IA</h2>
-        <p class="text-sm text-gray-600">Décrivez l'application que vous voulez créer</p>
-      </div>
-      
-      <!-- Messages -->
-      <div class="flex-1 overflow-y-auto p-4 space-y-4">
-        {#if messages.length === 0}
-          <div class="text-center text-gray-500 mt-12">
-            <i class="fas fa-robot text-6xl mb-4 text-gray-300"></i>
-            <p class="text-lg mb-2">Bonjour ! Je suis votre assistant IA.</p>
-            <p>Décrivez-moi l'application que vous voulez créer et je la générerai pour vous !</p>
-          </div>
-        {:else}
-          {#each messages as message}
-            <div class="flex {message.type === 'user' ? 'justify-end' : 'justify-start'}">
-              <div class="max-w-xs lg:max-w-md px-4 py-2 rounded-lg {message.type === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-900'}">
-                {message.content}
-              </div>
-            </div>
-          {/each}
-        {/if}
-        
-        {#if isGenerating}
-          <div class="flex justify-start">
-            <div class="bg-gray-200 text-gray-900 px-4 py-2 rounded-lg flex items-center">
-              <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600 mr-2"></div>
-              Génération en cours...
-            </div>
-          </div>
-        {/if}
-      </div>
-      
-      <!-- Input du chat -->
-      <div class="p-4 border-t border-gray-200">
-        <form on:submit|preventDefault={handleSendMessage} class="flex space-x-2">
-          <input
-            bind:value={userPrompt}
-            placeholder="Ex: Créer un site e-commerce pour vendre des vêtements..."
-            class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={isGenerating}
-          />
-          <button
-            type="submit"
-            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={isGenerating || !userPrompt.trim()}
-          >
-            {#if isGenerating}
-              <i class="fas fa-spinner fa-spin"></i>
-            {:else}
-              <i class="fas fa-paper-plane"></i>
-            {/if}
-          </button>
-        </form>
-      </div>
-    </div>
-    
-    <!-- Preview à droite -->
-    <div class="w-1/2 bg-white flex flex-col">
-      <!-- Onglets -->
-      <div class="flex border-b border-gray-200">
-        {#each previewTabs as tab}
-          <button
-            class="px-4 py-3 font-medium text-sm border-b-2 {activePreviewTab === tab.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
-            on:click={() => activePreviewTab = tab.id}
-          >
-            <i class="{tab.icon} mr-2"></i>
-            {tab.label}
-          </button>
-        {/each}
-      </div>
-      
-      <!-- Contenu des onglets -->
-      <div class="flex-1 overflow-hidden">
-        {#if activePreviewTab === 'preview'}
-          <div class="h-full bg-gray-100 flex items-center justify-center">
-            <div class="text-center text-gray-500">
-              <i class="fas fa-browser text-6xl mb-4 text-gray-300"></i>
-              <p class="text-lg mb-2">Aperçu de l'Application</p>
-              <p>L'aperçu de votre application apparaîtra ici après génération</p>
-            </div>
-          </div>
-        {:else if activePreviewTab === 'code'}
-          <div class="h-full p-4 overflow-y-auto bg-gray-900 text-gray-100">
-            <pre class="text-sm"><code>{`<script>
-  // Code généré par l'IA
-  let message = 'Hello, World!';
-</script>
-
-<div class="container">
-  <h1>{message}</h1>
-  <p>Application générée automatiquement</p>
-</div>
-
-<style>
-  .container {
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 2rem;
-    text-align: center;
+  
+  .overflow-y-auto::-webkit-scrollbar {
+    width: 6px;
   }
-</style>`}</code></pre>
-          </div>
-        {:else if activePreviewTab === 'files'}
-          <div class="h-full p-4 overflow-y-auto">
-            <div class="space-y-2">
-              {#each fileStructure as file}
-                <div class="flex items-center text-sm">
-                  <i class="fas fa-{file.type === 'folder' ? 'folder' : 'file'} mr-2 text-gray-600"></i>
-                  {file.name}
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/if}
-      </div>
-    </div>
-  </div>
-</div>
+  
+  .overflow-y-auto::-webkit-scrollbar-track {
+    background: #f8fafc;
+    border-radius: 3px;
+  }
+  
+  .overflow-y-auto::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+  }
+  
+  .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+</style>
