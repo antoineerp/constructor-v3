@@ -1,4 +1,4 @@
-<script lang="ts">
+<script>
   import { onMount } from 'svelte';
   import Button from '$lib/Button.svelte';
   import Card from '$lib/Card.svelte';
