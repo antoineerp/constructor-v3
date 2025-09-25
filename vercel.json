@@ -1,19 +1,11 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "apps/main/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "buildCommand": "cd ../.. && pnpm run build --filter=main",
-        "outputDirectory": "apps/main/build"
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "apps/main/build/$1"
-    }
-  ]
+  "buildCommand": "npm install && npm run build",
+  "outputDirectory": ".svelte-kit/output/client",
+  "framework": "sveltekit",
+  "installCommand": "npm install",
+  "env": {
+    "PUBLIC_SUPABASE_URL": "https://ewszfsdwouuqgrnnyazv.supabase.co",
+    "PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV3c3pmc2R3b3V1cWdybm55YXp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzU4MjI1OTgsImV4cCI6MjA1MTM5ODU5OH0.YSHB3dvVNRUZJvSrHHOW3EXTH8rJGjk1xmPRt2iNx2s"
+  }
 }
