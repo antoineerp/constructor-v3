@@ -1,0 +1,21 @@
+{
+  "name": "@constructor-v3/ai",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./generator": "./src/generator.js",
+    "./analyzer": "./src/analyzer.js",
+    "./templates": "./src/templates.js"
+  },
+  "dependencies": {
+    "langchain": "^0.3.0",
+    "@langchain/openai": "^0.3.0",
+    "@langchain/core": "^0.3.0",
+    "openai": "^4.67.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

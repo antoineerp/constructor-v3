@@ -1,13 +1,216 @@
-# Turborepo starter
+# Constructor V3 🚀
 
-This Turborepo starter is maintained by the Turborepo core team.
+**Générateur d'applications SvelteKit basé sur l'IA**
 
-## Using this example
+Constructor V3 est une plateforme innovante qui permet de créer des applications web SvelteKit complètes en décrivant simplement vos besoins en langage naturel. L'IA analyse votre demande, sélectionne les templates appropriés, et génère du code de haute qualité que vous pouvez voir en temps réel et affiner par itérations.
 
-Run the following command:
+## ✨ Fonctionnalités principales
 
-```sh
-npx create-turbo@latest
+### 🤖 Chat IA Intelligent
+- **Analyse avancée** des prompts utilisateur
+- **Sélection automatique** de templates et composants
+- **Génération de code SvelteKit** optimisé
+- **Itérations intelligentes** basées sur vos retours
+
+### 💻 Éditeur Monaco Intégré  
+- **Syntaxe highlighting** pour Svelte, TypeScript, CSS
+- **Autocomplétion** intelligente avec snippets SvelteKit
+- **Validation en temps réel** du code généré
+- **Thèmes personnalisés** (sombre/clair)
+
+### 👁️ Preview Temps Réel
+- **Hot reloading ultra-rapide** avec Vite
+- **Environnement isolé** sécurisé dans iframe
+- **Mise à jour instantanée** à chaque modification
+- **Responsive design** pour tester sur tous les écrans
+
+### 🤝 Collaboration Temps Réel
+- **Curseurs partagés** entre utilisateurs
+- **Synchronisation automatique** des modifications
+- **Chat intégré** pour communiquer
+- **Gestion des conflits** intelligente
+
+### 📊 Dashboard Admin
+- **Métriques d'utilisation** détaillées
+- **Gestion des templates** et composants
+- **Analyse des prompts** populaires
+- **Optimisation continue** de l'IA
+
+## 🏗️ Architecture
+
+```
+constructor-v3/
+├── 🎯 apps/
+│   ├── main/      # Interface principale (5173)
+│   ├── preview/   # Preview isolée (5174)
+│   └── admin/     # Dashboard admin (5176)
+├── 📦 packages/
+│   ├── ui/        # Composants réutilisables
+│   ├── db/        # Utilitaires Supabase
+│   ├── ai/        # Logique IA (LangChain/OpenAI)
+│   └── editor/    # Monaco + collaboration
+├── 🛠️ scripts/    # Scripts utilitaires
+└── 📚 docs/       # Documentation
+```
+
+## 🚀 Démarrage rapide
+
+### 1. Installation
+
+```bash
+# Cloner le repository
+git clone https://github.com/antoineerp/constructor-v3
+cd constructor-v3
+
+# Installer les dépendances
+pnpm install
+```
+
+### 2. Configuration
+
+```bash
+# Copier le fichier d'environnement
+cp .env.example .env
+
+# Ajouter vos clés API
+nano .env
+```
+
+Variables requises :
+```bash
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_ANON_KEY=your_key
+OPENAI_API_KEY=sk-your_key
+```
+
+### 3. Base de données
+
+```bash
+# Initialiser les tables Supabase (voir docs/TECHNICAL_GUIDE.md)
+# Puis charger les templates par défaut
+pnpm run init-templates
+```
+
+### 4. Lancement
+
+```bash
+# Démarrer toutes les applications
+pnpm run dev
+
+# Ou individuellement
+pnpm run dev:main     # Interface principale
+pnpm run dev:preview  # Preview isolée  
+pnpm run dev:admin    # Dashboard admin
+```
+
+🎉 **Votre Constructor V3 est prêt !**
+- Interface principale : http://localhost:5173
+- Preview isolée : http://localhost:5174  
+- Dashboard admin : http://localhost:5176
+
+## 🎯 Comment ça marche
+
+### 1. **Décrivez votre projet**
+```
+"Je veux un site e-commerce pour vendre des vêtements avec 
+panier, paiement Stripe et tableau de bord vendeur"
+```
+
+### 2. **L'IA analyse et propose**
+- Type de projet détecté : **E-commerce**
+- Template recommandé : **E-commerce Moderne**  
+- Composants suggérés : **ProductCard, Cart, Dashboard**
+
+### 3. **Code généré instantanément**
+```svelte
+<!-- Exemple de code généré -->
+<script>
+  import { cart } from '$lib/stores/cart';
+  import ProductCard from '$lib/components/ProductCard.svelte';
+  
+  let products = [];
+  // Logique générée automatiquement...
+</script>
+
+<div class="product-grid">
+  {#each products as product}
+    <ProductCard {product} />
+  {/each}
+</div>
+```
+
+### 4. **Preview temps réel**
+Voir immédiatement le résultat dans l'environnement isolé.
+
+### 5. **Affinage par feedback**
+```
+"Peux-tu ajouter un filtre par catégorie et changer 
+les couleurs pour du bleu ?"
+```
+
+### 6. **Export et déploiement**
+- Télécharger le code en ZIP
+- Déployer directement sur Vercel
+- Continuer le développement localement
+
+## 🛠️ Stack technique
+
+### Frontend
+- **SvelteKit 2.5+** - Framework principal avec SSR
+- **TailwindCSS** - Styling utilitaire et responsive
+- **Monaco Editor** - Éditeur de code professionnel
+- **Socket.io** - Collaboration temps réel
+- **Vite** - Build tool ultra-rapide
+
+### Backend  
+- **Supabase** - Base de données PostgreSQL + Auth
+- **OpenAI GPT-4o-mini** - Génération de code IA
+- **LangChain** - Orchestration et prompts IA
+- **Node.js** - Runtime serveur
+
+### Infrastructure
+- **TurboRepo** - Monorepo avec cache intelligent
+- **pnpm** - Gestionnaire de paquets rapide
+- **Vercel** - Déploiement et hosting
+- **Docker** - Containerisation (optionnel)
+
+## 📖 Documentation
+
+- **[Guide technique complet](docs/TECHNICAL_GUIDE.md)** - Architecture détaillée
+- **[Guide utilisateur](docs/README.md)** - Comment utiliser l'interface
+
+## 🎨 Templates disponibles
+
+| Template | Description | Composants inclus |
+|----------|-------------|-------------------|
+| **E-commerce** | Boutique complète | ProductCard, Cart, Checkout, Dashboard |
+| **CRM** | Gestion client | ClientCard, Pipeline, Reports, Analytics |
+| **Blog** | Site de contenu | ArticleCard, Categories, Comments, SEO |
+| **Portfolio** | Vitrine créative | ProjectCard, Gallery, Contact, About |
+| **SaaS** | Application métier | Dashboard, Billing, Users, Settings |
+| **Landing** | Page de vente | Hero, Features, Testimonials, Pricing |
+
+## 🤝 Contribution
+
+Constructor V3 est un projet open-source ! Pour contribuer :
+
+1. **Fork** le repository
+2. **Créer** une branche feature (`git checkout -b feature/amazing-feature`)
+3. **Committer** vos changements (`git commit -m 'Add amazing feature'`)
+4. **Pousser** vers la branche (`git push origin feature/amazing-feature`)
+5. **Ouvrir** une Pull Request
+
+## 📝 License
+
+Ce projet est sous licence **MIT**.
+
+---
+
+<div align="center">
+
+**Fait avec ❤️ par l'équipe Constructor V3**
+
+</div>
 ```
 
 ## What's inside?

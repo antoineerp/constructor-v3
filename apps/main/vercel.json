@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "buildCommand": "cd ../.. && pnpm run build",
+  "outputDirectory": "build",
+  "installCommand": "cd ../.. && pnpm install",
+  "framework": "svelte",
+  "env": {
+    "PUBLIC_SUPABASE_URL": "@supabase_url",
+    "PUBLIC_SUPABASE_ANON_KEY": "@supabase_anon_key"
+  }
+}

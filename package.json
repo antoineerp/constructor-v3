@@ -5,8 +5,13 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "check-types": "turbo run check-types"
+    "check": "turbo run check", 
+    "format": "turbo run format",
+    "preview": "turbo run preview",
+    "dev:main": "turbo run dev --filter=main",
+    "dev:preview": "turbo run dev --filter=preview",
+    "dev:admin": "turbo run dev --filter=admin",
+    "init-templates": "./scripts/init-templates.sh"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "apps/main/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "buildCommand": "cd ../.. && pnpm run build --filter=main",
+        "outputDirectory": "apps/main/build"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "apps/main/build/$1"
+    }
+  ]
+}

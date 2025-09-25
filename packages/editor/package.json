@@ -1,0 +1,22 @@
+{
+  "name": "@constructor-v3/editor",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./monaco": "./src/monaco.js",
+    "./collaboration": "./src/collaboration.js"
+  },
+  "dependencies": {
+    "monaco-editor": "^0.52.0",
+    "socket.io": "^4.8.0",
+    "socket.io-client": "^4.8.0"
+  },
+  "devDependencies": {
+    "svelte": "^5.0.0"
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0"
+  }
+}

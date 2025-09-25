@@ -5,17 +5,21 @@
     "build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
-      "outputs": [".next/**", "!.next/cache/**"]
-    },
-    "lint": {
-      "dependsOn": ["^lint"]
-    },
-    "check-types": {
-      "dependsOn": ["^check-types"]
+      "outputs": [".svelte-kit/**", "build/**", "dist/**"]
     },
     "dev": {
       "cache": false,
       "persistent": true
+    },
+    "check": {
+      "dependsOn": ["^build"]
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "format": {},
+    "preview": {
+      "dependsOn": ["build"]
     }
   }
 }
