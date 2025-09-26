@@ -606,9 +606,9 @@
                     {#if siteSelectedFile}<span class="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded">{siteSelectedFile}</span>{/if}
                     <button class="ml-auto text-indigo-600 hover:underline text-[11px] disabled:opacity-30" disabled={!siteProjectId} on:click={updateSandbox}><i class="fas fa-rotate-right mr-1"></i>Rafraîchir</button>
                   </div>
-                  <div class="flex-1 bg-gray-100">
+                  <div class="flex-1 bg-gray-100 overflow-auto">
                     {#if sandboxUrl}
-                      <iframe title="Sandbox Preview" src={sandboxUrl} class="w-full h-full bg-white"></iframe>
+                      <iframe title="Sandbox Preview" src={sandboxUrl} class="w-full h-full bg-white" style="overflow:auto;"></iframe>
                     {:else}
                       <!-- Mode éphémère: on affiche un rendu statique local du fichier sélectionné -->
                       <div class="h-full overflow-auto p-4">
