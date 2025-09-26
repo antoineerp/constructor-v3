@@ -3,6 +3,7 @@ import { openaiService } from '$lib/openaiService.js';
 import { supabase as clientSupabase } from '$lib/supabase.js';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
+import { summarizeCatalog } from '$lib/catalog/components.js';
 
 // Orchestrateur: génère blueprint et/ou code application selon état projet.
 // Body: { query?: string, projectId?: string, regenerateFile?: string }
@@ -133,16 +134,38 @@ Titre SEO: ${seo_meta.title}
 Articles disponibles: ${articles.slice(0,4).map(a=>a.title).join(' | ')}
 Retourne JSON: {"src/routes/+page.svelte":"CONTENU"}`.trim();
   }
-  return `Crée une application SvelteKit structurée.
-Routes: ${routes.map(r=> r.path+ ' => '+ r.sections.join(',')).join(' | ')}.
-Palette: ${color_palette.join(', ')}.
-SEO Title: ${seo_meta.title}.
-Composants à réutiliser si possible: ${core_components.join(', ')}.
-Articles d'exemple:${articles.map(a=> ` {title:${a.title}, slug:${a.slug}}`).join('')}.
-Contraintes:
-- Retourne JSON pur {"src/routes/+page.svelte":"..."}
-- Max 8 fichiers
-- Utilise Tailwind
-- Header + Footer cohérents
-- Aucun texte hors JSON`.trim();
+  // Construction des fichiers attendus à partir des routes + composants
+  const routeFileMappings = routes.map(r => {
+    const p = r.path || '/';
+    if(p === '/' || p === '') return 'src/routes/+page.svelte';
+    // dynamique : /articles/:slug
+    const segs = p.split('/').filter(Boolean).map(seg => seg.startsWith(':') ? `[${seg.slice(1)}]` : seg);
+    return 'src/routes/' + segs.join('/') + '/+page.svelte';
+  });
+  const uniqueRoutes = Array.from(new Set(routeFileMappings));
+  const componentFiles = (core_components || []).map(name => {
+    const safe = name.replace(/[^A-Za-z0-9]/g,'');
+    return `src/lib/components/${safe}.svelte`;
+  });
+  const expectedFiles = [...uniqueRoutes, ...componentFiles].slice(0, 20);
+  const catalogSummary = summarizeCatalog();
+  return `Crée une application SvelteKit multi-fichiers.
+Contexte:
+Routes: ${routes.map(r=> r.path+ ' => '+ (r.sections||[]).join(',')).join(' | ')}
+Composants: ${core_components.join(', ')}
+Palette: ${color_palette.join(', ')}
+SEO Title: ${seo_meta.title}
+Articles: ${articles.map(a=> a.slug).join(', ')}
+Catalogue de composants validés (à RÉUTILISER, pas réécrire) :\n${catalogSummary}\n
+Objectif: Générer les fichiers Svelte suivants (clés JSON): ${expectedFiles.join(', ')}. Tu peux aussi ajouter README.md, package.json, tailwind.config.cjs, postcss.config.cjs, src/app.css si utiles.
+Contraintes STRICTES:
+- Retourne UNIQUEMENT un objet JSON (pas de markdown, pas de texte hors JSON)
+- Chaque clé = chemin fichier relatif
+- Pas de commentaires hors code
+- Les fichiers .svelte doivent être valides et utiliser Tailwind pour le style
+- Réutiliser Header/Footer/Hero/ArticleCard/CommentSection
+- Pour la page dynamique, inclure un exemple d'affichage d'un article (données mock locales)
+- Fournir contenu pertinent dans chaque route
+- Max 20 fichiers, prioriser ceux listés
+FIN.`.trim();
 }
