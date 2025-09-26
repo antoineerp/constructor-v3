@@ -1,3 +1,8 @@
+/*
+	Tailwind directives de base.
+	NOTE: Les diagnostics "Unknown at rule @tailwind" provenant de l'analyse statique peuvent être ignorés.
+	Ces directives sont correctement remplacées au build par PostCSS + Tailwind.
+*/
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
