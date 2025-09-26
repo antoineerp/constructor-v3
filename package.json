@@ -16,7 +16,6 @@
     "init-templates": "./scripts/init-templates.sh",
     "test": "turbo run test",
     "dev:temp-app": "node ./scripts/dev-temp-app.js",
-    "prepare": "husky install",
     "ci": "pnpm lint && pnpm --filter=main check && pnpm --filter=main test && pnpm --filter=main build",
     "ci:storybook": "pnpm --filter=main build:storybook",
     "lint:staged": "eslint --fix --ext .js,.ts,.svelte apps/main/src apps/admin/src apps/preview/src packages/ui/src || true"
@@ -25,7 +24,6 @@
     "prettier": "^3.6.2",
     "turbo": "^2.5.8",
     "typescript": "5.9.2",
-    "husky": "^9.0.11",
     "lint-staged": "^15.2.0",
     "magic-string": "^0.30.10",
     "recast": "^0.23.9"
