@@ -4,6 +4,7 @@ import { env } from '$env/dynamic/private';
 import { extractJson, withJsonEnvelope } from '$lib/ai/jsonExtractor.js';
 import { simpleCache } from '$lib/quality/simpleCache.js';
 import { topComponentCodeSnippets } from '$lib/catalog/components.js';
+import { buildPrompt } from '$lib/prompt/promptLibrary.js';
 
 // Résolution simplifiée des imports relatifs vers des fichiers Svelte.
 // from: fichier courant (ex: src/routes/+page.svelte)
@@ -267,6 +268,35 @@ ${retrievalContext}
       }
     } // fin if missingImports
     return files;
+  }
+
+  /**
+   * Multi-variantes de génération application.
+   * variants: array ex ['applicationStrict','applicationBase'] (ordre = priorité). La première qui produit JSON valide sans erreurs schema majeures est sélectionnée.
+   */
+  async generateApplicationMultiVariant(query, { variants=['applicationStrict','applicationBase'], model='gpt-4o-mini', maxFiles=20, blueprint=null } = {}) {
+    const results = [];
+    for(const variant of variants){
+      let files=null; let error=null; let schemaErrors=null; let started=Date.now();
+      try {
+        const variantPrompt = buildPrompt(variant, { query, maxFiles });
+        files = await this.generateApplication(variantPrompt, { model, maxFiles, provider:'openai', blueprint });
+        schemaErrors = files.__schema_errors || null;
+      } catch(e){ error = e.message; }
+      results.push({ variant, durationMs: Date.now()-started, ok: !!files && !error, error, schemaErrorsCount: schemaErrors ? schemaErrors.length : 0, files });
+      // Sélection early si propre
+      if(files && !error && (!schemaErrors || schemaErrors.length===0)) break;
+    }
+    // Sélection finale: meilleure entrée ok sinon dernière
+    let winner = results.find(r=> r.ok && r.schemaErrorsCount===0) || results.find(r=> r.ok) || results[results.length-1];
+    if(!winner || !winner.files) throw new Error('Aucune variante application valide: '+ results.map(r=> `${r.variant}:${r.error||'ok'}`).join('; '));
+    winner.files.__variant_meta = {
+      tried: results.map(({variant,durationMs,ok,error,schemaErrorsCount})=>({variant,durationMs,ok,error,schemaErrorsCount})),
+      selected: winner.variant,
+      query,
+      maxFiles
+    };
+    return winner.files;
   }
 
   async generateBlueprint(query, { model = 'gpt-4o-mini', provider='openai' } = {}) {

@@ -12,6 +12,7 @@ import { validateAndFix, unifyPalette, addAccessibilityFixes } from '$lib/valida
 import { validateFiles } from '$lib/validation/validator.js';
 import { upsertSnippet } from '$lib/embeddings';
 import { runSvelteCheckSnippet } from '$lib/validation/svelteCheckRunner.js';
+import { applyGuardRails } from '$lib/generation/guardrails.js';
 
 // Orchestrateur: génère blueprint et/ou code application selon état projet.
 // Body: { query?: string, projectId?: string, regenerateFile?: string }
@@ -261,7 +262,10 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
       }
     }
 
-    // Mise à jour / création projet
+  // Guardrails pré-validation (injection fichiers requis + quick fixes basiques)
+  try { applyGuardRails(files); } catch(e){ console.warn('Guardrails apply failed', e.message); }
+
+  // Mise à jour / création projet
     if (!project && !ephemeral) {
       try {
         const insertData = {

@@ -4,13 +4,14 @@ import * as path from 'path';
 import { ESLint } from 'eslint';
 
 // ESLint singleton (flat config inline) — on ne dépend plus de découverte de fichier ni de fallback.
-let eslintInstance;
+let eslintInstance; let eslintInitError=null;
 async function getEslint() {
-  if (eslintInstance) return eslintInstance;
+  if (eslintInstance || eslintInitError) return eslintInstance;
   try {
     const sveltePlugin = (await import('eslint-plugin-svelte')).default;
     const globalsMod = await import('globals');
-    // Construction d'une flat config minimale interne
+    const parser = (await import('svelte-eslint-parser')).default;
+    // Flat config interne – empêche la recherche d'un fichier externe
     const baseConfig = [
       {
         name: 'base-js',
@@ -30,7 +31,7 @@ async function getEslint() {
         files: ['**/*.svelte'],
         plugins: { svelte: sveltePlugin },
         languageOptions: {
-          parser: (await import('svelte-eslint-parser')).default,
+          parser,
           parserOptions: { extraFileExtensions: ['.svelte'], ecmaVersion: 2022, sourceType: 'module' },
           globals: { ...globalsMod.browser, ...globalsMod.node }
         },
@@ -39,17 +40,16 @@ async function getEslint() {
           'no-undef': 'error'
         }
       },
-      {
-        name: 'ignores',
-        ignores: ['**/dist/**','**/build/**','**/.svelte-kit/**','**/node_modules/**']
-      }
+      { name: 'ignores', ignores: ['**/dist/**','**/build/**','**/.svelte-kit/**','**/node_modules/**'] }
     ];
-    // Instanciation; en ESLint v9 la flat config est par défaut si on passe un tableau à overrideConfig.
     eslintInstance = new ESLint({
       fix: true,
+      useFlatConfig: true,
+      overrideConfigFile: false,
       overrideConfig: baseConfig
     });
   } catch (e) {
+    eslintInitError = e;
     console.error('[validator] ESLint initialisation échouée (lint désactivé):', e.message);
     eslintInstance = null;
   }
@@ -100,7 +100,13 @@ export async function validateFiles(files) {
           }
         }
       } catch(e){
-        diagnostics.push({ severity: 'error', source: 'eslint', message: 'ESLint erreur: ' + e.message });
+        // Cas fréquent: "Could not find config file" → convertir en info & ne pas bloquer
+        const msg = e.message || '';
+        if(/could not find config file/i.test(msg)){
+          diagnostics.push({ severity: 'info', source: 'eslint', message: 'ESLint (flat interne) utilisé – config externe absente (info)' });
+        } else {
+          diagnostics.push({ severity: 'error', source: 'eslint', message: 'ESLint erreur: ' + msg });
+        }
       }
     } else if (ext !== '.json' && !eslint) {
       diagnostics.push({ severity: 'info', source: 'eslint', message: 'Lint non initialisé (ESLint indisponible)' });

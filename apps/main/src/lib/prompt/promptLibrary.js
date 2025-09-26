@@ -24,6 +24,33 @@ Retourne JSON: { "${filename}": "CONTENU" } sans texte additionnel.`,
   enrichArticles: ({ query }) => `Réécris sample_content.articles avec titres spécifiques (req: ${query}). JSON: { "sample_content": { "articles": [...] } }`,
 
   intentExpansion: ({ query }) => `Enrichis intention utilisateur: ${query}. JSON strict { original_query,enriched_query,style_keywords,feature_hints,tone_keywords }`
+  ,
+  applicationBase: ({ query, maxFiles=20 }) => `Génère une application SvelteKit basée sur: "${query}".
+Retourne STRICTEMENT un objet JSON { "filename":"CONTENU", ... } (aucun texte hors JSON).
+Contraintes:
+- Max ${maxFiles} fichiers
+- Doit inclure: README.md, package.json, src/routes/+page.svelte
+- Utiliser Tailwind (si config absente, inclure tailwind.config.cjs, postcss.config.cjs, src/app.css)
+- Pas de commentaires verbeux ni markdown
+- Pas d'import externe non nécessaire
+- Chaque composant Svelte valide (<script> optionnel si purement statique)
+- Préférer réutilisation de composants (src/lib/components)
+- Pas de placeholder TODO
+`,
+  applicationStrict: ({ query, maxFiles=20 }) => `Tu es un générateur SvelteKit senior.
+Objectif: produire une base IMMÉDIATEMENT compilable pour: "${query}".
+Sortie: UNIQUE objet JSON strict.
+Règles renforcées:
+- Max ${maxFiles} fichiers (priorité aux routes essentielles + layout + 1-2 composants réutilisables)
+- Fichiers obligatoires: README.md, package.json, src/routes/+layout.svelte, src/routes/+page.svelte, src/app.css
+- package.json minimal: scripts dev/build, dépendances sveltekit + tailwind
+- ZÉRO texte hors JSON, ZÉRO commentaires hors code
+- Aucune chaîne "TODO" / "FIXME" / placeholder
+- Pas de code mort ni variables inutilisées évidentes
+- Styles via classes Tailwind exclusivement
+- Accessibilité: attributs aria-* pertinents pour navigation / boutons
+- Si données mock: mettre dans src/lib/data/*.ts
+`
 };
 
 export function listPromptTemplates(){
