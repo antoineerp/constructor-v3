@@ -11,7 +11,8 @@ import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/publi
 export async function GET({ url, request }) {
   try {
     const projectId = url.searchParams.get('projectId');
-    const file = url.searchParams.get('file');
+  const file = url.searchParams.get('file');
+  const routeParam = url.searchParams.get('route');
     if (!projectId) return json({ error: 'projectId requis' }, { status: 400 });
 
     // Auth facultative: si header Authorization présent on le propage pour respecter RLS
@@ -34,8 +35,26 @@ export async function GET({ url, request }) {
       mapping = project.code_generated || {};
     }
 
+    // Détecter fichiers de pages +page.svelte
+    const pageFiles = Object.keys(mapping).filter(k => /src\/routes\/.+\+page\.svelte$|src\/routes\/\+page\.svelte$/.test(k));
+    // Map route -> fichier
+    const routeMap = pageFiles.reduce((acc,f)=>{
+      const rel = f.replace(/^src\/routes\//,'');
+      let routePath = '/' + rel.replace(/\+page\.svelte$/,'').replace(/index\.svelte$/,'').replace(/\/\+page\.svelte$/,'');
+      routePath = routePath.replace(/\/$/,'');
+      if(routePath==='') routePath='/';
+      // transformer [slug] -> :slug pour affichage
+      routePath = routePath.replace(/\[(.+?)\]/g, ':$1');
+      acc[routePath] = f; return acc;
+    }, {});
+
+    let chosenRoute = null;
+    if(routeParam && routeMap[routeParam]) {
+      chosenRoute = routeParam;
+    }
+
     // Choisir fichier principal
-    const mainCandidates = file ? [file] : ['src/routes/+page.svelte', 'src/routes/index.svelte'];
+    const mainCandidates = file ? [file] : [ chosenRoute ? routeMap[chosenRoute] : null, 'src/routes/+page.svelte', 'src/routes/index.svelte' ].filter(Boolean);
     let chosen = null;
     for (const c of mainCandidates) { if (mapping[c]) { chosen = c; break; } }
     if (!chosen) {
@@ -50,13 +69,17 @@ export async function GET({ url, request }) {
     // Heuristique: si composant Svelte contient {#each} etc., on laisse tel quel (pas d'exécution) → afficher comme code.
     const isLikelySvelte = /{#each|{#if|on:click=/.test(raw);
 
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Aperçu Sandbox</title>
+  const routesList = Object.keys(routeMap).sort((a,b)=> a.localeCompare(b));
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Aperçu Sandbox</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
 <script src="https://cdn.tailwindcss.com"></script>
-<style>body{font-family:system-ui, sans-serif;padding:1rem;background:#f1f5f9;} .container{max-width:960px;margin:0 auto;} pre{background:#0f172a;color:#e2e8f0;padding:1rem;border-radius:.5rem;overflow:auto;font-size:.8rem;}</style>
+<style>body{font-family:system-ui, sans-serif;padding:1rem;background:#f1f5f9;} .container{max-width:1100px;margin:0 auto;} pre{background:#0f172a;color:#e2e8f0;padding:1rem;border-radius:.5rem;overflow:auto;font-size:.8rem;} .routes{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem} .routes a{font-size:.7rem;padding:.3rem .55rem;border:1px solid #cbd5e1;border-radius:.4rem;background:#fff;text-decoration:none;color:#334155} .routes a.active{background:#6366f1;color:#fff;border-color:#6366f1} .routes a:hover{border-color:#6366f1}</style>
 </head><body><div class="container">
-<h1 class="text-xl font-semibold mb-4">Preview fichier: ${chosen}</h1>
-${ isLikelySvelte ? `<div class="mb-4 p-4 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded">Ce fichier contient de la syntaxe Svelte dynamique. Rendu statique approximatif ci-dessous.</div><pre>${escapeHtml(raw)}</pre>` : raw }
+<div class="routes">
+${routesList.map(r=> `<a href="?projectId=${encodeURIComponent(projectId)}&route=${encodeURIComponent(r)}" class="${r === chosenRoute ? 'active':''}">${r}</a>`).join('')}
+</div>
+<h1 class="text-sm font-semibold mb-3 text-slate-700">Fichier: <code>${chosen}</code></h1>
+${ isLikelySvelte ? `<div class="mb-3 p-3 bg-amber-50 border border-amber-200 text-amber-800 text-[11px] rounded">Syntaxe Svelte détectée – rendu statique (code affiché).</div><pre>${escapeHtml(raw)}</pre>` : raw }
 </div></body></html>`;
 
     return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });

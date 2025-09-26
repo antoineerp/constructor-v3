@@ -4,6 +4,33 @@
 
 	let showComponents = false;
 	let showTemplates = false;
+	let templates = [];
+	let tplLoading = false;
+	let newTplName = '';
+	let newTplDesc = '';
+	let tplError = '';
+
+	async function loadTemplates(){
+		try {
+			tplLoading = true; tplError='';
+			const res = await fetch('/api/templates');
+			const data = await res.json();
+			if(!data.success) throw new Error(data.error||'échec chargement');
+			templates = data.templates||[];
+		} catch(e){ tplError = e.message; }
+		finally { tplLoading=false; }
+	}
+
+	async function createTemplate(){
+		if(!newTplName.trim()) return; tplError='';
+		try {
+			const res = await fetch('/api/templates', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name:newTplName.trim(), description:newTplDesc.trim(), catalogSnapshot: { summary: 'auto', count: filtered.length } }) });
+			const data = await res.json(); if(!data.success) throw new Error(data.error||'échec création');
+			templates = [data.template, ...templates]; newTplName=''; newTplDesc='';
+		} catch(e){ tplError = e.message; }
+	}
+
+	function toggleTemplates(){ showTemplates = !showTemplates; if(showTemplates && templates.length===0) loadTemplates(); }
 	let filtered = componentsCatalog;
 	let compSearch = '';
 
@@ -140,9 +167,9 @@
 		<!-- Management Sections -->
 		<div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
 			<div class="bg-white rounded-lg shadow p-6 flex flex-col">
-				<h3 class="text-lg font-semibold mb-2">Templates</h3>
-				<p class="text-gray-600 text-sm mb-4 flex-1">Créer et gérer des structures de base (WIP).</p>
-				<button class="w-full bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50" disabled>À venir</button>
+				<h3 class="text-lg font-semibold mb-2 flex items-center gap-2"><i class="fas fa-layer-group text-green-500"></i>Templates</h3>
+				<p class="text-gray-600 text-sm mb-4 flex-1">Structures réutilisables (blueprint + composants).</p>
+				<button class="w-full bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded" on:click={toggleTemplates}>{showTemplates ? 'Masquer' : 'Afficher'}</button>
 			</div>
 			<div class="bg-white rounded-lg shadow p-6 flex flex-col">
 				<h3 class="text-lg font-semibold mb-2">Composants validés</h3>
@@ -178,6 +205,41 @@
 					{:else}
 						<p class="text-gray-500 col-span-full text-sm">Aucun composant.</p>
 					{/each}
+				</div>
+			</section>
+		{/if}
+
+		{#if showTemplates}
+			<section class="mt-10 bg-white rounded-lg shadow border">
+				<header class="px-6 py-4 border-b flex items-center gap-4">
+					<h2 class="text-lg font-semibold text-gray-900 flex items-center gap-2"><i class="fas fa-layer-group text-green-500"></i> Templates</h2>
+				</header>
+				<div class="p-6 space-y-6">
+					<div class="grid md:grid-cols-3 gap-4 text-sm">
+						<div class="md:col-span-1 flex flex-col gap-2">
+							<input placeholder="Nom du template" bind:value={newTplName} class="px-3 py-2 border rounded focus:ring-2 focus:ring-green-500 focus:outline-none" />
+							<textarea rows="3" placeholder="Description" bind:value={newTplDesc} class="px-3 py-2 border rounded focus:ring-2 focus:ring-green-500 focus:outline-none"></textarea>
+							<button class="py-2 rounded bg-green-600 text-white text-sm font-medium disabled:opacity-50" disabled={!newTplName.trim()} on:click={createTemplate}>Créer</button>
+							{#if tplError}<div class="text-xs text-red-600">{tplError}</div>{/if}
+						</div>
+						<div class="md:col-span-2">
+							{#if tplLoading}
+								<p class="text-gray-500 text-sm">Chargement…</p>
+							{:else if templates.length===0}
+								<p class="text-gray-500 text-sm">Aucun template enregistré.</p>
+							{:else}
+								<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+									{#each templates as t}
+										<div class="border rounded p-3 bg-gradient-to-br from-gray-50 to-white flex flex-col text-xs">
+											<h3 class="font-semibold text-gray-800 mb-1">{t.name}</h3>
+											<p class="text-gray-600 line-clamp-3 mb-2">{t.description}</p>
+											<span class="mt-auto text-[10px] text-gray-400">#{t.id} · {new Date(t.created_at).toLocaleDateString()}</span>
+										</div>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					</div>
 				</div>
 			</section>
 		{/if}
