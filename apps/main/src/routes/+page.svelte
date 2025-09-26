@@ -13,7 +13,6 @@
   const tabs = [
     { id: 'chat', label: 'Chat', icon: 'fas fa-comments' },
     { id: 'site', label: 'Site', icon: 'fas fa-globe' },
-    { id: 'components', label: 'Composants', icon: 'fas fa-puzzle-piece' },
     { id: 'preview', label: 'Aperçu', icon: 'fas fa-eye' }
   ];
 
@@ -454,36 +453,6 @@
             Astuce: Soyez précis dans votre description pour de meilleurs résultats
           </p>
         </div>
-      </div>
-
-    {:else if activeTab === 'components'}
-      <!-- Liste des composants générés -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {#each generatedComponents as component, i}
-          <div class="bg-white rounded-xl shadow-sm border p-5 hover:shadow-md transition-shadow">
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="font-semibold text-gray-900">Composant #{i + 1}</h3>
-              <div class="flex items-center space-x-2">
-                <span class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
-                  {component.type}
-                </span>
-                <span class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
-                  <i class="fas fa-robot mr-1"></i>OpenAI
-                </span>
-              </div>
-            </div>
-            <p class="text-sm text-gray-600 mb-4 line-clamp-2">{component.description}</p>
-            <div class="border rounded-lg p-3 bg-gray-50">
-              <DynamicComponent code={component.code} />
-            </div>
-          </div>
-        {:else}
-          <div class="col-span-full text-center py-12">
-            <i class="fas fa-cube text-4xl text-gray-400 mb-4"></i>
-            <h3 class="text-lg font-medium text-gray-900 mb-2">Aucun composant généré</h3>
-            <p class="text-gray-500">Utilisez le chat pour créer vos premiers composants avec OpenAI</p>
-          </div>
-        {/each}
       </div>
 
     {:else if activeTab === 'preview'}

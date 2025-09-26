@@ -1,5 +1,17 @@
 <script>
 	import { onMount } from 'svelte';
+	import { componentsCatalog } from '$lib/catalog/components.js';
+
+	let showComponents = false;
+	let showTemplates = false;
+	let filtered = componentsCatalog;
+	let compSearch = '';
+
+	function filterComponents(){
+		const q = compSearch.toLowerCase().trim();
+		if(!q) { filtered = componentsCatalog; return; }
+		filtered = componentsCatalog.filter(c => c.name.toLowerCase().includes(q) || c.purpose.toLowerCase().includes(q) || c.tags.some(t=> t.toLowerCase().includes(q)));
+	}
 	
 	let stats = {
 		totalProjects: 0,
@@ -127,30 +139,48 @@
 
 		<!-- Management Sections -->
 		<div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-			<div class="bg-white rounded-lg shadow p-6">
-				<h3 class="text-lg font-semibold mb-4">Gestion des Templates</h3>
-				<p class="text-gray-600 mb-4">Créer et gérer les templates de base pour les projets.</p>
-				<button class="w-full bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded">
-					Gérer Templates
-				</button>
+			<div class="bg-white rounded-lg shadow p-6 flex flex-col">
+				<h3 class="text-lg font-semibold mb-2">Templates</h3>
+				<p class="text-gray-600 text-sm mb-4 flex-1">Créer et gérer des structures de base (WIP).</p>
+				<button class="w-full bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50" disabled>À venir</button>
 			</div>
-
-			<div class="bg-white rounded-lg shadow p-6">
-				<h3 class="text-lg font-semibold mb-4">Gestion des Composants</h3>
-				<p class="text-gray-600 mb-4">Ajouter et organiser les composants réutilisables.</p>
-				<button class="w-full bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded">
-					Gérer Composants
-				</button>
+			<div class="bg-white rounded-lg shadow p-6 flex flex-col">
+				<h3 class="text-lg font-semibold mb-2">Composants validés</h3>
+				<p class="text-gray-600 text-sm mb-4 flex-1">Liste des composants réutilisables proposés à l'IA.</p>
+				<button class="w-full bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded" on:click={() => showComponents = !showComponents}>{showComponents ? 'Masquer' : 'Afficher'}</button>
 			</div>
-
-			<div class="bg-white rounded-lg shadow p-6">
-				<h3 class="text-lg font-semibold mb-4">Analyse des Prompts</h3>
-				<p class="text-gray-600 mb-4">Analyser les prompts pour améliorer l'IA.</p>
-				<button class="w-full bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded">
-					Analyser Prompts
-				</button>
+			<div class="bg-white rounded-lg shadow p-6 flex flex-col">
+				<h3 class="text-lg font-semibold mb-2">Prompts / Analyse</h3>
+				<p class="text-gray-600 text-sm mb-4 flex-1">Analyse des prompts les plus utilisés (WIP).</p>
+				<button class="w-full bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded disabled:opacity-50" disabled>À venir</button>
 			</div>
 		</div>
+
+		{#if showComponents}
+			<section class="mt-10 bg-white rounded-lg shadow border">
+				<header class="px-6 py-4 border-b flex items-center gap-4">
+					<h2 class="text-lg font-semibold text-gray-900 flex items-center gap-2"><i class="fas fa-puzzle-piece text-purple-500"></i> Composants disponibles pour l'IA</h2>
+					<div class="ml-auto flex items-center gap-2">
+						<input type="text" placeholder="Filtrer..." bind:value={compSearch} on:input={filterComponents} class="px-3 py-1.5 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+						<span class="text-xs text-gray-500">{filtered.length} / {componentsCatalog.length}</span>
+					</div>
+				</header>
+				<div class="p-6 grid md:grid-cols-2 lg:grid-cols-3 gap-5 text-sm">
+					{#each filtered as comp}
+						<div class="border rounded-lg p-4 bg-gradient-to-br from-gray-50 to-white flex flex-col">
+							<div class="flex items-center justify-between mb-2">
+								<h3 class="font-semibold text-gray-800 text-sm">{comp.name}</h3>
+								<span class="text-[10px] px-2 py-0.5 rounded bg-purple-100 text-purple-700">{comp.tags.join(', ')}</span>
+							</div>
+							<p class="text-gray-600 text-xs mb-3 leading-relaxed line-clamp-3">{comp.purpose}</p>
+							<code class="block text-[10px] bg-gray-900 text-gray-100 rounded p-2 overflow-auto whitespace-pre-wrap max-h-40">{comp.filename}</code>
+						</div>
+					{:else}
+						<p class="text-gray-500 col-span-full text-sm">Aucun composant.</p>
+					{/each}
+				</div>
+			</section>
+		{/if}
 	</main>
 </div>
 
