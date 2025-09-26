@@ -14,6 +14,15 @@ export function extractJson(raw, { allowArrays = true } = {}) {
   // Nettoyage fences
   text = text.replace(/^```(json)?\s*/i, '').replace(/```\s*$/,'').trim();
 
+  // Suppression de bruit éventuel avant la 1ère accolade
+  const firstBrace = text.indexOf('{');
+  if(firstBrace > 0 && firstBrace < 400){ // si peu de bruit, on coupe
+    const pre = text.slice(0, firstBrace);
+    if(/<<<JSON_ST|^Here|^Output|^Réponse|^Result/i.test(pre)){
+      text = text.slice(firstBrace);
+    }
+  }
+
   // Délimiteurs explicites
   const startMarker = '<<<JSON_START>>>';
   const endMarker = '<<<JSON_END>>>';
@@ -21,6 +30,16 @@ export function extractJson(raw, { allowArrays = true } = {}) {
     const inner = text.substring(text.indexOf(startMarker)+startMarker.length, text.lastIndexOf(endMarker)).trim();
     const parsed = tryParse(inner, allowArrays);
     if (parsed.ok) return { ...parsed, rawFragment: inner };
+  }
+  // Marqueur partiel (ex: tronqué) -> tenter entre première '{' et dernière '}'
+  if(text.includes('<<<JSON_ST') && !text.includes('<<<JSON_END>>>')){
+    const fb = text.indexOf('{');
+    const lb = text.lastIndexOf('}');
+    if(fb !== -1 && lb !== -1 && lb > fb){
+      const slice = text.slice(fb, lb+1);
+      const parsed = tryParse(slice, allowArrays);
+      if(parsed.ok) return { ...parsed, rawFragment: slice };
+    }
   }
 
   // Tentative direct

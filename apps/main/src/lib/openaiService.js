@@ -206,7 +206,7 @@ ${componentContext}
 ${retrievalContext}
 `;
     const enveloped = withJsonEnvelope(`Génère une application basée sur: ${prompt}`);
-    const attempt = async (retryIndex=0) => {
+    const attempt = async (retryIndex=0, lastError=null, lastRaw='') => {
       const body = { model, messages:[{role:'system',content:system},{role:'user',content:enveloped}], temperature:0.2, max_tokens:1800 };
       const cacheKey = simpleCache.key('generateApplication', { prompt, model, retryIndex });
       const cached = simpleCache.get(cacheKey);
@@ -215,9 +215,16 @@ ${retrievalContext}
       if(!response.ok){ const txt = await response.text(); throw new Error('Erreur OpenAI app: '+txt); }
       const data = await response.json();
       const raw = data.choices?.[0]?.message?.content?.trim();
-      if(!raw){ if(retryIndex===0) return attempt(1); throw new Error('Réponse vide'); }
-      const extracted = extractJson(raw, { allowArrays:false });
-      if(!extracted.ok){ if(retryIndex===0) return attempt(1); throw new Error('Extraction JSON échouée: '+extracted.error); }
+      if(!raw){ if(retryIndex<2) return attempt(retryIndex+1, 'Réponse vide'); throw new Error('Réponse vide'); }
+      let extracted = extractJson(raw, { allowArrays:false });
+      if(!extracted.ok){
+        if(retryIndex < 2){
+          // Prompt correctif: demander uniquement la portion JSON
+          const fixPrompt = withJsonEnvelope(`La sortie précédente n'était pas JSON strict. Corrige et renvoie UNIQUEMENT l'objet JSON complet. Erreur: ${extracted.error}`);
+          return attempt(retryIndex+1, extracted.error, raw + '\n---FIXPROMPT---\n'+fixPrompt);
+        }
+        throw new Error('Extraction JSON échouée: '+extracted.error);
+      }
       const files = extracted.data;
       try {
         const { validateApplicationFiles } = await import('$lib/ai/schemas.js');
@@ -277,7 +284,7 @@ ${retrievalContext}
     if(!this.apiKey) throw new Error('Clé API OpenAI manquante');
     const system = `Tu es un architecte logiciel spécialisé en SvelteKit. Retourne STRICTEMENT un JSON validant le schéma conceptuel du blueprint. AUCUN texte hors JSON.`;
     const envelope = withJsonEnvelope(`Génère un blueprint complet pour la requête: ${query}\nExigences clés: routes structurées, 3-5 articles si blog, palette 4-6 hex (#...), prompts par fichier.`);
-    const attempt = async (retryIndex=0) => {
+    const attempt = async (retryIndex=0, lastError=null, lastRaw='') => {
       const body = { model, messages:[{role:'system',content:system},{role:'user',content:envelope}], temperature: 0.4, max_tokens: 1800 };
       const cacheKey = simpleCache.key('generateBlueprint', { query, model, retryIndex });
       const cached = simpleCache.get(cacheKey);
@@ -288,7 +295,10 @@ ${retrievalContext}
       const raw = data.choices?.[0]?.message?.content?.trim() || '';
       const extracted = extractJson(raw, { allowArrays:false });
       if(!extracted.ok){
-        if(retryIndex===0) return attempt(1);
+        if(retryIndex < 2){
+          const fixEnvelope = withJsonEnvelope(`La tentative précédente contenait un JSON invalide (${extracted.error}). Fournis uniquement le blueprint JSON complet et corrigé.`);
+          return attempt(retryIndex+1, extracted.error, raw+'\n---FIX---\n'+fixEnvelope);
+        }
         throw new Error('Extraction JSON blueprint échouée: '+extracted.error);
       }
       const blueprint = extracted.data;

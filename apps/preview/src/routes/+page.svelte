@@ -16,6 +16,9 @@
 	let autoRefresh = true;
 	let intervalId;
 	let sandboxEl; // iframe ref
+		let routes = [];
+		let selectedFile = '';
+		let quality = null; let validationSummary = null; let qualityOpen = false;
 
 	// Sandbox props (ex-exports du composant local)
 	let sandboxCompiledModules = [];
@@ -27,30 +30,67 @@
 		return p.url.searchParams.get('projectId') || '';
 	}
 
-	async function load(){
+		function currentModeParam(){
+			const p = get(page);
+			const m = (p.url.searchParams.get('mode')||'').toLowerCase();
+			return ['inline','sandbox','ssr'].includes(m) ? m : null;
+		}
+
+		function updateUrlParam(param, value){
+			try {
+				const p = get(page);
+				const url = new URL(p.url);
+				if(value === null || value === undefined || value === '') url.searchParams.delete(param); else url.searchParams.set(param, value);
+				history.replaceState({}, '', url.toString());
+			} catch(_e){ /* ignore */ }
+		}
+
+		async function load(){
 		projectId = currentProjectId();
 		if(!projectId){ error = 'Paramètre ?projectId= manquant'; return; }
 		loading = true; error='';
 		try {
 			if(mode === 'ssr'){
-				const res = await fetch(`/api/projects/${projectId}/preview`);
+					const qs = selectedFile ? `?file=${encodeURIComponent(selectedFile)}` : '';
+							const res = await fetch(`/api/projects/${projectId}/preview${qs}`);
 				const data = await res.json();
 				if(!data.success) throw new Error(data.error||'Erreur preview SSR');
-				html = data.html; entry = data.entry; currentComponent = null; compiledModules = []; sandboxCompiledModules=[]; sandboxEntry='';
+							html = data.html; entry = data.entry; routes = data.routes || []; currentComponent = null; compiledModules = []; sandboxCompiledModules=[]; sandboxEntry=''; quality = data.quality; validationSummary = data.validation_summary;
 			} else {
-				const res = await fetch(`/api/projects/${projectId}/compile`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
+					const payload = selectedFile ? { file: selectedFile } : {};
+					const res = await fetch(`/api/projects/${projectId}/compile`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
 				const data = await res.json();
 				if(!data.success) throw new Error(data.error||'Erreur compile');
-				entry = data.entry; compiledModules = data.modules;
+							entry = data.entry; compiledModules = data.modules; routes = data.routes || []; quality = data.quality; validationSummary = data.validation_summary;
 				if(mode === 'inline'){
 					const urlMap = new Map();
+								// Préparer mapping imports => URL pour réécriture
+								const pathToUrl = new Map();
 					for(const m of compiledModules){
 						if(m.error) continue;
 						const blob = new Blob([m.jsCode], { type:'text/javascript' });
 						const url = URL.createObjectURL(blob);
-						urlMap.set(m.path, url);
+									pathToUrl.set(m.path, url);
 					}
-					const entryUrl = urlMap.get(entry);
+								// Réécriture des imports relatifs dans chaque module (simple replace)
+								for(const m of compiledModules){
+									if(!m.imports || !m.imports.length || m.error) continue;
+									let code = m.jsCode;
+									for(const imp of m.imports){
+										const targetUrl = pathToUrl.get(imp.target);
+										if(targetUrl){
+											// Remplace uniquement occurrences exactes entre quotes
+											const pattern = new RegExp(`(['"])${imp.spec.replace(/[-/\\.^$*+?()|[\]{}]/g,'\\$&')}\\1`, 'g');
+											code = code.replace(pattern, `"${targetUrl}"`);
+										}
+									}
+									if(code !== m.jsCode){
+										const blob = new Blob([code], { type:'text/javascript' });
+										const newUrl = URL.createObjectURL(blob);
+										pathToUrl.set(m.path, newUrl);
+									}
+								}
+								const entryUrl = pathToUrl.get(entry);
 					if(entryUrl){
 						const mod = await import(/* @vite-ignore */ entryUrl);
 						currentComponent = mod.default;
@@ -75,10 +115,15 @@
 	}
 
 	onMount(()=> {
-		load();
+			const initialMode = currentModeParam();
+			if(initialMode) mode = initialMode; // override default
+			load();
 		refreshLoop();
 		return ()=> clearInterval(intervalId);
 	});
+
+		// Mise à jour URL quand le mode change (deep-link shareable)
+		$: updateUrlParam('mode', mode);
 
 	// Sandbox IIFE reactive effect
 	$: if(sandboxEl && mode === 'sandbox' && sandboxCompiledModules && sandboxEntry){
@@ -120,6 +165,46 @@
     <div class="p-4 text-sm text-red-600 bg-red-50 border-b">Erreur: {error}</div>
   {/if}
   <div class="flex-1 overflow-auto p-4">
+		{#if quality}
+			<div class="mb-4 border rounded bg-white shadow-sm">
+				<button class="w-full flex items-center justify-between px-4 py-2 text-sm font-medium" on:click={()=> qualityOpen=!qualityOpen}>
+					<span>Qualité: <span class="font-semibold">{quality.grade}</span> ({quality.score})</span>
+					<span class="text-xs text-gray-500">{qualityOpen ? '▼' : '▲'}</span>
+				</button>
+				{#if qualityOpen}
+					<div class="px-4 pb-4 space-y-3 text-xs">
+						{#if quality.rationale && quality.rationale.length}
+							<ul class="list-disc ml-5 marker:text-indigo-500">
+								{#each quality.rationale as r}<li>{r}</li>{/each}
+							</ul>
+						{/if}
+						{#if validationSummary}
+							<div>
+								<p class="font-semibold mb-1">Issues par fichier:</p>
+								<div class="grid gap-1">
+									{#each Object.entries(validationSummary) as [fname,count]}
+										<button class="text-left hover:bg-indigo-50 px-2 py-1 rounded border text-[11px] flex justify-between" on:click={()=> { selectedFile=fname; load(); }}>
+											<span class="truncate max-w-[240px]">{fname}</span>
+											<span class="text-gray-500">{count}</span>
+										</button>
+									{/each}
+								</div>
+							</div>
+						{/if}
+					</div>
+				{/if}
+			</div>
+		{/if}
+		{#if routes.length}
+			<div class="mb-3 flex flex-wrap gap-2 text-xs">
+				{#each routes as r}
+					<button class="px-2 py-1 rounded border bg-white hover:bg-indigo-50 transition disabled:opacity-50" on:click={() => { selectedFile = r; load(); }} disabled={loading || selectedFile===r}>{r === selectedFile ? '●': '○'} {r.replace('src/routes/','')}</button>
+				{/each}
+				{#if selectedFile}
+					<button class="px-2 py-1 rounded border bg-white text-red-600" on:click={() => { selectedFile=''; load(); }} disabled={loading}>Reset</button>
+				{/if}
+			</div>
+		{/if}
     {#if loading}
       <div class="flex items-center gap-3 text-sm text-gray-600"><div class="animate-spin h-5 w-5 border-2 border-indigo-500 border-t-transparent rounded-full"></div> Chargement...</div>
 		{:else if mode==='ssr' && html}

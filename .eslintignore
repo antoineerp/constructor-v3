@@ -1,3 +1,13 @@
+node_modules
+dist
+build
+.svelte-kit
+.vercel
+coverage
+.output
+*.log
+pnpm-lock.yaml
+yarn.lock
 # Ignorer les artefacts générés / build pour ESLint
 # (Empêche le hook pre-commit de traiter du code transitoire ou volumineux)
 .svelte-kit

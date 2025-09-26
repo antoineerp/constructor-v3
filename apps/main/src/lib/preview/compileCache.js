@@ -15,6 +15,15 @@ export function computeProjectHash(files, options={}){
   return hash.digest('hex').slice(0,48);
 }
 
+export function computeFileHash(path, content, options={}){
+  const hash = crypto.createHash('sha256');
+  hash.update('f1');
+  hash.update(path); hash.update('\n');
+  hash.update(content||'');
+  hash.update(JSON.stringify(options));
+  return hash.digest('hex').slice(0,48);
+}
+
 export function getCached(hash){
   const entry = cache.get(hash);
   if(!entry) return null;
