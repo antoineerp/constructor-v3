@@ -1,9 +1,17 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export default defineConfig({
 	plugins: [sveltekit()],
-	server: {
-		port: 5173
-	}
+	resolve: {
+		alias: {
+			'$tools/format': resolve(__dirname, 'tools/format-files.mjs')
+		}
+	},
+	server: { port: 5173 }
 });

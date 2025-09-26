@@ -6,11 +6,11 @@ import { toText } from '../utils/to-text.js';
 // Charge optionnellement le formatter dédié multi-fichiers (Svelte + Tailwind)
 let formatFilesFn = null;
 try {
-  // NOTE: chemin corrigé: validator.js est dans src/lib/validation → remonter 3 niveaux jusqu'à main/
-  const mod = await import('../../../tools/format-files.mjs');
+  // Chargement via alias Vite ($tools/format) défini dans vite.config.js
+  const mod = await import('$tools/format');
   formatFilesFn = mod.formatFiles;
 } catch(_e) {
-  // silencieux si absent
+  // silencieux si absent (en build SSR Vercel, alias résolu via Vite)
 }
 
 // ESLint singleton (flat config inline) — on ne dépend plus de découverte de fichier ni de fallback.
