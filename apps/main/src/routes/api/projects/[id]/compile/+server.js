@@ -1,5 +1,8 @@
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
+import { execSync } from 'node:child_process';
+import fs from 'fs';
+import crypto from 'crypto';
 import path from 'path';
 import { supabase as clientSupabase } from '$lib/supabase.js';
 import { computeProjectHash, getCached, setCached } from '$lib/preview/compileCache.js';
@@ -36,6 +39,37 @@ export async function POST(event){
       return json({ success:true, cached:true, ...cached });
     }
     const modules = [];
+    // Caching CSS (hash sur app.css + tailwind.config.cjs)
+    let globalCss = '';
+    let cssHash = null;
+    const hasTailwind = !!projectFiles['src/app.css'] && !!projectFiles['tailwind.config.cjs'];
+    const cssCacheTTLms = 2 * 60 * 1000; // 2 minutes
+    // Module-level cache (closure)
+    if(typeof globalThis.__TAILWIND_CSS_CACHE === 'undefined') globalThis.__TAILWIND_CSS_CACHE = new Map();
+    const cssCache = globalThis.__TAILWIND_CSS_CACHE;
+    try {
+      if(hasTailwind){
+        cssHash = crypto.createHash('sha1').update(projectFiles['src/app.css']).update(projectFiles['tailwind.config.cjs']).digest('hex');
+        const cached = cssCache.get(cssHash);
+        if(cached && (Date.now() - cached.t) < cssCacheTTLms){
+          globalCss = cached.css;
+        } else {
+          const tmpDir = `/tmp/preview-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          fs.mkdirSync(tmpDir, { recursive:true });
+          try {
+            fs.writeFileSync(`${tmpDir}/tailwind.config.cjs`, projectFiles['tailwind.config.cjs']);
+            fs.writeFileSync(`${tmpDir}/app.css`, projectFiles['src/app.css']);
+            try {
+              const out = execSync(`npx tailwindcss -i ${tmpDir}/app.css -c ${tmpDir}/tailwind.config.cjs --minify`, { encoding:'utf-8', stdio:['ignore','pipe','pipe'], timeout:8000 });
+              globalCss = out.trim();
+              cssCache.set(cssHash, { css: globalCss, t: Date.now() });
+            } catch(e){ /* ignore tailwind failure */ }
+          } finally {
+            try { fs.rmSync(tmpDir, { recursive:true, force:true }); } catch(_e){ /* ignore */ }
+          }
+        }
+      }
+    } catch(e){ /* ignore env fs / hash issues */ }
     const fileSet = new Set(svelteEntries.map(e=> e[0]));
     function resolveImport(spec, from){
       if(!spec.startsWith('.')) return null; // only relative
@@ -81,7 +115,9 @@ export async function POST(event){
         validation_summary = logs[0].meta?.validation_summary || null;
       }
     } catch(_e){ /* ignore quality fetch */ }
-    const result = { modules, entry, cached:false, timings:{ total_ms: Date.now()-t0 }, routes: routeCandidates, quality, validation_summary };
+  const guardMeta = projectFiles.__guard_meta || null;
+  const variantMeta = projectFiles.__variant_meta || null;
+  const result = { modules, entry, cached:false, timings:{ total_ms: Date.now()-t0 }, routes: routeCandidates, quality, validation_summary, css: globalCss, cssHash, guardMeta, variantMeta };
     setCached(hash, result, 2*60*1000); // 2 min
     return json({ success:true, ...result });
   } catch(e){

@@ -2,6 +2,14 @@ import { compile } from 'svelte/compiler';
 import prettier from 'prettier';
 import * as path from 'path';
 import { ESLint } from 'eslint';
+// Charge optionnellement le formatter dédié multi-fichiers (Svelte + Tailwind)
+let formatFilesFn = null;
+try {
+  const mod = await import('../../tools/format-files.mjs');
+  formatFilesFn = mod.formatFiles;
+} catch(_e) {
+  // silencieux si absent
+}
 
 // ESLint singleton (flat config inline) — on ne dépend plus de découverte de fichier ni de fallback.
 let eslintInstance; let eslintInitError=null;
@@ -63,6 +71,15 @@ function mapSeverity(num) {
 }
 
 export async function validateFiles(files) {
+  // Pré-formatage global (rapide, parallélisé) avant lint/compile
+  if (formatFilesFn) {
+    try {
+      const { files: formattedAll } = await formatFilesFn(files);
+      files = formattedAll;
+    } catch(e) {
+      console.warn('[validator] formatFiles.mjs a échoué (continuation sans pré-format):', e.message);
+    }
+  }
   const result = {};
   const eslint = await getEslint();
 
@@ -126,6 +143,7 @@ export async function validateFiles(files) {
       if (ext === '.svelte') parser = 'svelte';
       else if (ext === '.json') parser = 'json';
       else if (ext === '.ts') parser = 'typescript';
+      else if (ext === '.css') parser = 'css'; // Important: évite interprétation décorateur JS (@tailwind)
       else parser = 'babel';
       const prettierPlugins = [];
       if (parser === 'svelte') {

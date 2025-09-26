@@ -29,7 +29,7 @@ Retourne JSON: { "${filename}": "CONTENU" } sans texte additionnel.`,
 Retourne STRICTEMENT un objet JSON { "filename":"CONTENU", ... } (aucun texte hors JSON).
 Contraintes:
 - Max ${maxFiles} fichiers
-- Doit inclure: README.md, package.json, src/routes/+page.svelte
+- Doit inclure: package.json, src/routes/+page.svelte
 - Utiliser Tailwind (si config absente, inclure tailwind.config.cjs, postcss.config.cjs, src/app.css)
 - Pas de commentaires verbeux ni markdown
 - Pas d'import externe non nécessaire
@@ -41,8 +41,8 @@ Contraintes:
 Objectif: produire une base IMMÉDIATEMENT compilable pour: "${query}".
 Sortie: UNIQUE objet JSON strict.
 Règles renforcées:
-- Max ${maxFiles} fichiers (priorité aux routes essentielles + layout + 1-2 composants réutilisables)
-- Fichiers obligatoires: README.md, package.json, src/routes/+layout.svelte, src/routes/+page.svelte, src/app.css
+- Max ${maxFiles} fichiers (priorité routes essentielles + layout + 1-2 composants réutilisables)
+- Fichiers obligatoires: package.json, src/routes/+layout.svelte, src/routes/+page.svelte, src/app.css
 - package.json minimal: scripts dev/build, dépendances sveltekit + tailwind
 - ZÉRO texte hors JSON, ZÉRO commentaires hors code
 - Aucune chaîne "TODO" / "FIXME" / placeholder

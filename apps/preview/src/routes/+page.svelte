@@ -11,6 +11,11 @@
 	let entry = '';
 	let mode = 'inline'; // 'inline' | 'sandbox' | 'ssr'
 	let compiledModules = [];
+	let globalCss = '';
+	let cssHash = '';
+	let guardMeta = null;
+	let variantMeta = null;
+	let showTech = false;
 	let currentComponent = null;
 	let iframeKey = 0;
 	let autoRefresh = true;
@@ -61,7 +66,7 @@
 					const res = await fetch(`/api/projects/${projectId}/compile`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
 				const data = await res.json();
 				if(!data.success) throw new Error(data.error||'Erreur compile');
-							entry = data.entry; compiledModules = data.modules; routes = data.routes || []; quality = data.quality; validationSummary = data.validation_summary;
+							entry = data.entry; compiledModules = data.modules; routes = data.routes || []; quality = data.quality; validationSummary = data.validation_summary; globalCss = data.css || ''; cssHash = data.cssHash || ''; guardMeta = data.guardMeta || null; variantMeta = data.variantMeta || null;
 				if(mode === 'inline'){
 					const urlMap = new Map();
 								// Préparer mapping imports => URL pour réécriture
@@ -129,9 +134,24 @@
 	$: if(sandboxEl && mode === 'sandbox' && sandboxCompiledModules && sandboxEntry){
 		const doc = sandboxEl.contentDocument;
 		doc.open();
-		doc.write(`<!DOCTYPE html><html><head><meta charset=\"utf-8\" />\n<style>html,body{margin:0;padding:0;font-family:system-ui,sans-serif;}/* Tailwind global */</style>\n</head><body><div id="app"></div><script>window.addEventListener('message', async (e)=>{ const { modules, entry }=e.data; const urlMap=new Map(); for(const m of modules){ if(m.error) continue; const blob=new Blob([m.jsCode],{type:'text/javascript'}); const u=URL.createObjectURL(blob); urlMap.set(m.path,u);} const entryUrl=urlMap.get(entry); if(entryUrl){ const mod=await import(entryUrl); new mod.default({ target: document.getElementById('app') }); } });<\/script></body></html>`);
+		doc.write(`<!DOCTYPE html><html><head><meta charset=\"utf-8\" />\n<style>html,body{margin:0;padding:0;font-family:system-ui,sans-serif;}\n${globalCss.replace(/<\/style>/g,'<\\/style>')}\n</style>\n</head><body><div id="app"></div><script>window.addEventListener('message', async (e)=>{ const { modules, entry }=e.data; const urlMap=new Map(); for(const m of modules){ if(m.error) continue; const blob=new Blob([m.jsCode],{type:'text/javascript'}); const u=URL.createObjectURL(blob); urlMap.set(m.path,u);} const entryUrl=urlMap.get(entry); if(entryUrl){ const mod=await import(entryUrl); new mod.default({ target: document.getElementById('app') }); } });<\/script></body></html>`);
 		doc.close();
 		setTimeout(()=> sandboxEl.contentWindow.postMessage({ modules: sandboxCompiledModules, entry: sandboxEntry }, '*'), 30);
+	}
+
+	// Injection CSS globale pour le mode inline (head du document parent)
+	$: if(mode==='inline' && globalCss){
+		if(typeof document!=='undefined'){
+			let styleEl = document.getElementById('__preview-tailwind');
+			if(!styleEl){
+				styleEl = document.createElement('style');
+				styleEl.id='__preview-tailwind';
+				document.head.appendChild(styleEl);
+			}
+			if(styleEl.textContent !== globalCss){
+				styleEl.textContent = globalCss;
+			}
+		}
 	}
 </script>
 
@@ -160,11 +180,54 @@
 				<input type="radio" name="mode" value="ssr" bind:group={mode} on:change={load}/> ssr
 			</label>
 		</div>
+		<div class="ml-auto flex items-center gap-2 text-xs">
+			{#if mode!=='ssr'}
+				<button class="px-2 py-1 rounded border bg-white hover:bg-gray-50" on:click={()=> showTech=!showTech}>{showTech? 'Fermer':'Tech'}</button>
+			{/if}
+		</div>
   </header>
   {#if error}
     <div class="p-4 text-sm text-red-600 bg-red-50 border-b">Erreur: {error}</div>
   {/if}
   <div class="flex-1 overflow-auto p-4">
+		{#if mode!=='ssr' && !loading && globalCss===''}
+			<div class="mb-3 text-[11px] px-3 py-2 rounded border border-amber-300 bg-amber-50 text-amber-700 flex items-start gap-2">
+				<i class="fas fa-circle-exclamation mt-0.5"></i>
+				<div>
+					<p class="font-medium">Tailwind non compilé</p>
+					<p class="leading-snug">Le CSS généré est vide. Vérifie présence de <code>src/app.css</code> & <code>tailwind.config.cjs</code>. (Le rendu inline/sandbox affichera seulement le HTML brut.)</p>
+				</div>
+			</div>
+		{/if}
+		{#if showTech && (guardMeta || variantMeta)}
+			<div class="mb-4 border rounded bg-white shadow-sm p-3 text-[11px] space-y-3">
+				<h2 class="font-semibold text-xs flex items-center gap-2"><i class="fas fa-microchip text-indigo-500"></i> Métadonnées techniques</h2>
+				{#if cssHash}<div class="text-gray-600">CSS hash: <span class="font-mono">{cssHash.slice(0,12)}</span>{globalCss ? ` (${(globalCss.length/1024).toFixed(1)} Ko)` : ''}</div>{/if}
+				{#if variantMeta}
+					<div>
+						<p class="font-medium mb-1">Variantes génération</p>
+						<p class="mb-1">Sélection: <span class="font-mono text-indigo-600">{variantMeta.selected}</span></p>
+						<ul class="space-y-1">
+							{#each variantMeta.tried as v}
+								<li class="border rounded px-2 py-1 flex justify-between gap-3 {v.variant===variantMeta.selected ? 'bg-indigo-50 border-indigo-300' : 'bg-gray-50'}">
+									<span class="truncate">{v.variant}</span>
+									<span class="text-gray-500">{v.durationMs} ms {v.schemaErrorsCount? ` • schemaErr:${v.schemaErrorsCount}`:''} {v.error? ' • fail':''}</span>
+								</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
+				{#if guardMeta}
+					<div>
+						<p class="font-medium mb-1">Guardrails</p>
+						{#if guardMeta.ensure?.injected?.length}
+							<p class="mb-1">Fichiers injectés: {guardMeta.ensure.injected.join(', ')}</p>
+						{/if}
+						<p class="text-gray-600">Corrections: alt+{guardMeta.summary.addedAlt} / hexFix {guardMeta.summary.tailwindHexFix} / imports dangereux {guardMeta.summary.strippedDangerous}</p>
+					</div>
+				{/if}
+			</div>
+		{/if}
 		{#if quality}
 			<div class="mb-4 border rounded bg-white shadow-sm">
 				<button class="w-full flex items-center justify-between px-4 py-2 text-sm font-medium" on:click={()=> qualityOpen=!qualityOpen}>

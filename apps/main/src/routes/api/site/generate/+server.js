@@ -265,6 +265,11 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
   // Guardrails pré-validation (injection fichiers requis + quick fixes basiques)
   try { applyGuardRails(files); } catch(e){ console.warn('Guardrails apply failed', e.message); }
 
+    // Suppression systématique du README.md si généré (non nécessaire pour preview / build minimal)
+    if(files['README.md']){
+      delete files['README.md'];
+    }
+
   // Mise à jour / création projet
     if (!project && !ephemeral) {
       try {

@@ -1,5 +1,18 @@
 # Constructor V3 🚀
 
+> Outils ajoutés: Prettier (Svelte + Tailwind) & script de formatage programmatique.
+
+Scripts utiles:
+
+```bash
+npm run format   # Prettier --write .
+npm run lint     # (placeholder ESLint si config active)
+```
+
+Config Prettier: `prettier.config.cjs`.
+Format programmatique: `apps/main/tools/format-files.mjs` (entrée JSON { files: { path: code } }).
+
+
 **Générateur d'applications SvelteKit basé sur l'IA**
 
 Constructor V3 est une plateforme innovante qui permet de créer des applications web SvelteKit complètes en décrivant simplement vos besoins en langage naturel. L'IA analyse votre demande, sélectionne les templates appropriés, et génère du code de haute qualité que vous pouvez voir en temps réel et affiner par itérations.
