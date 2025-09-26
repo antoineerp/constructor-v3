@@ -31,6 +31,7 @@
   let runningPass = null; // 'scaffold'|'fill'|'optimize'
   let passBusy = false;
   let assetsBusy = false;
+  let simpleMode = true; // Mode simple: un seul fichier statique
 
   function addSiteMessage(msg){ siteMessages = [...siteMessages, { id: Date.now().toString()+Math.random(), ...msg, timestamp:new Date() }]; }
 
@@ -55,7 +56,7 @@
       } catch(e){ console.warn('Session Supabase indisponible', e); }
       const headers = { 'Content-Type':'application/json' };
       if(token) headers['Authorization'] = `Bearer ${token}`; else console.warn('Aucun token supabase: la création de projet sera refusée (401)');
-      const res = await fetch('/api/site/generate', { method:'POST', headers, body: JSON.stringify({ query: current }) });
+  const res = await fetch('/api/site/generate', { method:'POST', headers, body: JSON.stringify({ query: current, simpleMode }) });
       if(!res.ok){ throw new Error('HTTP '+res.status); }
       const data = await res.json();
       if(!data.success) throw new Error(data.error || 'Erreur génération site');
@@ -566,6 +567,10 @@
                 <span>Générer</span>
               </button>
             </div>
+            <div class="mt-2 flex items-center gap-3 text-xs text-gray-600">
+              <label class="inline-flex items-center gap-2 cursor-pointer select-none"><input type="checkbox" bind:checked={simpleMode} class="rounded border-gray-300" /><span>Mode simple (1 fichier statique)</span></label>
+              {#if simpleMode}<span class="px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded border border-indigo-200">Ultra rapide</span>{/if}
+            </div>
             {#if siteError}<div class="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded">{siteError}</div>{/if}
             <p class="mt-2 text-[11px] text-gray-500 flex items-center gap-1"><i class="fas fa-lightbulb"></i> Le système produit un blueprint + fichiers SvelteKit (max ~8).</p>
           </div>
@@ -605,7 +610,30 @@
                     {#if sandboxUrl}
                       <iframe title="Sandbox Preview" src={sandboxUrl} class="w-full h-full bg-white"></iframe>
                     {:else}
-                      <div class="h-full flex items-center justify-center text-gray-400 text-sm">Aucun projet à prévisualiser.</div>
+                      <!-- Mode éphémère: on affiche un rendu statique local du fichier sélectionné -->
+                      <div class="h-full overflow-auto p-4">
+                        {#if siteSelectedFile && siteFiles?.[siteSelectedFile]}
+                          {#if siteSelectedFile.endsWith('+page.svelte')}
+                            <div class="mb-3 text-[11px] text-gray-600 flex items-center gap-2">
+                              <i class="fas fa-info-circle text-indigo-500"></i>
+                              <span>Aperçu statique (mode éphémère) – aucune exécution Svelte. Connecte-toi puis régénère pour un sandbox isolé.</span>
+                            </div>
+                          {/if}
+                          {#if /<script[\s\S]*?<\/script>/i.test(siteFiles[siteSelectedFile])}
+                            <div class="mb-2 rounded border border-amber-300 bg-amber-50 text-amber-800 text-[11px] px-3 py-2 flex items-start gap-2">
+                              <i class="fas fa-code"></i>
+                              <span>Scripts retirés du rendu pour sécurité. Le code complet reste disponible dans l'onglet Fichiers.</span>
+                            </div>
+                          {/if}
+                          {#key siteSelectedFile}
+                            <div class="bg-white rounded shadow-sm border p-4 prose max-w-none">
+                              {@html buildSafePreview(siteFiles[siteSelectedFile]) }
+                            </div>
+                          {/key}
+                        {:else}
+                          <div class="h-full flex items-center justify-center text-gray-400 text-sm">Aucun projet à prévisualiser.</div>
+                        {/if}
+                      </div>
                     {/if}
                   </div>
                 </div>

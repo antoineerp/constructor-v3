@@ -13,7 +13,7 @@ import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/publi
 export async function POST({ request }) {
   try {
     const body = await request.json();
-    const { query, projectId, regenerateFile } = body;
+  const { query, projectId, regenerateFile, simpleMode } = body;
     // Récupération token Supabase (passé côté client via Authorization: Bearer <access_token>)
     const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
     let userId = null;
@@ -78,7 +78,7 @@ export async function POST({ request }) {
     }
 
     // Construire prompt global à partir du blueprint
-    const appPrompt = buildAppPrompt(blueprint);
+  const appPrompt = buildAppPrompt(blueprint, { simpleMode });
   const files = await openaiService.generateApplication(appPrompt, { model: 'gpt-4o-mini', maxFiles: 20 });
 
     // Mise à jour / création projet
@@ -114,9 +114,25 @@ export async function POST({ request }) {
   }
 }
 
-function buildAppPrompt(blueprint){
+function buildAppPrompt(blueprint, { simpleMode } = {}){
   const { routes = [], core_components = [], color_palette = [], sample_content = {}, seo_meta = {} } = blueprint || {};
   const articles = sample_content.articles || [];
+  if(simpleMode){
+    return `Génère un site SvelteKit ULTRA SIMPLE en UN SEUL FICHIER.
+Contraintes STRICTES:
+- Uniquement le fichier src/routes/+page.svelte dans le JSON final (pas d'autres clés)
+- Pas de <script> ni d'import local; uniquement du markup statique + classes Tailwind
+- Le fichier doit contenir: un header de navigation, une section hero, jusqu'à 3 sections de contenu, éventuellement une grille d'articles, et un footer.
+- Le style repose exclusivement sur Tailwind CDN (le sandbox l'injectera)
+- Pas de logique dynamique, pas de formulaires complexes
+- AUCUN texte hors JSON, pas de commentaires.
+Contexte:
+Routes prévues: ${routes.map(r=>r.path).join(', ') || '/'}
+Palette: ${color_palette.join(', ')}
+Titre SEO: ${seo_meta.title}
+Articles disponibles: ${articles.slice(0,4).map(a=>a.title).join(' | ')}
+Retourne JSON: {"src/routes/+page.svelte":"CONTENU"}`.trim();
+  }
   return `Crée une application SvelteKit structurée.
 Routes: ${routes.map(r=> r.path+ ' => '+ r.sections.join(',')).join(' | ')}.
 Palette: ${color_palette.join(', ')}.
@@ -128,6 +144,5 @@ Contraintes:
 - Max 8 fichiers
 - Utilise Tailwind
 - Header + Footer cohérents
-- Aucun texte hors JSON
-`.trim();
+- Aucun texte hors JSON`.trim();
 }
