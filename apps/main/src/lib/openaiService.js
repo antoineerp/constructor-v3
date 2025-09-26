@@ -1,8 +1,10 @@
-import { OPENAI_API_KEY } from '$env/static/private';
+// IMPORTANT: utilisation de $env/dynamic/private pour éviter l'injection statique
+// afin que la clé ne soit pas écrite en dur dans le bundle build côté serveur.
+import { env } from '$env/dynamic/private';
 
 export class OpenAIService {
   constructor() {
-    this.apiKey = OPENAI_API_KEY;
+  this.apiKey = env.OPENAI_API_KEY;
   }
 
   async generateComponent(prompt, type = 'generic') {

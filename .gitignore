@@ -30,6 +30,8 @@ dist
 # SvelteKit build output (ne pas versionner pour éviter fuite variables statiques)
 .svelte-kit
 apps/*/.svelte-kit
+.vercel
+apps/*/.vercel
 
 
 # Debug
