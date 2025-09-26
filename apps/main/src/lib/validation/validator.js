@@ -2,10 +2,12 @@ import { compile } from 'svelte/compiler';
 import prettier from 'prettier';
 import * as path from 'path';
 import { ESLint } from 'eslint';
+import { toText } from '../utils/to-text.js';
 // Charge optionnellement le formatter dédié multi-fichiers (Svelte + Tailwind)
 let formatFilesFn = null;
 try {
-  const mod = await import('../../tools/format-files.mjs');
+  // NOTE: chemin corrigé: validator.js est dans src/lib/validation → remonter 3 niveaux jusqu'à main/
+  const mod = await import('../../../tools/format-files.mjs');
   formatFilesFn = mod.formatFiles;
 } catch(_e) {
   // silencieux si absent
@@ -83,13 +85,14 @@ export async function validateFiles(files) {
   const result = {};
   const eslint = await getEslint();
 
-  for (const [filename, content] of Object.entries(files)) {
+  for (const [filename, rawVal] of Object.entries(files)) {
+    const content = toText(rawVal, filename);
     const ext = path.extname(filename);
     const diagnostics = [];
-  let working = content;
-  let formatted = content;
-  let fixed = null;
-  let fixApplied = false;
+    let working = content;
+    let formatted = content;
+    let fixed = null;
+    let fixApplied = false;
     let ssrOk = false;
     let domOk = false;
 

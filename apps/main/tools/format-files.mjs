@@ -7,6 +7,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import fs from 'node:fs/promises';
 import prettier from 'prettier';
 import pluginSvelte from 'prettier-plugin-svelte';
+import { toText } from '../src/lib/utils/to-text.js';
 
 let pluginTailwind = null;
 try {
@@ -30,11 +31,12 @@ function pickParser(filename = '') {
   return 'babel';
 }
 
-async function formatOne(path, code) {
+async function formatOne(path, codeVal) {
+  const code = toText(codeVal, path);
   let resolved = null;
   try { resolved = await prettier.resolveConfig(path).catch(() => null); } catch (_e) { /* ignore */ }
   const parser = pickParser(path);
-  return prettier.format(code, { parser, plugins, ...(resolved || {}) });
+  return prettier.format(code, { parser, plugins, filepath: path, ...(resolved || {}) });
 }
 
 export async function formatFiles(files) {
@@ -44,12 +46,14 @@ export async function formatFiles(files) {
     Object.entries(files).map(async ([p, code]) => {
       try {
         const formatted = await formatOne(p, code);
+        const raw = toText(code, p);
         out[p] = formatted;
-        changes.push({ file: p, before: code.length, after: formatted.length, changed: formatted !== code });
+        changes.push({ file: p, before: raw.length, after: formatted.length, changed: formatted !== raw });
       } catch (e) {
         // En cas d'échec, on conserve le code original pour ne pas bloquer
-        out[p] = code;
-        changes.push({ file: p, before: code.length, after: code.length, changed: false, error: e.message });
+        const raw = (typeof code === 'string') ? code : (()=>{ try { return toText(code,p);} catch { return ''; } })();
+        out[p] = raw;
+        changes.push({ file: p, before: raw.length, after: raw.length, changed: false, error: e.message });
       }
     })
   );
