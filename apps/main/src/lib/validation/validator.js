@@ -49,91 +49,107 @@ export async function validateFiles(files) {
     let ssrOk = false;
     let domOk = false;
 
-    // ESLint (inclut plugin svelte via config) - auto-fix
-    if (eslint) {
-      try {
-        const lintResults = await eslint.lintText(working, { filePath: filename });
-        for (const lr of lintResults) {
-          if (lr.output && lr.output !== working) {
-            working = lr.output;
-            fixed = lr.output;
-            fixApplied = true;
-          }
-          if (lr.messages?.length) {
-            diagnostics.push(
-              ...lr.messages.map(m => ({
-                severity: mapSeverity(m.severity),
-                rule: m.ruleId || 'unknown',
-                message: m.message,
-                line: m.line,
-                column: m.column,
-                source: 'eslint'
-              }))
-            );
-          }
-        }
-      } catch (e) {
-        if (/Could not find config file/i.test(e.message)) {
-          // Fallback minimal inline config (évite l'erreur bloquante sur environnements sans fichier config ESLint)
-          try {
-            const fallback = new ESLint({
-              fix: true,
-              useFlatConfig: true,
-              overrideConfig: [
-                {
-                  files: ['**/*.{js,ts,svelte}'],
-                  ignores: ['dist','build','.svelte-kit','node_modules'],
-                  plugins: { 'svelte': await import('eslint-plugin-svelte') },
-                  languageOptions: {
-                    parser: (await import('svelte-eslint-parser')).default,
-                    parserOptions: { extraFileExtensions: ['.svelte'], ecmaVersion: 2022, sourceType: 'module' }
-                  },
-                  rules: {
-                    'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
-                    'no-undef': 'error'
-                  }
-                }
-              ]
-            });
-            const lintResults = await fallback.lintText(working, { filePath: filename });
-            for (const lr of lintResults) {
-              if (lr.output && lr.output !== working) {
-                working = lr.output;
-                fixed = lr.output;
-                fixApplied = true;
-              }
-              if (lr.messages?.length) {
-                diagnostics.push(...lr.messages.map(m => ({
+    // ESLint (skip pour JSON car on ne veut pas de bruit et ce n'est pas du code exécutable)
+    if (ext !== '.json') {
+      if (eslint) {
+        try {
+          const lintResults = await eslint.lintText(working, { filePath: filename });
+          for (const lr of lintResults) {
+            if (lr.output && lr.output !== working) {
+              working = lr.output;
+              fixed = lr.output;
+              fixApplied = true;
+            }
+            if (lr.messages?.length) {
+              diagnostics.push(
+                ...lr.messages.map(m => ({
                   severity: mapSeverity(m.severity),
                   rule: m.ruleId || 'unknown',
                   message: m.message,
                   line: m.line,
                   column: m.column,
-                  source: 'eslint-fallback'
-                })));
-              }
+                  source: 'eslint'
+                }))
+              );
             }
-            diagnostics.push({ severity: 'info', source: 'eslint', message: 'Fallback ESLint inline config utilisé.' });
-          } catch(fbErr){
-            diagnostics.push({ severity: 'error', source: 'eslint-fallback', message: 'Fallback échoué: '+fbErr.message });
           }
-        } else {
-          diagnostics.push({ severity: 'error', source: 'eslint', message: 'ESLint erreur: ' + e.message });
+        } catch (e) {
+          if (/Could not find config file/i.test(e.message)) {
+            try {
+              const sveltePlugin = await import('eslint-plugin-svelte');
+              const fallback = new ESLint({
+                fix: true,
+                overrideConfig: {
+                  overrides: [
+                    {
+                      files: ['**/*.{js,ts,svelte}'],
+                      excludedFiles: ['dist/**','build/**','.svelte-kit/**','node_modules/**'],
+                      plugins: ['svelte'],
+                      parser: (await import('svelte-eslint-parser')).default,
+                      parserOptions: { extraFileExtensions: ['.svelte'], ecmaVersion: 2022, sourceType: 'module' },
+                      rules: {
+                        'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+                        'no-undef': 'error'
+                      }
+                    }
+                  ]
+                },
+                plugins: { svelte: sveltePlugin }
+              });
+              const lintResults = await fallback.lintText(working, { filePath: filename });
+              for (const lr of lintResults) {
+                if (lr.output && lr.output !== working) {
+                  working = lr.output;
+                  fixed = lr.output;
+                  fixApplied = true;
+                }
+                if (lr.messages?.length) {
+                  diagnostics.push(...lr.messages.map(m => ({
+                    severity: mapSeverity(m.severity),
+                    rule: m.ruleId || 'unknown',
+                    message: m.message,
+                    line: m.line,
+                    column: m.column,
+                    source: 'eslint-fallback'
+                  })));
+                }
+              }
+              diagnostics.push({ severity: 'info', source: 'eslint', message: 'Fallback ESLint inline config utilisé.' });
+            } catch(fbErr){
+              diagnostics.push({ severity: 'error', source: 'eslint-fallback', message: 'Fallback échoué: '+fbErr.message });
+            }
+          } else {
+            diagnostics.push({ severity: 'error', source: 'eslint', message: 'ESLint erreur: ' + e.message });
+          }
         }
+      } else {
+        diagnostics.push({ severity: 'info', source: 'eslint', message: 'ESLint désactivé (init failed)' });
       }
-    } else {
-      diagnostics.push({ severity: 'info', source: 'eslint', message: 'ESLint désactivé (init failed)' });
     }
 
     // Prettier format (après auto-fix ESLint)
+    if (ext === '.json') {
+      // Validation JSON explicite
+      try {
+        JSON.parse(working);
+      } catch(parseErr) {
+        diagnostics.push({ severity: 'error', source: 'json-parse', message: 'JSON invalide: ' + parseErr.message });
+      }
+    }
     try {
-      formatted = await prettier.format(working, {
-        parser: ext === '.svelte' ? 'svelte' : 'babel',
-        plugins: [await import('prettier-plugin-svelte')]
-      });
+      let parser;
+      if (ext === '.svelte') parser = 'svelte';
+      else if (ext === '.json') parser = 'json';
+      else if (ext === '.ts') parser = 'typescript';
+      else parser = 'babel';
+      const prettierPlugins = [];
+      if (parser === 'svelte') {
+        prettierPlugins.push(await import('prettier-plugin-svelte'));
+      }
+      formatted = await prettier.format(working, { parser, plugins: prettierPlugins });
     } catch (e) {
       diagnostics.push({ severity: 'error', source: 'prettier', message: 'Formatage échoué: ' + e.message });
-      formatted = working; // fallback
+      formatted = working;
     }
 
     if (ext === '.svelte') {
