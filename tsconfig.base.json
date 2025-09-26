@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "NodeNext",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "$tools/*": ["apps/main/tools/*"],
+      "@constructor-v3/config": ["packages/config/src/index.js"],
+      "@constructor-v3/config/*": ["packages/config/src/*"],
+      "@constructor-v3/ui/*": ["packages/ui/src/*"],
+      "@constructor-v3/ai/*": ["packages/ai/src/*"],
+      "@constructor-v3/db/*": ["packages/db/src/*"],
+      "@constructor-v3/editor/*": ["packages/editor/src/*"]
+    }
+  }
+}

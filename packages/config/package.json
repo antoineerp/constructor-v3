@@ -1,0 +1,13 @@
+{
+  "name": "@constructor-v3/config",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./eslint": "./src/eslint.config.js",
+    "./prettier": "./src/prettier.config.cjs",
+    "./tailwind": "./src/tailwind.config.cjs"
+  }
+}
