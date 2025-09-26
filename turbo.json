@@ -21,5 +21,14 @@
     "preview": {
       "dependsOn": ["build"]
     }
+    ,
+    "storybook": {
+      "cache": false,
+      "persistent": true
+    },
+    "build:storybook": {
+      "dependsOn": [],
+      "outputs": ["storybook-static/**"]
+    }
   }
 }

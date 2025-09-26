@@ -5,9 +5,12 @@ import { supabase as clientSupabase } from '$lib/supabase.js';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { summarizeCatalog, componentsCatalog, selectComponentsForBlueprint } from '$lib/catalog/components.js';
-import { buildGlobalGenerationPrompt, buildGlobalGenerationPromptAsync } from '$lib/prompt/promptBuilders.js';
+import { summarizeCatalog, selectComponentsForBlueprint } from '$lib/catalog/components.js';
+import { buildGlobalGenerationPromptAsync } from '$lib/prompt/promptBuilders.js';
 import { validateAndFix, unifyPalette, addAccessibilityFixes } from '$lib/validator/svelteValidator.js';
 import { validateFiles } from '$lib/validation/validator.js';
+import { upsertSnippet } from '$lib/embeddings';
+import { runSvelteCheckSnippet } from '$lib/validation/svelteCheckRunner.js';
 
 // Orchestrateur: génère blueprint et/ou code application selon état projet.
 // Body: { query?: string, projectId?: string, regenerateFile?: string }
@@ -15,10 +18,11 @@ import { validateFiles } from '$lib/validation/validator.js';
 // Réponses:
 //  - Génération initiale: { success, blueprint, files, project }
 //  - Régénération fichier: { success, regenerated: filename, fileContent }
-export async function POST({ request }) {
+export async function POST(event) {
+  const { request, locals } = event;
   try {
     const body = await request.json();
-  const { query, projectId, regenerateFile, simpleMode, forceSinglePass, generationProfile = 'safe', provider='openai', chatContext = [] } = body;
+  const { query, projectId, regenerateFile, simpleMode, generationProfile = 'safe', provider='openai', chatContext = [] } = body;
     // Récupération token Supabase (passé côté client via Authorization: Bearer <access_token>)
     const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
     let userId = null;
@@ -49,6 +53,10 @@ export async function POST({ request }) {
         if (userId) queryBuilder.eq('user_id', userId);
         const { data, error } = await queryBuilder.single();
         if (error) throw error;
+        // Si hook a identifié user et projet a un owner explicite, vérifier
+        if(locals.user && data.owner_id && data.owner_id !== locals.user.id){
+          return json({ success:false, error:'Accès refusé (owner mismatch)' }, { status:403 });
+        }
         project = data;
       } catch(dbErr){
         if(/relation .* does not exist/i.test(dbErr.message||'')){
@@ -261,6 +269,7 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
           status: 'draft',
           user_id: userId
         };
+        if(locals.user?.id) insertData.owner_id = locals.user.id;
         const { data:created, error:insErr } = await clientSupabase.from('projects').insert(insertData).select().single();
         if (insErr) throw insErr;
         project = created;
@@ -377,9 +386,44 @@ Ancienne version:
   let fullValidation = null;
   try {
     fullValidation = await validateFiles(files);
+    // Embeddings: upsert chaque fichier validé OK
+    for(const [filename, val] of Object.entries(fullValidation)){
+      // Svelte-check: fusionne diagnostics
+      if(filename.endsWith('.svelte')){
+        try {
+          const sc = await runSvelteCheckSnippet(filename, val.formatted || val.original, { timeoutMs: 4000 });
+          if(sc.diagnostics?.length){
+            const seen = new Set(val.diagnostics.map(d=>d.source+'|'+d.message+'|'+d.line));
+            for(const d of sc.diagnostics){
+              const key = d.source+'|'+d.message+'|'+d.line;
+              if(!seen.has(key)){ val.diagnostics.push(d); seen.add(key); }
+            }
+          }
+        } catch(e){ /* ignore */ }
+      }
+      if(val.diagnostics.filter(d=>d.severity==='error').length===0){
+        if(process.env.DATABASE_URL){
+          try {
+            await upsertSnippet({ path: filename, content: val.formatted || val.original, kind: filename.endsWith('.svelte')?'component':'other', language: filename.endsWith('.svelte')?'svelte':'js' });
+          } catch(e){ /* ignore embeddings failure */ }
+        }
+      }
+    }
   } catch(e){
     console.warn('validateFiles global failed', e.message);
   }
+  try {
+    if(!ephemeral){
+      await clientSupabase.from('generation_logs').insert({
+        user_id: project?.owner_id || project?.user_id || userId || null,
+        project_id: project?.id || null,
+        type: 'generation',
+        pass_count: 1,
+        duration_ms: null,
+        meta: { file_count: Object.keys(files).length, simpleMode: !!simpleMode }
+      });
+    }
+  } catch(e){ /* ignore logs errors */ }
   return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues, validation: fullValidation, singlePass: Object.keys(files).length>0, capabilities, compileResults });
   } catch (e) {
     console.error('site/generate error', e);

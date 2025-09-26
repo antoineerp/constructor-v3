@@ -1,25 +1,40 @@
 import crypto from 'crypto';
+import { Pool } from 'pg';
+import { embedOpenAI } from './openai.js';
 
-// Placeholder embedder: to be replaced by real provider (OpenAI / local model)
-// Return a Float32Array of fixed length for now (mock) to unblock plumbing.
-const DIM = 16; // keep tiny until real model integrated
-
-function fakeEmbed(text) {
-  const hash = crypto.createHash('sha256').update(text).digest();
-  const arr = new Float32Array(DIM);
-  for (let i = 0; i < DIM; i++) arr[i] = hash[i] / 255;
-  return arr;
-}
-
-export function embed(text) {
-  // Later: switch on process.env.EMBEDDINGS_PROVIDER
-  return fakeEmbed(text);
+let poolInstance;
+function getPool(){
+  if(!poolInstance){
+    const cs = process.env.DATABASE_URL;
+    if(!cs) throw new Error('DATABASE_URL manquant pour embeddings');
+    poolInstance = new Pool({ connectionString: cs, max: 3 });
+  }
+  return poolInstance;
 }
 
 export function fingerprint(content) {
   return crypto.createHash('sha256').update(content).digest('hex');
 }
 
-export function serializeVector(vec) {
-  return Array.from(vec);
+export async function upsertSnippet({ path, content, kind, language }) {
+  const hash = fingerprint(content);
+  const pool = getPool();
+  const exists = await pool.query('SELECT 1 FROM code_snippets WHERE hash=$1', [hash]);
+  if (exists.rowCount) return { skipped: true };
+  const embedding = await embedOpenAI(content);
+  await pool.query(
+    'INSERT INTO code_snippets (path, hash, kind, language, content, embedding, tokens) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [path, hash, kind, language, content, embedding, content.length]
+  );
+  return { inserted: true };
+}
+
+export async function semanticSearch(query, k = 5) {
+  const pool = getPool();
+  const emb = await embedOpenAI(query);
+  const { rows } = await pool.query(
+    'SELECT path, kind, content, 1 - (embedding <=> $1) AS score FROM code_snippets ORDER BY embedding <=> $1 LIMIT $2',
+    [emb, k]
+  );
+  return rows;
 }

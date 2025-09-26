@@ -1,8 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { embed, fingerprint, serializeVector } from '$lib/embeddings';
-
-// In-memory store placeholder. Replace with Postgres + pgvector integration.
-const memory = new Map(); // hash -> record
+import { upsertSnippet, fingerprint } from '$lib/embeddings';
 
 export async function POST({ request }) {
   const body = await request.json();
@@ -10,11 +7,11 @@ export async function POST({ request }) {
   if (!path || !content) {
     return json({ error: 'path and content required' }, { status: 400 });
   }
-  const hash = fingerprint(content);
-  if (memory.has(hash)) {
-    return json({ skipped: true, hash });
+  try {
+    const hash = fingerprint(content);
+    const res = await upsertSnippet({ path, content, kind, language });
+    return json({ hash, ...res });
+  } catch (e) {
+    return json({ error: e.message }, { status: 500 });
   }
-  const vector = serializeVector(embed(content));
-  memory.set(hash, { path, kind, language, content, vector, created_at: new Date().toISOString() });
-  return json({ inserted: true, hash, dim: vector.length });
 }

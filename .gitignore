@@ -33,6 +33,10 @@ apps/*/.svelte-kit
 .vercel
 apps/*/.vercel
 
+# Storybook build output
+storybook-static
+apps/*/storybook-static
+
 
 # Debug
 npm-debug.log*

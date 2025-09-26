@@ -16,7 +16,10 @@
     "init-templates": "./scripts/init-templates.sh",
     "test": "turbo run test",
     "dev:temp-app": "node ./scripts/dev-temp-app.js",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "ci": "pnpm lint && pnpm --filter=main check && pnpm --filter=main test && pnpm --filter=main build",
+    "ci:storybook": "pnpm --filter=main build:storybook",
+    "lint:staged": "eslint --fix --ext .js,.ts,.svelte apps/main/src apps/admin/src apps/preview/src packages/ui/src || true"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
@@ -28,9 +31,16 @@
     "recast": "^0.23.9"
   },
   "lint-staged": {
-    "*.{js,ts,svelte,css,md}": [
+    "apps/*/src/**/*.{js,ts,svelte}": [
       "prettier --write",
-      "eslint --fix"
+      "pnpm lint:staged"
+    ],
+    "packages/*/src/**/*.{js,ts,svelte}": [
+      "prettier --write",
+      "pnpm lint:staged"
+    ],
+    "*.{md,css}": [
+      "prettier --write"
     ]
   },
   "packageManager": "pnpm@9.0.0",

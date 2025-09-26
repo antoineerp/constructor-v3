@@ -8,11 +8,19 @@ Body: { projectId, filename, intent?, diagnostics?[] }
 Optionnel: code (si version locale non encore persistée) sinon on lit project_files.
 Retour: { success, patchedCode, validation }
 */
-export async function POST({ request }) {
+export async function POST(event) {
+  const { request, locals } = event;
   try {
     const body = await request.json();
-    const { projectId, filename, code: overrideCode, diagnostics = [], intent } = body || {};
+    const { projectId, filename, code: overrideCode, diagnostics = [] } = body || {};
     if(!projectId || !filename) return json({ success:false, error:'projectId & filename requis' }, { status:400 });
+    // Ownership rapide
+    try {
+      const { data:proj } = await clientSupabase.from('projects').select('id, owner_id').eq('id', projectId).maybeSingle();
+      if(proj && proj.owner_id && locals.user && proj.owner_id !== locals.user.id){
+        return json({ success:false, error:'Accès refusé (owner mismatch)' }, { status:403 });
+      }
+    } catch { /* ignore */ }
 
     // Récupération du fichier existant
     let existingContent = overrideCode;

@@ -13,7 +13,7 @@
     "gen:validate": "npm run format && npm run lint && npm run check",
     "test": "vitest run",
     "test:ui": "vitest",
-    "storybook": "storybook dev -p 6006",
+  "storybook": "storybook dev -p 6006 --no-open",
     "build:storybook": "storybook build"
   },
   "devDependencies": {
@@ -52,7 +52,8 @@
     "jszip": "^3.10.1",
     "monaco-editor": "^0.52.0",
     "openai": "^4.67.0",
-    "socket.io-client": "^4.8.0"
+    "socket.io-client": "^4.8.0",
+    "pg": "^8.13.1"
   },
   "type": "module"
 }

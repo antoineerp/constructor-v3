@@ -158,6 +158,39 @@ les couleurs pour du bleu ?"
 ### Frontend
 - **SvelteKit 2.5+** - Framework principal avec SSR
 - **TailwindCSS** - Styling utilitaire et responsive
+ - **Storybook** - Documentation interactive des composants (port 6006)
+
+### Embeddings & Réutilisation de code
+Système d'indexation des fichiers validés (pgvector) :
+1. Chaque fichier sans erreurs (ESLint + Prettier + compile + svelte-check) déclenche un upsert dans `code_snippets`.
+2. Recherche sémantique via `/api/snippets/search` (cosine).
+3. Modèle embeddings par défaut: `text-embedding-3-small` (modifiable via `EMBEDDINGS_MODEL`).
+
+Table (extrait) :
+```
+id uuid PK | path text | hash unique | kind text | language text | embedding vector(1536) | content text | summary text
+```
+
+### Auth & RLS
+Hook `hooks.server.js` attache `locals.user` si header `Authorization: Bearer <token>` Supabase valide.
+Policies RLS proposées (fichier `apps/main/RLS_AND_LOGS.sql`).
+
+### Logging génération / réparation
+Table `generation_logs` (insertion lors de `site/generate` et auto-repair) :
+```
+type: generation|auto-repair, pass_count, meta(JSON), duration_ms
+```
+
+### CI / Qualité
+Script `pnpm ci` : lint + check + test + build.
+Script `pnpm ci:storybook` : build statique Storybook.
+
+### Variables d’environnement Storybook
+Les variables `PUBLIC_*` sont injectées dans Storybook via `viteFinal` (fichier `.storybook/main.js`).
+
+### Sécurité clés
+Ne jamais exposer `SUPABASE_SERVICE_ROLE_KEY` côté client (non utilisée par le code client). Vérifier avant déploiement.
+
 - **Monaco Editor** - Éditeur de code professionnel
 - **Socket.io** - Collaboration temps réel
 - **Vite** - Build tool ultra-rapide

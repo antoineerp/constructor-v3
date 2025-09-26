@@ -1,0 +1,13 @@
+# Ignorer les artefacts générés / build pour ESLint
+# (Empêche le hook pre-commit de traiter du code transitoire ou volumineux)
+.svelte-kit
+**/.svelte-kit/**
+apps/*/.svelte-kit
+storybook-static
+apps/*/storybook-static
+build
+dist
+coverage
+node_modules
+# Logs & divers
+*.log

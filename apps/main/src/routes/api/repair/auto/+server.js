@@ -16,7 +16,8 @@ Body: {
 }
 Retour: { success, filename, passes, fixedCode, finalDiagnostics, source, memoryApplied }
 */
-export async function POST({ request }) {
+export async function POST(event) {
+  const { request, locals } = event;
   try {
     const body = await request.json();
     const { projectId, filename, code: providedCode, maxPasses = 3, allowCatalog = true } = body || {};
@@ -28,6 +29,9 @@ export async function POST({ request }) {
     if(projectId){
       const { data:projRow } = await clientSupabase.from('projects').select('*').eq('id', projectId).maybeSingle();
       project = projRow || null;
+      if(project && project.owner_id && locals.user && project.owner_id !== locals.user.id){
+        return json({ success:false, error:'Accès refusé (owner mismatch)' }, { status:403 });
+      }
       if(!baseCode){
         const { data:fileRow } = await clientSupabase.from('project_files').select('*').eq('project_id', projectId).eq('filename', filename).maybeSingle();
         baseCode = fileRow?.content || '';
@@ -79,7 +83,7 @@ Diagnostics actuels (pass ${i+1}/${maxPasses}):\n${diagText}\n\nCode actuel:\n${
         if(notes.length){
           working = transformed;
         }
-      } catch(e){ /* silencieux */ }
+  } catch { /* silencieux */ }
       // Revalider avant prochaine boucle
       const postVal = await validateFiles({ [filename]: working });
       let remaining = postVal[filename].diagnostics.filter(d=> d.severity==='error');
@@ -96,7 +100,7 @@ Diagnostics actuels (pass ${i+1}/${maxPasses}):\n${diagText}\n\nCode actuel:\n${
             }
           }
         }
-      } catch(e){ /* silencieux */ }
+  } catch { /* silencieux */ }
       lastDiagnostics = remaining;
       if(remaining.length===0) break;
 
@@ -121,14 +125,25 @@ Diagnostics actuels (pass ${i+1}/${maxPasses}):\n${diagText}\n\nCode actuel:\n${
         const solved = lastDiagnostics.length===0 ? (memoryForFile.concat(['pass:'+passes+' ok'])).slice(-12) : memoryForFile.concat(['pass:'+passes+' partial']).slice(-12);
         const newMemory = { ...repairMemory, [filename]: solved };
         await clientSupabase.from('projects').update({ code_generated: { ...(project?.code_generated||{}), [filename]: working }, repair_memory: newMemory }).eq('id', projectId);
-      } catch(e){
-        console.warn('Persistance auto repair échouée', e.message);
-      }
+      } catch { /* ignore persistence error */ }
     }
 
+    try {
+      if(projectId){
+        await clientSupabase.from('generation_logs').insert({
+          user_id: project?.owner_id || null,
+          project_id: projectId,
+          type: 'auto-repair',
+          filename,
+          pass_count: passes,
+          duration_ms: null,
+          meta: { final_errors: lastDiagnostics.length, source }
+        });
+      }
+  } catch { /* ignore log */ }
     return json({ success:true, filename, passes, fixedCode: working, finalDiagnostics: lastDiagnostics, source, memoryApplied });
-  } catch(e){
-    console.error('auto repair error', e);
-    return json({ success:false, error:e.message||'Erreur auto-repair' }, { status:500 });
+  } catch(err){
+    console.error('auto repair error', err);
+    return json({ success:false, error:err.message||'Erreur auto-repair' }, { status:500 });
   }
 }

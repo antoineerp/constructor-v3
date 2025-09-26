@@ -88,6 +88,7 @@ declare module '$env/static/private' {
 	export const npm_package_dependencies_chartjs_adapter_date_fns: string;
 	export const npm_package_devDependencies__types_eslint: string;
 	export const INIT_CWD: string;
+	export const NODE_ENV: string;
 }
 
 /**
@@ -179,6 +180,7 @@ declare module '$env/dynamic/private' {
 		npm_package_dependencies_chartjs_adapter_date_fns: string;
 		npm_package_devDependencies__types_eslint: string;
 		INIT_CWD: string;
+		NODE_ENV: string;
 		[key: `PUBLIC_${string}`]: undefined;
 		[key: `${string}`]: string | undefined;
 	}
