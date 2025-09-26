@@ -200,7 +200,18 @@
 								<span class="text-[10px] px-2 py-0.5 rounded bg-purple-100 text-purple-700">{comp.tags.join(', ')}</span>
 							</div>
 							<p class="text-gray-600 text-xs mb-3 leading-relaxed line-clamp-3">{comp.purpose}</p>
-							<code class="block text-[10px] bg-gray-900 text-gray-100 rounded p-2 overflow-auto whitespace-pre-wrap max-h-40">{comp.filename}</code>
+							<div class="mt-auto">
+								<details class="group">
+									<summary class="cursor-pointer text-[11px] text-indigo-600 hover:underline flex items-center gap-1"><i class="fas fa-code"></i>Voir code</summary>
+									<div class="mt-2 space-y-1">
+										<div class="flex items-center justify-between text-[10px] text-gray-500">
+											<span>{comp.filename}</span>
+											<button type="button" class="text-indigo-600 hover:underline" on:click={() => navigator.clipboard.writeText(comp.code)}>Copier</button>
+										</div>
+										<pre class="bg-gray-900 text-[10px] text-gray-100 p-2 rounded overflow-auto max-h-48 whitespace-pre">{comp.code}</pre>
+									</div>
+								</details>
+							</div>
 						</div>
 					{:else}
 						<p class="text-gray-500 col-span-full text-sm">Aucun composant.</p>
@@ -231,9 +242,16 @@
 								<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
 									{#each templates as t}
 										<div class="border rounded p-3 bg-gradient-to-br from-gray-50 to-white flex flex-col text-xs">
-											<h3 class="font-semibold text-gray-800 mb-1">{t.name}</h3>
+											<h3 class="font-semibold text-gray-800 mb-1 flex items-center gap-2"><i class="fas fa-layer-group text-green-500"></i>{t.name}</h3>
 											<p class="text-gray-600 line-clamp-3 mb-2">{t.description}</p>
-											<span class="mt-auto text-[10px] text-gray-400">#{t.id} · {new Date(t.created_at).toLocaleDateString()}</span>
+											<details class="mt-auto group">
+												<summary class="cursor-pointer text-[11px] text-green-600 hover:underline flex items-center gap-1"><i class="fas fa-eye"></i> Blueprint</summary>
+												<div class="mt-2 space-y-1">
+													<button class="text-[10px] text-green-700 hover:underline" type="button" on:click={() => navigator.clipboard.writeText(JSON.stringify(t.blueprint_json||{}, null, 2))}>Copier JSON</button>
+													<pre class="bg-gray-900 text-[10px] text-gray-100 p-2 rounded overflow-auto max-h-56 whitespace-pre">{JSON.stringify(t.blueprint_json||{}, null, 2)}</pre>
+												</div>
+											</details>
+											<span class="mt-2 text-[10px] text-gray-400">#{t.id} · {new Date(t.created_at).toLocaleDateString()}</span>
 										</div>
 									{/each}
 								</div>
