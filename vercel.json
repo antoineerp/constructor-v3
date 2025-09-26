@@ -1,7 +1,9 @@
 {
   "version": 2,
-  "buildCommand": "cd apps/main && npm install && npm run build",
-  "outputDirectory": "apps/main/.svelte-kit/output/client",
   "framework": "sveltekit",
-  "installCommand": "cd apps/main && npm install"
+  "installCommand": "pnpm install",
+  "buildCommand": "pnpm --filter=main build",
+  "environment": {
+    "SK_APP_VARIANT": "production"
+  }
 }

@@ -16,7 +16,7 @@ import { validateAndFix, unifyPalette, addAccessibilityFixes } from '$lib/valida
 export async function POST({ request }) {
   try {
     const body = await request.json();
-  const { query, projectId, regenerateFile, simpleMode, forceSinglePass, generationProfile = 'safe' } = body;
+  const { query, projectId, regenerateFile, simpleMode, forceSinglePass, generationProfile = 'safe', provider='openai' } = body;
     // Récupération token Supabase (passé côté client via Authorization: Bearer <access_token>)
     const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
     let userId = null;
@@ -80,7 +80,7 @@ export async function POST({ request }) {
       // Intent expansion (Phase C) avant blueprint pour enrichir le contexte
       let intentExpansion = null;
       try { intentExpansion = await openaiService.generateIntentExpansion(effectiveQuery); } catch(e){ console.warn('Intent expansion failed', e.message); }
-      blueprint = await openaiService.generateBlueprint(intentExpansion?.enriched_query || effectiveQuery);
+  blueprint = await openaiService.generateBlueprint(intentExpansion?.enriched_query || effectiveQuery, { provider });
       if(intentExpansion) blueprint.intent_expansion = intentExpansion;
     }
 
@@ -94,7 +94,7 @@ export async function POST({ request }) {
     if(!simpleMode){
       try {
   const { prompt: globalPrompt } = await buildGlobalGenerationPromptAsync(blueprint, selected, { generationProfile });
-        const singleResult = await openaiService.generateApplication(globalPrompt, { model: 'gpt-4o-mini', maxFiles: 30 });
+    const singleResult = await openaiService.generateApplication(globalPrompt, { model: 'gpt-4o-mini', maxFiles: 30, provider });
         // heuristique: si on a au moins 3 fichiers dont +page.svelte ou +layout.svelte, on adopte
         const keys = Object.keys(singleResult||{});
         const hasCore = keys.some(k => k.endsWith('+page.svelte'));
@@ -108,7 +108,7 @@ export async function POST({ request }) {
 
     if(simpleMode){
   const appPrompt = buildAppPrompt(blueprint, { simpleMode: true, generationProfile });
-      files = await openaiService.generateApplication(appPrompt, { model: 'gpt-4o-mini', maxFiles: 5 });
+    files = await openaiService.generateApplication(appPrompt, { model: 'gpt-4o-mini', maxFiles: 5, provider });
     } else if(Object.keys(files).length === 0) {
       // Ancien mode orchestré seulement si single-pass non satisfaisant
       const perFile = blueprint?.recommended_prompts?.per_file || [];
@@ -118,7 +118,7 @@ export async function POST({ request }) {
           if(!filename || !filePrompt) continue;
           try {
             const context = buildPerFilePrompt({ blueprint, filePrompt, filename, already: files, catalogSummary });
-            const result = await openaiService.generateApplication(context, { model: 'gpt-4o-mini', maxFiles: 1 });
+      const result = await openaiService.generateApplication(context, { model: 'gpt-4o-mini', maxFiles: 1, provider });
             // On attend exactement 1 clé (filename attendu). Sinon on tente de récupérer la première.
             if(result[filename]) files[filename] = result[filename];
             else {
@@ -139,7 +139,7 @@ export async function POST({ request }) {
       // Fallback: si rien généré, utiliser ancien mode global
       if(Object.keys(files).length === 0){
   const fallbackPrompt = buildAppPrompt(blueprint, { simpleMode: false, generationProfile });
-        files = await openaiService.generateApplication(fallbackPrompt, { model: 'gpt-4o-mini', maxFiles: 20 });
+    files = await openaiService.generateApplication(fallbackPrompt, { model: 'gpt-4o-mini', maxFiles: 20, provider });
       }
       // Injecter composants validés manquants (si non générés) en ajoutant leur code brut
       for(const comp of selected){

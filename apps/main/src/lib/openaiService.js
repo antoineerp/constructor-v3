@@ -4,7 +4,8 @@ import { env } from '$env/dynamic/private';
 
 export class OpenAIService {
   constructor() {
-  this.apiKey = env.OPENAI_API_KEY;
+    this.apiKey = env.OPENAI_API_KEY;
+    this.claudeKey = env.ANTHROPIC_API_KEY || env.CLAUDE_API_KEY; // support deux noms
   }
 
   async generateEmbedding(input, { model = 'text-embedding-3-small' } = {}) {
@@ -23,10 +24,32 @@ export class OpenAIService {
     return data.data?.[0]?.embedding || [];
   }
 
-  async generateComponent(prompt, type = 'generic', { model = 'gpt-4o-mini' } = {}) {
-    if (!this.apiKey) {
-      throw new Error('Clé API OpenAI manquante');
+  async generateComponent(prompt, type = 'generic', { model = 'gpt-4o-mini', provider='openai' } = {}) {
+    if (provider === 'claude') {
+      if(!this.claudeKey) throw new Error('Clé API Claude manquante');
+      const systemPrompt = `Tu es un expert Svelte/Tailwind. Génère UNIQUEMENT le markup HTML Tailwind d'un composant ${type}. Pas de <script>, pas de markdown.`;
+      const userPrompt = `Description: ${prompt}`;
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method:'POST',
+        headers:{
+          'Content-Type':'application/json',
+          'x-api-key': this.claudeKey,
+          'anthropic-version':'2023-06-01'
+        },
+        body: JSON.stringify({
+          model: env.CLAUDE_MODEL || 'claude-3-5-sonnet-20240620',
+          max_tokens: 800,
+          system: systemPrompt,
+          messages:[{ role:'user', content: userPrompt }]
+        })
+      });
+      if(!resp.ok){ const t= await resp.text(); throw new Error('Erreur Claude: '+t); }
+      const data = await resp.json();
+      const contentBlock = data.content?.[0]?.text?.trim() || '';
+      if(!contentBlock) throw new Error('Sortie vide Claude');
+      return contentBlock.replace(/```(html|svelte)?\n?/g,'').replace(/```$/,'').trim();
     }
+    if (!this.apiKey) throw new Error('Clé API OpenAI manquante');
 
     const systemPrompt = `Tu es un expert en développement Svelte. Génère UNIQUEMENT le code HTML/CSS du composant demandé, sans balises <script> ni imports. Le composant doit être responsive avec TailwindCSS et fonctionnel.
 
@@ -92,7 +115,23 @@ Types de composants supportés :
     }
   }
 
-  async generateApplication(prompt, { model = 'gpt-4o-mini', maxFiles = 20 } = {}) {
+  async generateApplication(prompt, { model = 'gpt-4o-mini', maxFiles = 20, provider='openai' } = {}) {
+    if(provider==='claude'){
+      if(!this.claudeKey) throw new Error('Clé API Claude manquante');
+      const system = `Tu génères une application SvelteKit. Retourne UNIQUEMENT JSON objet { "filename":"CONTENU" }. Max ${maxFiles} fichiers.`;
+      const user = prompt;
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json','x-api-key':this.claudeKey,'anthropic-version':'2023-06-01' },
+        body: JSON.stringify({ model: env.CLAUDE_MODEL || 'claude-3-5-sonnet-20240620', max_tokens: 3000, system, messages:[{role:'user', content:user}] })
+      });
+      if(!resp.ok){ const t = await resp.text(); throw new Error('Erreur Claude app: '+t); }
+      const data = await resp.json();
+      let raw = data.content?.map(c=> c.text).join('\n')?.trim() || '';
+      raw = raw.replace(/^```json\n?/i,'').replace(/```$/,'').trim();
+      let parsed; try { parsed = JSON.parse(raw); } catch(e){ throw new Error('JSON invalide Claude: '+e.message); }
+      return parsed;
+    }
     if (!this.apiKey) throw new Error('Clé API OpenAI manquante');
   const system = `Tu es un assistant qui génère une application SvelteKit modulaire.
 Retourne STRICTEMENT un objet JSON (aucun texte hors JSON) où chaque clé est un nom de fichier (chemins relatifs) et chaque valeur son contenu COMPLET.
@@ -131,7 +170,18 @@ Contraintes:
     return parsed;
   }
 
-  async generateBlueprint(query, { model = 'gpt-4o-mini' } = {}) {
+  async generateBlueprint(query, { model = 'gpt-4o-mini', provider='openai' } = {}) {
+    if(provider==='claude'){
+      if(!this.claudeKey) throw new Error('Clé API Claude manquante');
+      const system = `Blueprint SvelteKit JSON strict (voir structure). Aucun texte hors JSON.`;
+      const user = query;
+      const resp = await fetch('https://api.anthropic.com/v1/messages', { method:'POST', headers:{'Content-Type':'application/json','x-api-key':this.claudeKey,'anthropic-version':'2023-06-01'}, body: JSON.stringify({ model: env.CLAUDE_MODEL || 'claude-3-5-sonnet-20240620', max_tokens: 1800, system, messages:[{role:'user', content:user}] }) });
+      if(!resp.ok){ const t= await resp.text(); throw new Error('Erreur Claude blueprint: '+t); }
+      const data = await resp.json();
+      let raw = data.content?.map(c=> c.text).join('\n').trim();
+      raw = raw.replace(/^```json\n?/i,'').replace(/```$/,'').trim();
+      try { return JSON.parse(raw); } catch(e){ throw new Error('JSON blueprint invalide Claude: '+e.message); }
+    }
     if(!this.apiKey) throw new Error('Clé API OpenAI manquante');
     const system = `Tu es un architecte logiciel spécialisé en SvelteKit, Tailwind et génération de sites (blog, e-commerce, portfolio, SaaS, documentation).
 Reçois une requête utilisateur courte (ex: "blog sur les motos") et PRODUIS UNIQUEMENT un JSON (pas de markdown) détaillant un blueprint.
@@ -199,7 +249,18 @@ SI la requête est ambiguë: fais des hypothèses raisonnables et note-les discr
     }
   }
 
-  async generateIntentExpansion(query, { model = 'gpt-4o-mini' } = {}) {
+  async generateIntentExpansion(query, { model = 'gpt-4o-mini', provider='openai' } = {}) {
+    if(provider==='claude'){
+      if(!this.claudeKey) throw new Error('Clé API Claude manquante');
+      const system = `Expansion d'intention JSON strict.`;
+      const user = query;
+      const resp = await fetch('https://api.anthropic.com/v1/messages', { method:'POST', headers:{'Content-Type':'application/json','x-api-key':this.claudeKey,'anthropic-version':'2023-06-01'}, body: JSON.stringify({ model: env.CLAUDE_MODEL || 'claude-3-5-sonnet-20240620', max_tokens: 600, system, messages:[{role:'user', content:user}] }) });
+      if(!resp.ok){ const t= await resp.text(); throw new Error('Erreur Claude expansion: '+t); }
+      const data = await resp.json();
+      let raw = data.content?.map(c=> c.text).join('\n').trim();
+      raw = raw.replace(/^```json\n?/i,'').replace(/```$/,'').trim();
+      try { return JSON.parse(raw); } catch(e){ throw new Error('JSON expansion invalide Claude: '+e.message); }
+    }
     if(!this.apiKey) throw new Error('Clé API OpenAI manquante');
     const system = `Tu es un assistant produit. Reçois une requête brute utilisateur courte et produis UNIQUEMENT un JSON enrichi.
 Format JSON strict:

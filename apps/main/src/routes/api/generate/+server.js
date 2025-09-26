@@ -3,13 +3,13 @@ import { openaiService } from '$lib/openaiService.js';
 
 export async function POST({ request }) {
   try {
-    const { prompt, type } = await request.json();
+  const { prompt, type, provider='openai' } = await request.json();
 
     if (!prompt || !prompt.trim()) {
       return json({ error: 'Prompt requis' }, { status: 400 });
     }
 
-    const componentCode = await openaiService.generateComponent(prompt, type);
+  const componentCode = await openaiService.generateComponent(prompt, type, { provider });
 
     return json({ 
       success: true, 

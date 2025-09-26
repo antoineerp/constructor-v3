@@ -7,6 +7,10 @@
   import { supabase } from '$lib/supabase.js';
   
   let activeTab = 'dashboard';
+  let aiProviders = [];
+  async function loadAIStatus(){
+    try { const r = await fetch('/api/ai/status'); const j = await r.json(); aiProviders = j.providers || j.data || []; } catch(e){ aiProviders=[{id:'error', label:'Erreur', status:e.message}]; }
+  }
   let stats = {
     totalProjects: 0,
     totalPrompts: 0,
@@ -27,6 +31,7 @@
   
   onMount(async () => {
     await loadDashboardData();
+    await loadAIStatus();
   });
   
   async function loadDashboardData() {
@@ -186,6 +191,13 @@
           <i class="fas fa-puzzle-piece mr-2"></i>
           Composants ({stats.totalComponents})
         </button>
+        <button
+          class="py-4 px-1 border-b-2 font-medium text-sm {activeTab === 'ai' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+          on:click={() => { activeTab = 'ai'; loadAIStatus(); }}
+        >
+          <i class="fas fa-robot mr-2"></i>
+          IA
+        </button>
       </nav>
     </div>
   </div>
@@ -285,6 +297,29 @@
           </div>
         </Card>
       </div>
+    {/if}
+
+    {#if activeTab === 'ai'}
+      <Card title="Statut des Fournisseurs IA" subtitle="Clés détectées côté serveur">
+        <div class="space-y-3">
+          {#each aiProviders as p}
+            <div class="flex items-center justify-between p-3 rounded border bg-white">
+              <div class="flex items-center gap-3">
+                <span class="w-8 h-8 rounded bg-gray-100 grid place-items-center text-gray-600"><i class="fas fa-microchip"></i></span>
+                <div>
+                  <p class="font-medium text-gray-900">{p.label || p.id}</p>
+                  <p class="text-xs text-gray-500">ID: {p.id}</p>
+                </div>
+              </div>
+              <span class="text-xs px-2 py-1 rounded-full {p.status==='connected' ? 'bg-green-100 text-green-700':'bg-red-100 text-red-700'}">{p.status}</span>
+            </div>
+          {/each}
+          {#if aiProviders.length === 0}
+            <p class="text-sm text-gray-500">Aucun provider détecté.</p>
+          {/if}
+          <div class="text-xs text-gray-500 mt-4">Actualisé manuellement à chaque ouverture de l'onglet.</div>
+        </div>
+      </Card>
     {/if}
     
     <!-- Gestion des Projets -->
