@@ -292,6 +292,7 @@
 <svelte:head>
   <title>Constructor v3 - Générateur IA OpenAI</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 </svelte:head>
 
 <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
@@ -532,6 +533,17 @@
               <span class="text-xs text-blue-600 flex items-center gap-1"><i class="fas fa-spinner fa-spin"></i> Génération...</span>
             {/if}
           </div>
+          {#if !siteProjectId && siteFiles && siteBlueprint}
+            <div class="mx-5 mt-3 mb-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs flex items-start gap-2">
+              <i class="fas fa-user-lock mt-0.5"></i>
+              <div>
+                <strong>Mode éphémère:</strong> connecte-toi pour sauvegarder et régénérer fichier par fichier.
+                <div class="mt-1">
+                  <a href="/auth" class="underline font-medium text-amber-800 hover:text-amber-900">Se connecter / créer un compte →</a>
+                </div>
+              </div>
+            </div>
+          {/if}
           <div class="flex-1 overflow-y-auto p-4 space-y-4">
             {#if siteMessages.length === 0}
               <div class="text-center text-gray-500 text-sm mt-20">
@@ -607,12 +619,12 @@
                   <div class="flex-1 flex flex-col">
                     <div class="px-4 py-2 border-b flex items-center justify-between text-xs bg-gray-50">
                       <div class="flex items-center gap-2"><i class="fas fa-file-code text-indigo-600"></i><span class="font-medium">{siteSelectedFile || 'Sélectionne un fichier'}</span></div>
-                      <div class="flex items-center gap-3">
-                        {#if siteSelectedFile}
-                          <button class="text-indigo-600 hover:underline" on:click={()=> navigator.clipboard.writeText(siteFiles[siteSelectedFile])}>Copier</button>
-                          <button class="text-indigo-600 hover:underline disabled:opacity-40" aria-label="Régénérer le fichier" disabled={!siteProjectId || siteGenerating} title="Régénérer ce fichier" on:click={regenerateCurrentFile}><i class="fas fa-rotate-right" aria-hidden="true"></i></button>
-                        {/if}
-                      </div>
+                        <div class="flex items-center gap-3">
+                          {#if siteSelectedFile}
+                            <button class="text-indigo-600 hover:underline" on:click={()=> navigator.clipboard.writeText(siteFiles[siteSelectedFile])}>Copier</button>
+                            <button class="text-indigo-600 hover:underline disabled:opacity-40" aria-label="Régénérer le fichier" disabled={!siteProjectId || siteGenerating} title={!siteProjectId ? 'Authentifie-toi pour régénérer' : 'Régénérer ce fichier'} on:click={regenerateCurrentFile}><i class="fas fa-rotate-right" aria-hidden="true"></i></button>
+                          {/if}
+                        </div>
                     </div>
                     <div class="flex-1 overflow-auto bg-gray-900 text-green-300 text-[11px] p-4 font-mono leading-relaxed">
                       {#if siteSelectedFile}
