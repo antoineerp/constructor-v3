@@ -26,6 +26,11 @@
   let siteSelectedFile = null;
   let siteError = '';
   let siteActiveRightTab = 'preview'; // preview | files | blueprint
+  let siteProjectId = null; // sera stocké après création
+  let sandboxUrl = '';
+  let runningPass = null; // 'scaffold'|'fill'|'optimize'
+  let passBusy = false;
+  let assetsBusy = false;
 
   function addSiteMessage(msg){ siteMessages = [...siteMessages, { id: Date.now().toString()+Math.random(), ...msg, timestamp:new Date() }]; }
 
@@ -54,8 +59,10 @@
       if(!res.ok){ throw new Error('HTTP '+res.status); }
       const data = await res.json();
       if(!data.success) throw new Error(data.error || 'Erreur génération site');
-      siteBlueprint = data.blueprint;
-      siteFiles = data.files;
+  siteBlueprint = data.blueprint;
+  siteFiles = data.files;
+  siteProjectId = data.project?.id || siteProjectId;
+  updateSandbox();
       // sélectionner un fichier principal plausible
       const mainCandidates = ['src/routes/+page.svelte','src/routes/index.svelte'];
       for(const c of mainCandidates){ if(siteFiles[c]) { siteSelectedFile = c; break; } }
@@ -69,6 +76,66 @@
     } finally { siteGenerating=false; }
   }
   function selectSiteFile(f){ siteSelectedFile = f; }
+
+  async function regenerateCurrentFile(){
+    if(!siteSelectedFile || !siteProjectId) return;
+    if(siteGenerating) return;
+    siteGenerating = true;
+    try {
+      let token = null;
+      try { const { data:{ session } } = await supabase.auth.getSession(); token = session?.access_token; } catch(_){}
+      const headers = { 'Content-Type':'application/json' };
+      if(token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/site/generate', { method:'POST', headers, body: JSON.stringify({ projectId: siteProjectId, regenerateFile: siteSelectedFile }) });
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || 'Echec régénération');
+      siteFiles = { ...siteFiles, [siteSelectedFile]: data.fileContent };
+      addSiteMessage({ type:'ai', content: '🔄 Fichier régénéré: '+ siteSelectedFile });
+  updateSandbox();
+    } catch(e){
+      addSiteMessage({ type:'ai', content: '❌ Régénération échouée: '+ e.message });
+    } finally { siteGenerating = false; }
+  }
+
+  function updateSandbox(){
+    if(!siteProjectId) { sandboxUrl=''; return; }
+    // Demande l'aperçu du fichier principal ou sélectionné
+    const base = '/api/preview?projectId='+ encodeURIComponent(siteProjectId);
+    if(siteSelectedFile) sandboxUrl = base + '&file=' + encodeURIComponent(siteSelectedFile);
+    else sandboxUrl = base;
+  }
+
+  async function runPass(pass){
+    if(!siteProjectId || passBusy) return;
+    runningPass = pass; passBusy = true;
+    try {
+      let token = null; try { const { data:{ session } } = await supabase.auth.getSession(); token = session?.access_token; } catch(_){ }
+      const headers = { 'Content-Type':'application/json' }; if(token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/site/pass', { method:'POST', headers, body: JSON.stringify({ projectId: siteProjectId, pass }) });
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || 'Erreur passe');
+      addSiteMessage({ type:'ai', content: `✅ Passe ${pass} appliquée (${data.updated.length} fichiers).` });
+      // Après modification, forcer un refresh sandbox (si fichier courant changé)
+      if(siteSelectedFile) updateSandbox();
+    } catch(e){
+      addSiteMessage({ type:'ai', content: '❌ Passe '+pass+' échouée: '+ e.message });
+    } finally { passBusy = false; runningPass=null; }
+  }
+
+  async function generateAssets(){
+    if(!siteProjectId || assetsBusy) return;
+    assetsBusy = true;
+    try {
+      let token=null; try { const { data:{ session } } = await supabase.auth.getSession(); token = session?.access_token; } catch(_){ }
+      const headers = { 'Content-Type':'application/json' }; if(token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/site/assets', { method:'POST', headers, body: JSON.stringify({ projectId: siteProjectId, type:'articles-hero' }) });
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || 'Erreur assets');
+      addSiteMessage({ type:'ai', content: `🖼️ Assets générés: ${Object.keys(data.assets||{}).length}` });
+    } catch(e){
+      addSiteMessage({ type:'ai', content: '❌ Génération assets échouée: '+ e.message });
+    } finally { assetsBusy=false; }
+  }
 
   // Détecter le type de composant
   function detectComponentType(prompt) {
@@ -494,6 +561,14 @@
             <button class="py-2 text-sm font-medium border-b-2 -mb-px {siteActiveRightTab==='preview' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}" on:click={()=> siteActiveRightTab='preview'}><i class="fas fa-eye mr-1"></i>Preview</button>
             <button class="py-2 text-sm font-medium border-b-2 -mb-px {siteActiveRightTab==='files' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}" on:click={()=> siteActiveRightTab='files'}><i class="fas fa-folder-tree mr-1"></i>Fichiers</button>
             <button class="py-2 text-sm font-medium border-b-2 -mb-px {siteActiveRightTab==='blueprint' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}" on:click={()=> siteActiveRightTab='blueprint'}><i class="fas fa-diagram-project mr-1"></i>Blueprint</button>
+            {#if siteProjectId}
+              <div class="ml-auto flex items-center gap-2 text-xs">
+                <button class="px-2 py-1 rounded border text-[11px] {passBusy ? 'opacity-50' : 'hover:bg-indigo-50'}" disabled={passBusy} on:click={()=> runPass('scaffold')}>{runningPass==='scaffold'? '…' : 'Scaffold'}</button>
+                <button class="px-2 py-1 rounded border text-[11px] {passBusy ? 'opacity-50' : 'hover:bg-indigo-50'}" disabled={passBusy} on:click={()=> runPass('fill')}>{runningPass==='fill'? '…' : 'Fill'}</button>
+                <button class="px-2 py-1 rounded border text-[11px] {passBusy ? 'opacity-50' : 'hover:bg-indigo-50'}" disabled={passBusy} on:click={()=> runPass('optimize')}>{runningPass==='optimize'? '…' : 'Optimize'}</button>
+                <button class="px-2 py-1 rounded border text-[11px] {assetsBusy ? 'opacity-50' : 'hover:bg-green-50'}" disabled={assetsBusy} on:click={generateAssets}>{assetsBusy ? 'Assets…' : 'Assets'}</button>
+              </div>
+            {/if}
           </div>
           <div class="flex-1 overflow-hidden">
             {#if !siteFiles && !siteGenerating}
@@ -505,9 +580,18 @@
               </div>
             {:else}
               {#if siteActiveRightTab==='preview'}
-                <div class="p-4 h-full overflow-auto bg-gray-50">
-                  <div class="border rounded-lg bg-white p-6 shadow-inner min-h-[300px]">
-                    {@html buildSafePreview(siteSelectedFile ? siteFiles[siteSelectedFile] : '')}
+                <div class="h-full flex flex-col">
+                  <div class="px-4 py-2 border-b bg-gray-50 flex items-center gap-3 text-xs">
+                    <span class="text-gray-600"><i class="fas fa-cube text-indigo-600 mr-1"></i>Sandbox Preview (statique)</span>
+                    {#if siteSelectedFile}<span class="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded">{siteSelectedFile}</span>{/if}
+                    <button class="ml-auto text-indigo-600 hover:underline text-[11px] disabled:opacity-30" disabled={!siteProjectId} on:click={updateSandbox}><i class="fas fa-rotate-right mr-1"></i>Rafraîchir</button>
+                  </div>
+                  <div class="flex-1 bg-gray-100">
+                    {#if sandboxUrl}
+                      <iframe title="Sandbox Preview" src={sandboxUrl} class="w-full h-full bg-white"></iframe>
+                    {:else}
+                      <div class="h-full flex items-center justify-center text-gray-400 text-sm">Aucun projet à prévisualiser.</div>
+                    {/if}
                   </div>
                 </div>
               {:else if siteActiveRightTab==='files'}
@@ -520,9 +604,12 @@
                   <div class="flex-1 flex flex-col">
                     <div class="px-4 py-2 border-b flex items-center justify-between text-xs bg-gray-50">
                       <div class="flex items-center gap-2"><i class="fas fa-file-code text-indigo-600"></i><span class="font-medium">{siteSelectedFile || 'Sélectionne un fichier'}</span></div>
-                      {#if siteSelectedFile}
-                        <button class="text-indigo-600 hover:underline" on:click={()=> navigator.clipboard.writeText(siteFiles[siteSelectedFile])}>Copier</button>
-                      {/if}
+                      <div class="flex items-center gap-3">
+                        {#if siteSelectedFile}
+                          <button class="text-indigo-600 hover:underline" on:click={()=> navigator.clipboard.writeText(siteFiles[siteSelectedFile])}>Copier</button>
+                          <button class="text-indigo-600 hover:underline disabled:opacity-40" aria-label="Régénérer le fichier" disabled={!siteProjectId || siteGenerating} title="Régénérer ce fichier" on:click={regenerateCurrentFile}><i class="fas fa-rotate-right" aria-hidden="true"></i></button>
+                        {/if}
+                      </div>
                     </div>
                     <div class="flex-1 overflow-auto bg-gray-900 text-green-300 text-[11px] p-4 font-mono leading-relaxed">
                       {#if siteSelectedFile}

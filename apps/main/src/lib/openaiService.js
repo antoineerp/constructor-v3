@@ -7,7 +7,7 @@ export class OpenAIService {
   this.apiKey = env.OPENAI_API_KEY;
   }
 
-  async generateComponent(prompt, type = 'generic') {
+  async generateComponent(prompt, type = 'generic', { model = 'gpt-4o-mini' } = {}) {
     if (!this.apiKey) {
       throw new Error('Clé API OpenAI manquante');
     }
@@ -32,14 +32,14 @@ Types de composants supportés :
     const userPrompt = `Crée un composant ${type} : ${prompt}`;
 
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.apiKey}`
         },
         body: JSON.stringify({
-          model: 'gpt-3.5-turbo',
+          model,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt }
@@ -76,20 +76,22 @@ Types de composants supportés :
     }
   }
 
-  async generateApplication(prompt) {
+  async generateApplication(prompt, { model = 'gpt-4o-mini', maxFiles = 20 } = {}) {
     if (!this.apiKey) throw new Error('Clé API OpenAI manquante');
-    const system = `Tu es un assistant qui génère une petite application SvelteKit.
-Retourne STRICTEMENT un objet JSON (pas de texte autour) où chaque clé est un nom de fichier et chaque valeur est son contenu.
+  const system = `Tu es un assistant qui génère une application SvelteKit modulaire.
+Retourne STRICTEMENT un objet JSON (aucun texte hors JSON) où chaque clé est un nom de fichier (chemins relatifs) et chaque valeur son contenu COMPLET.
 Contraintes:
-- Inclure OBLIGATOIREMENT: README.md, src/App.svelte, src/routes/+page.svelte, src/components/Example.svelte, package.json
-- Utiliser Tailwind si pertinent (indiquer config minimale si nécessaire)
-- Pas d'explications, seulement JSON pur.
-- Pas de balises de code.
-- Limiter à 8 fichiers maximum.
+- Inclure si non déjà présent: README.md, package.json, src/routes/+page.svelte
+- Si besoin de composants réutilisables, crée src/lib/components/* ou src/components/*
+- Utiliser Tailwind quand pertinent (si config absente, inclure tailwind.config.cjs minimal + postcss.config.cjs + src/app.css)
+- Pas d'explications NI commentaires hors code
+- Pas de fences markdown
+- Maximum ${maxFiles} fichiers (priorise les routes et composants clés)
+- Les fichiers Svelte doivent être valides.
 `;
     const user = `Génère une application basée sur: ${prompt}`;
     const body = {
-      model: 'gpt-3.5-turbo',
+      model,
       messages: [ { role:'system', content: system }, { role:'user', content: user } ],
       temperature: 0.6,
       max_tokens: 1800
@@ -113,7 +115,7 @@ Contraintes:
     return parsed;
   }
 
-  async generateBlueprint(query) {
+  async generateBlueprint(query, { model = 'gpt-4o-mini' } = {}) {
     if(!this.apiKey) throw new Error('Clé API OpenAI manquante');
     const system = `Tu es un architecte logiciel spécialisé en SvelteKit, Tailwind et génération de sites (blog, e-commerce, portfolio, SaaS, documentation).
 Reçois une requête utilisateur courte (ex: "blog sur les motos") et PRODUIS UNIQUEMENT un JSON (pas de markdown) détaillant un blueprint.
@@ -151,7 +153,7 @@ SI la requête est ambiguë: fais des hypothèses raisonnables et note-les discr
 `;
     const user = `Requête: ${query}`;
     const body = {
-      model: 'gpt-3.5-turbo',
+      model,
       messages: [ { role:'system', content: system }, { role:'user', content: user } ],
       temperature: 0.65,
       max_tokens: 1800
@@ -181,5 +183,24 @@ SI la requête est ambiguë: fais des hypothèses raisonnables et note-les discr
     }
   }
 }
+
+// Ajout hors du bloc JSON du prompt blueprint: méthodes utilitaires supplémentaires
+OpenAIService.prototype.generateImage = async function(prompt, { model = env.OPENAI_IMAGE_MODEL || 'gpt-image-1', size = '1024x1024', quality = 'standard' } = {}) {
+  if(!this.apiKey) throw new Error('Clé API OpenAI manquante');
+  const body = { model, prompt, size, quality, n:1, response_format:'b64_json' };
+  const response = await fetch('https://api.openai.com/v1/images/generations', {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${this.apiKey}` },
+    body: JSON.stringify(body)
+  });
+  if(!response.ok){
+    const txt = await response.text();
+    throw new Error('Erreur génération image: '+txt);
+  }
+  const data = await response.json();
+  const b64 = data?.data?.[0]?.b64_json;
+  if(!b64) throw new Error('Aucune image retournée');
+  return { base64: b64, model };
+};
 
 export const openaiService = new OpenAIService();

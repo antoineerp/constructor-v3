@@ -6,6 +6,7 @@ import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/publi
 
 // Orchestrateur: génère blueprint et/ou code application selon état projet.
 // Body: { query?: string, projectId?: string, regenerateFile?: string }
+// Nouvelles persistance: table project_files (un enregistrement par fichier généré)
 // Réponses:
 //  - Génération initiale: { success, blueprint, files, project }
 //  - Régénération fichier: { success, regenerated: filename, fileContent }
@@ -48,22 +49,25 @@ export async function POST({ request }) {
     }
 
     // Si régénération d'un fichier spécifique
-    if (regenerateFile && project?.blueprint_json && project?.code_generated) {
+    if (regenerateFile && project?.blueprint_json) {
+      // Chercher le fichier existant dans project_files pour confirmer existence (optionnel)
+      const { data:existingFile } = await clientSupabase.from('project_files').select('*').eq('project_id', project.id).eq('filename', regenerateFile).maybeSingle();
       const blueprint = project.blueprint_json;
       const per = blueprint?.recommended_prompts?.per_file || [];
       const target = per.find(p => p.filename === regenerateFile);
       if (!target) return json({ success:false, error:'Prompt fichier introuvable' }, { status:404 });
 
-      // Utilise generateApplication sur un prompt ciblé minimal mais on attend un seul fichier.
-      // Simplicité: on réutilise le modèle composant (pourrait être amélioré plus tard).
-      const singlePrompt = `Génère UNIQUEMENT le fichier ${regenerateFile} pour l'application décrite: ${JSON.stringify({ routes: blueprint.routes, components: blueprint.core_components })}. Contenu attendu complet.`;
-      // Réutilisation generateApplication donnerait plusieurs fichiers; ici on pourrait appeler generateComponent, mais si c'est un +page.svelte complexe on veut plus.
+      const singlePrompt = `Tu améliores ou régénères un fichier unique pour une application SvelteKit. FICHIER CIBLE: ${regenerateFile}. Fournis UNIQUEMENT le contenu brut du fichier sans markdown ni explications. Contexte blueprint: ${JSON.stringify({ routes: blueprint.routes, components: blueprint.core_components, site_type: blueprint.detected_site_type }).slice(0,1800)}\n${existingFile ? 'Ancienne version:\n'+existingFile.content.slice(0,2000) : ''}`;
       const result = await openaiService.generateApplication(singlePrompt);
       const newContent = result[regenerateFile] || Object.values(result)[0];
-      // Mettre à jour en base
-      const updatedCode = { ...project.code_generated, [regenerateFile]: newContent };
-      const { error:upErr } = await clientSupabase.from('projects').update({ code_generated: updatedCode }).eq('id', project.id);
-      if (upErr) throw upErr;
+      if (!newContent) return json({ success:false, error:'Aucun contenu régénéré' }, { status:500 });
+      // Upsert dans project_files
+      const { error:pfErr } = await clientSupabase.from('project_files')
+        .upsert({ project_id: project.id, filename: regenerateFile, content: newContent, stage: 'final', pass_index: 0 }, { onConflict: 'project_id,filename' });
+      if (pfErr) throw pfErr;
+      // Mettre à jour l'agrégat code_generated (option legacy)
+      const updatedCode = { ...(project.code_generated||{}), [regenerateFile]: newContent };
+      await clientSupabase.from('projects').update({ code_generated: updatedCode }).eq('id', project.id);
       return json({ success:true, regenerated: regenerateFile, fileContent: newContent });
     }
 
@@ -77,7 +81,7 @@ export async function POST({ request }) {
 
     // Construire prompt global à partir du blueprint
     const appPrompt = buildAppPrompt(blueprint);
-    const files = await openaiService.generateApplication(appPrompt);
+  const files = await openaiService.generateApplication(appPrompt, { model: 'gpt-4o-mini', maxFiles: 20 });
 
     // Mise à jour / création projet
     if (!project) {
@@ -97,7 +101,13 @@ export async function POST({ request }) {
       if (updErr) throw updErr;
     }
 
-    return json({ success:true, blueprint, files, project });
+    // Stocker chaque fichier dans project_files (upsert pour idempotence)
+    const fileEntries = Object.entries(files || {});
+    for (const [filename, content] of fileEntries) {
+      await clientSupabase.from('project_files').upsert({ project_id: project.id, filename, content, stage: 'final', pass_index: 0 }, { onConflict: 'project_id,filename' });
+    }
+
+  return json({ success:true, blueprint, files, project });
   } catch (e) {
     console.error('site/generate error', e);
     return json({ success:false, error:e.message }, { status:500 });
