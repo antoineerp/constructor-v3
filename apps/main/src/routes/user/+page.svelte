@@ -3,12 +3,16 @@
   let appPrompt = '';
   let appIsGenerating = false;
   let appFiles = null; // { filename: code }
+  let appValidation = null; // { filename: { diagnostics, ssrOk, domOk, formatted, ... } }
   let appSelectedFile = null;
   let appError = '';
   let compileUrl = '';
   let compiling = false;
-  let activeView = 'code'; // 'code' | 'render'
+  let activeView = 'code'; // 'code' | 'render' | 'interactive'
   const compileCache = new Map(); // filename -> objectURL
+  const interactiveCache = new Map(); // filename -> { url, ts }
+  let interactiveUrl = '';
+  let interactiveLoading = false;
 
   async function generateApplication() {
     appError = '';
@@ -19,10 +23,20 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: appPrompt })
       });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || 'Erreur inconnue');
-      appFiles = data.files || null;
-      appSelectedFile = appFiles ? Object.keys(appFiles)[0] : null;
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || 'Erreur inconnue');
+  appFiles = data.files || null;
+  appValidation = data.validation || null;
+      if(appFiles){
+        const keys = Object.keys(appFiles);
+        // On privilégie le premier fichier .svelte pour que l'utilisateur voie rapidement un rendu
+        const firstSvelte = keys.find(k=>k.endsWith('.svelte'));
+        appSelectedFile = firstSvelte || keys[0] || null;
+        // Si on a trouvé un .svelte on bascule automatiquement sur l'onglet Rendu SSR
+        if(firstSvelte) activeView = 'render'; else activeView='code';
+      } else {
+        appSelectedFile = null;
+      }
     } catch (e) {
       console.error(e);
       appError = e.message;
@@ -33,6 +47,7 @@
 
   function resetGeneration() {
     appFiles = null;
+    appValidation = null;
     appSelectedFile = null;
     compileUrl='';
   }
@@ -64,6 +79,54 @@
     } else if(!compiling) {
       compileSelected();
     }
+  }
+
+  async function buildInteractive() {
+    if(!appSelectedFile || !appSelectedFile.endsWith('.svelte')) { interactiveUrl=''; return; }
+    if(interactiveCache.has(appSelectedFile)) { interactiveUrl = interactiveCache.get(appSelectedFile).url; return; }
+    interactiveLoading = true; interactiveUrl='';
+    try {
+      const res = await fetch('/api/compile/dom', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: appFiles[appSelectedFile] }) });
+      const data = await res.json();
+      if(!data.success) { interactiveUrl = 'error:'+ (data.error||'Compilation DOM échouée'); }
+      else {
+        const cssBlock = data.css ? `<style>${data.css}</style>` : '';
+        const componentJs = data.js;
+        const safeCssBlock = cssBlock.replace(/<\/script>/g,'<\\/script>');
+        const safeJsBase = componentJs.replace(/<\/script>/g,'<\\/script>');
+        // Transforme export default pour exposer la classe puis encapsule tout dans un script injecté dynamiquement
+        const safeJs = safeJsBase.replace(/export default /, 'window.__App = ');
+        const payload = {
+          css: safeCssBlock,
+          js: safeJs
+        };
+        const bootParts = [];
+        bootParts.push('<!DOCTYPE html><html><head><meta charset="utf-8" />');
+        bootParts.push('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />');
+        bootParts.push('<scr'+'ipt src="https://cdn.tailwindcss.com"></scr'+'ipt>');
+        if(payload.css) bootParts.push(payload.css);
+        bootParts.push('</head><body class="p-4"><div id="app"></div>');
+        bootParts.push('<scr'+'ipt>(function(){');
+        bootParts.push('const data = JSON.parse(decodeURIComponent("'+encodeURIComponent(JSON.stringify(payload))+'"));');
+        bootParts.push("try{");
+        bootParts.push("const blob = new Blob([data.js],{type:'text/javascript'});");
+        bootParts.push("const u = URL.createObjectURL(blob);");
+        bootParts.push("import(u).then(m=>{const App = window.__App || m.default || m.App; const target=document.getElementById('app'); new App({target});});");
+        bootParts.push("}catch(e){document.getElementById('app').innerText='Erreur JS: '+e.message}");
+        bootParts.push('})();</scr'+'ipt></body></html>');
+        const boot = bootParts.join('\n');
+        const runtime = boot;
+        const blob = new Blob([runtime], { type:'text/html' });
+        const url = URL.createObjectURL(blob);
+        interactiveUrl = url;
+        interactiveCache.set(appSelectedFile, { url, ts: Date.now() });
+      }
+    } catch(e){ interactiveUrl = 'error:'+e.message; }
+    finally { interactiveLoading = false; }
+  }
+
+  $: if(activeView === 'interactive' && appSelectedFile?.endsWith('.svelte')) {
+    if(interactiveCache.has(appSelectedFile)) interactiveUrl = interactiveCache.get(appSelectedFile).url; else if(!interactiveLoading) buildInteractive();
   }
 </script>
 
@@ -116,9 +179,35 @@
         </div>
       {:else}
         <div class="flex h-full">
-          <div class="w-52 border-r bg-gray-50 p-3 overflow-auto text-xs space-y-1">
+          <div class="w-60 border-r bg-gray-50 p-3 overflow-auto text-xs space-y-1">
+            <div class="mb-2 text-[10px] text-gray-500 leading-snug">
+              Fichiers générés. Sélectionne un fichier <span class="font-medium text-purple-600">.svelte</span> puis onglet
+              <span class="font-medium">Rendu SSR</span> ou <span class="font-medium">Interactif</span> pour prévisualiser.
+            </div>
             {#each Object.keys(appFiles) as f}
-              <button class="block w-full text-left px-2 py-1.5 rounded border text-[11px] break-all {appSelectedFile === f ? 'bg-white border-purple-400 text-purple-700 font-medium' : 'bg-white/70 hover:bg-white border-gray-200 text-gray-600'}" on:click={() => selectFile(f)}>{f}</button>
+              {#key f}
+                {@const meta = appValidation && appValidation[f]}
+                <button
+                  class="group relative flex items-center gap-1 w-full text-left px-2 py-1.5 rounded border text-[11px] break-all transition-colors
+                    {appSelectedFile === f ? 'bg-white border-purple-400 text-purple-700 font-medium' : 'bg-white/70 hover:bg-white border-gray-200 text-gray-600'}"
+                  on:click={() => selectFile(f)}
+                  title={meta && meta.diagnostics?.length ? meta.diagnostics.map(d=>d.severity+': '+d.message).join('\n') : f}
+                >
+                  {#if f.endsWith('.svelte')}
+                    <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded bg-purple-600 text-white text-[8px] font-bold">S</span>
+                  {/if}
+                  <span class="flex-1 truncate">{f}</span>
+                  {#if meta}
+                    {#if meta.diagnostics && meta.diagnostics.some(d=>d.severity==='error')}
+                      <i class="fas fa-circle-exclamation text-red-500" title="Erreurs détectées"></i>
+                    {:else if meta.ssrOk && meta.domOk}
+                      <i class="fas fa-check-circle text-emerald-500" title="SSR & DOM OK"></i>
+                    {:else if meta.ssrOk || meta.domOk}
+                      <i class="fas fa-circle text-amber-500" title="Compilation partielle"></i>
+                    {/if}
+                  {/if}
+                </button>
+              {/key}
             {/each}
           </div>
           <div class="flex-1 flex flex-col">
@@ -146,12 +235,18 @@
                   class:text-purple-600={activeView==='render'}
                   on:click={()=> { if(appSelectedFile?.endsWith('.svelte')) activeView='render'; }}
                   disabled={!appSelectedFile || !appSelectedFile.endsWith('.svelte')}>Rendu SSR</button>
+                <button
+                  class="pb-2 border-b-2 -mb-px px-1 border-transparent text-gray-500 hover:text-gray-700 disabled:opacity-40"
+                  class:border-purple-600={activeView==='interactive'}
+                  class:text-purple-600={activeView==='interactive'}
+                  on:click={()=> { if(appSelectedFile?.endsWith('.svelte')) activeView='interactive'; }}
+                  disabled={!appSelectedFile || !appSelectedFile.endsWith('.svelte')}>Interactif</button>
               </div>
             </div>
             {#if activeView==='code'}
               <div class="flex-1 overflow-auto bg-gray-900 text-green-300 text-[11px] p-4 font-mono leading-relaxed">
                 {#if appSelectedFile}
-                  <pre><code>{appFiles[appSelectedFile]}</code></pre>
+                  <pre><code>{(appValidation && appValidation[appSelectedFile]?.formatted) || appFiles[appSelectedFile]}</code></pre>
                 {:else}
                   <div class="h-full flex items-center justify-center text-gray-500">Choisis un fichier dans la liste.</div>
                 {/if}
@@ -169,6 +264,22 @@
                     <div class="p-4 text-xs text-red-600 bg-red-50 h-full overflow-auto">{compileUrl.slice(6)}</div>
                   {:else if compileUrl}
                     <iframe title="Rendu SSR" src={compileUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
+                  {/if}
+                {/if}
+              </div>
+            {:else if activeView==='interactive'}
+              <div class="flex-1 bg-white relative">
+                {#if !appSelectedFile}
+                  <div class="h-full flex items-center justify-center text-gray-500 text-xs">Aucun fichier sélectionné.</div>
+                {:else if !appSelectedFile.endsWith('.svelte')}
+                  <div class="h-full flex items-center justify-center text-gray-500 text-xs">Mode interactif seulement pour .svelte</div>
+                {:else}
+                  {#if interactiveLoading && !interactiveUrl}
+                    <div class="h-full flex items-center justify-center text-gray-500 text-xs gap-2"><i class="fas fa-spinner fa-spin"></i> Construction sandbox...</div>
+                  {:else if interactiveUrl && interactiveUrl.startsWith('error:')}
+                    <div class="p-4 text-xs text-red-600 bg-red-50 h-full overflow-auto">{interactiveUrl.slice(6)}</div>
+                  {:else if interactiveUrl}
+                    <iframe title="Sandbox Interactif" src={interactiveUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
                   {/if}
                 {/if}
               </div>
