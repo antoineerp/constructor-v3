@@ -6,10 +6,25 @@ import { ESLint } from 'eslint';
 let eslintInstance; // singleton paresseux
 async function getEslint() {
   if (!eslintInstance) {
-    eslintInstance = new ESLint({
-      useEslintrc: true, // s'appuie sur .eslintrc.cjs
-      fix: false
-    });
+    try {
+      eslintInstance = new ESLint({
+        fix: true,
+        overrideConfig: {
+          extends: ['eslint:recommended', 'plugin:svelte/recommended', 'prettier'],
+          plugins: ['svelte'],
+          ignorePatterns: ['dist','build','.svelte-kit','node_modules'],
+          overrides: [
+            {
+              files: ['**/*.svelte'],
+              processor: 'svelte/svelte'
+            }
+          ]
+        }
+      });
+    } catch (e) {
+      console.error('ESLint init failed, fallback disabled lint:', e);
+      eslintInstance = null;
+    }
   }
   return eslintInstance;
 }
@@ -27,39 +42,52 @@ export async function validateFiles(files) {
   for (const [filename, content] of Object.entries(files)) {
     const ext = path.extname(filename);
     const diagnostics = [];
-    let formatted = content;
+  let working = content;
+  let formatted = content;
+  let fixed = null;
+  let fixApplied = false;
     let ssrOk = false;
     let domOk = false;
 
-    // Prettier format
+    // ESLint (inclut plugin svelte via config) - auto-fix
+    if (eslint) {
+      try {
+        const lintResults = await eslint.lintText(working, { filePath: filename });
+        for (const lr of lintResults) {
+          if (lr.output && lr.output !== working) {
+            working = lr.output;
+            fixed = lr.output;
+            fixApplied = true;
+          }
+          if (lr.messages?.length) {
+            diagnostics.push(
+              ...lr.messages.map(m => ({
+                severity: mapSeverity(m.severity),
+                rule: m.ruleId || 'unknown',
+                message: m.message,
+                line: m.line,
+                column: m.column,
+                source: 'eslint'
+              }))
+            );
+          }
+        }
+      } catch (e) {
+        diagnostics.push({ severity: 'error', source: 'eslint', message: 'ESLint erreur: ' + e.message });
+      }
+    } else {
+      diagnostics.push({ severity: 'info', source: 'eslint', message: 'ESLint désactivé (init failed)' });
+    }
+
+    // Prettier format (après auto-fix ESLint)
     try {
-      formatted = await prettier.format(content, {
+      formatted = await prettier.format(working, {
         parser: ext === '.svelte' ? 'svelte' : 'babel',
         plugins: [await import('prettier-plugin-svelte')]
       });
     } catch (e) {
       diagnostics.push({ severity: 'error', source: 'prettier', message: 'Formatage échoué: ' + e.message });
-    }
-
-    // ESLint (inclut plugin svelte via config)
-    try {
-      const lintResults = await eslint.lintText(content, { filePath: filename });
-      for (const lr of lintResults) {
-        if (lr.messages?.length) {
-          diagnostics.push(
-            ...lr.messages.map(m => ({
-              severity: mapSeverity(m.severity),
-              rule: m.ruleId || 'unknown',
-              message: m.message,
-              line: m.line,
-              column: m.column,
-              source: 'eslint'
-            }))
-          );
-        }
-      }
-    } catch (e) {
-      diagnostics.push({ severity: 'error', source: 'eslint', message: 'ESLint erreur: ' + e.message });
+      formatted = working; // fallback
     }
 
     if (ext === '.svelte') {
@@ -79,6 +107,8 @@ export async function validateFiles(files) {
 
     result[filename] = {
       original: content,
+      fixed,
+      fixApplied,
       formatted,
       diagnostics,
       ssrOk,

@@ -44,10 +44,9 @@
 
 <main>
   <nav class="bg-gray-900 text-white px-4 py-2 flex items-center gap-8">
-    <div class="font-bold text-lg tracking-wide flex items-center gap-2"><i class="fas fa-cubes text-blue-400"></i> Constructor V3</div>
+  <a href="/user" class="font-bold text-lg tracking-wide flex items-center gap-2 hover:text-blue-300"><i class="fas fa-cubes text-blue-400"></i> Constructor V3</a>
     <ul class="flex gap-6 text-sm">
-      <li><a href="/" class="hover:text-blue-400">Accueil</a></li>
-      <li><a href="/user" class="hover:text-blue-400">Espace Utilisateur</a></li>
+  <li><a href="/user" class="hover:text-blue-400">Générateur</a></li>
       <li><a href="/admin" class="hover:text-blue-400">Admin</a></li>
     </ul>
     <div class="ml-auto flex items-center gap-4">

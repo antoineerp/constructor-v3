@@ -8,11 +8,15 @@
   let appError = '';
   let compileUrl = '';
   let compiling = false;
-  let activeView = 'code'; // 'code' | 'render' | 'interactive'
+  let activeView = 'code'; // 'files' | 'code' | 'preview-ssr' | 'preview-interactive'
   const compileCache = new Map(); // filename -> objectURL
   const interactiveCache = new Map(); // filename -> { url, ts }
   let interactiveUrl = '';
   let interactiveLoading = false;
+  let showDiagnostics = true;
+  let repairing = false;
+  let repairMessage = '';
+  let lastPatched = null;
 
   async function generateApplication() {
     appError = '';
@@ -33,7 +37,7 @@
         const firstSvelte = keys.find(k=>k.endsWith('.svelte'));
         appSelectedFile = firstSvelte || keys[0] || null;
         // Si on a trouvé un .svelte on bascule automatiquement sur l'onglet Rendu SSR
-        if(firstSvelte) activeView = 'render'; else activeView='code';
+  if(firstSvelte) activeView = 'preview-ssr'; else activeView='files';
       } else {
         appSelectedFile = null;
       }
@@ -53,6 +57,34 @@
   }
   function selectFile(f) { appSelectedFile = f; }
   function copyCurrent() { if(appSelectedFile) navigator.clipboard.writeText(appFiles[appSelectedFile]); }
+  async function repairCurrent(){
+    if(!appSelectedFile || !appValidation?.[appSelectedFile]) return;
+    repairing = true; repairMessage='';
+    try {
+      const meta = appValidation[appSelectedFile];
+      const res = await fetch('/api/repair', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: appSelectedFile, code: meta.formatted || meta.original || appFiles[appSelectedFile], diagnostics: meta.diagnostics||[] }) });
+      const data = await res.json();
+      if(!data.success) throw new Error(data.error||'Échec réparation');
+      lastPatched = data.patchedCode;
+      appFiles[appSelectedFile] = data.patchedCode;
+      compileCache.delete(appSelectedFile);
+      interactiveCache.delete(appSelectedFile);
+      // Intégration revalidation live si présente
+      if(data.validation){
+        appValidation[appSelectedFile] = {
+          ...data.validation,
+          original: meta.original,
+          fixed: data.validation.fixed || data.patchedCode,
+          formatted: data.validation.formatted || data.patchedCode
+        };
+        const errs = data.validation.diagnostics?.filter(d=>d.severity==='error').length || 0;
+        if(errs===0) repairMessage = 'Réparation appliquée et validée ✔'; else repairMessage = `Réparation appliquée mais ${errs} erreur(s) restantes.`;
+      } else {
+        repairMessage = 'Réparation appliquée (validation indisponible).';
+      }
+    } catch(e){ repairMessage = e.message; }
+    finally { repairing = false; }
+  }
 
   async function compileSelected() {
     if(!appSelectedFile || !appSelectedFile.endsWith('.svelte')) { compileUrl=''; return; }
@@ -179,79 +211,111 @@
         </div>
       {:else}
         <div class="flex h-full">
-          <div class="w-60 border-r bg-gray-50 p-3 overflow-auto text-xs space-y-1">
-            <div class="mb-2 text-[10px] text-gray-500 leading-snug">
-              Fichiers générés. Sélectionne un fichier <span class="font-medium text-purple-600">.svelte</span> puis onglet
-              <span class="font-medium">Rendu SSR</span> ou <span class="font-medium">Interactif</span> pour prévisualiser.
-            </div>
-            {#each Object.keys(appFiles) as f}
-              {#key f}
-                {@const meta = appValidation && appValidation[f]}
-                <button
-                  class="group relative flex items-center gap-1 w-full text-left px-2 py-1.5 rounded border text-[11px] break-all transition-colors
-                    {appSelectedFile === f ? 'bg-white border-purple-400 text-purple-700 font-medium' : 'bg-white/70 hover:bg-white border-gray-200 text-gray-600'}"
-                  on:click={() => selectFile(f)}
-                  title={meta && meta.diagnostics?.length ? meta.diagnostics.map(d=>d.severity+': '+d.message).join('\n') : f}
-                >
-                  {#if f.endsWith('.svelte')}
-                    <span class="inline-flex items-center justify-center w-3.5 h-3.5 rounded bg-purple-600 text-white text-[8px] font-bold">S</span>
-                  {/if}
-                  <span class="flex-1 truncate">{f}</span>
-                  {#if meta}
-                    {#if meta.diagnostics && meta.diagnostics.some(d=>d.severity==='error')}
-                      <i class="fas fa-circle-exclamation text-red-500" title="Erreurs détectées"></i>
-                    {:else if meta.ssrOk && meta.domOk}
-                      <i class="fas fa-check-circle text-emerald-500" title="SSR & DOM OK"></i>
-                    {:else if meta.ssrOk || meta.domOk}
-                      <i class="fas fa-circle text-amber-500" title="Compilation partielle"></i>
-                    {/if}
-                  {/if}
-                </button>
-              {/key}
-            {/each}
-          </div>
           <div class="flex-1 flex flex-col">
-            <div class="px-4 pt-2 border-b bg-gray-50">
-              <div class="flex items-center justify-between mb-2 text-xs">
+            <!-- Barre onglets globaux -->
+            <div class="bg-gray-50 border-b px-4 pt-3">
+              <div class="flex items-center gap-6 text-[12px] font-medium">
+                <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='files' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> activeView='files'}>
+                  <i class="fas fa-folder-open mr-1"></i>Fichiers
+                </button>
+                <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='code' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> activeView='code'} disabled={!appSelectedFile}>
+                  <i class="fas fa-code mr-1"></i>Code
+                </button>
+                <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='preview-ssr' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> { if(appSelectedFile?.endsWith('.svelte')) activeView='preview-ssr'; }} disabled={!appSelectedFile || !appSelectedFile.endsWith('.svelte')}>
+                  <i class="fas fa-eye mr-1"></i>Preview SSR
+                </button>
+                <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='preview-interactive' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> { if(appSelectedFile?.endsWith('.svelte')) activeView='preview-interactive'; }} disabled={!appSelectedFile || !appSelectedFile.endsWith('.svelte')}>
+                  <i class="fas fa-play-circle mr-1"></i>Interactif
+                </button>
+              </div>
+              <div class="flex items-center justify-between mt-3 mb-2 text-xs">
                 <div class="flex items-center gap-2">
                   <i class="fas fa-file-code text-purple-600"></i>
-                  <span class="font-medium truncate max-w-[240px]" title={appSelectedFile}>{appSelectedFile || 'Sélectionne un fichier'}</span>
+                  <span class="font-medium truncate max-w-[240px]" title={appSelectedFile}>{appSelectedFile || 'Aucun fichier sélectionné'}</span>
                 </div>
                 <div class="flex items-center gap-3">
                   {#if appSelectedFile}
                     <button class="text-purple-600 hover:underline" on:click={copyCurrent}>Copier</button>
+                    {#if appValidation && appValidation[appSelectedFile]?.diagnostics?.length}
+                      <button class="text-amber-600 hover:underline disabled:opacity-50" disabled={repairing} on:click={repairCurrent}>
+                        {#if repairing}<i class="fas fa-spinner fa-spin"></i>{:else}<i class="fas fa-wrench"></i>{/if} Réparer (IA)
+                      </button>
+                    {/if}
                   {/if}
                 </div>
               </div>
-              <div class="flex items-center gap-4 text-[11px] font-medium">
-                <button
-                  class="pb-2 border-b-2 -mb-px px-1 border-transparent text-gray-500 hover:text-gray-700"
-                  class:border-purple-600={activeView==='code'}
-                  class:text-purple-600={activeView==='code'}
-                  on:click={()=> activeView='code'}>Code</button>
-                <button
-                  class="pb-2 border-b-2 -mb-px px-1 border-transparent text-gray-500 hover:text-gray-700 disabled:opacity-40"
-                  class:border-purple-600={activeView==='render'}
-                  class:text-purple-600={activeView==='render'}
-                  on:click={()=> { if(appSelectedFile?.endsWith('.svelte')) activeView='render'; }}
-                  disabled={!appSelectedFile || !appSelectedFile.endsWith('.svelte')}>Rendu SSR</button>
-                <button
-                  class="pb-2 border-b-2 -mb-px px-1 border-transparent text-gray-500 hover:text-gray-700 disabled:opacity-40"
-                  class:border-purple-600={activeView==='interactive'}
-                  class:text-purple-600={activeView==='interactive'}
-                  on:click={()=> { if(appSelectedFile?.endsWith('.svelte')) activeView='interactive'; }}
-                  disabled={!appSelectedFile || !appSelectedFile.endsWith('.svelte')}>Interactif</button>
-              </div>
             </div>
-            {#if activeView==='code'}
-              <div class="flex-1 overflow-auto bg-gray-900 text-green-300 text-[11px] p-4 font-mono leading-relaxed">
+
+            <!-- Contenu suivant onglet -->
+            {#if activeView==='files'}
+              <div class="flex-1 overflow-auto p-4 bg-white text-xs space-y-1">
+                <div class="text-[11px] text-gray-500 mb-2">Liste des fichiers générés.</div>
+                <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {#each Object.keys(appFiles) as f}
+                    {#key f}
+                      {@const meta = appValidation && appValidation[f]}
+                      <button
+                        class="relative group text-left px-2 py-2 rounded border text-[11px] break-all transition-colors
+                          {appSelectedFile === f ? 'bg-purple-50 border-purple-400 text-purple-700 font-medium' : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-600'}"
+                        on:click={()=> { selectFile(f); if(f.endsWith('.svelte')) activeView='code'; }}
+                        title={meta && meta.diagnostics?.length ? meta.diagnostics.map(d=>d.severity+': '+d.message).join('\n') : f}
+                      >
+                        <div class="flex items-center gap-1">
+                          {#if f.endsWith('.svelte')}
+                            <span class="inline-flex items-center justify-center w-4 h-4 rounded bg-purple-600 text-white text-[9px] font-bold">S</span>
+                          {/if}
+                          <span class="truncate flex-1">{f}</span>
+                          {#if meta}
+                            {#if meta.diagnostics && meta.diagnostics.some(d=>d.severity==='error')}
+                              <i class="fas fa-circle-exclamation text-red-500" title="Erreurs détectées"></i>
+                            {:else if meta.ssrOk && meta.domOk}
+                              <i class="fas fa-check-circle text-emerald-500" title="SSR & DOM OK"></i>
+                            {:else if meta.ssrOk || meta.domOk}
+                              <i class="fas fa-circle text-amber-500" title="Compilation partielle"></i>
+                            {/if}
+                          {/if}
+                        </div>
+                      </button>
+                    {/key}
+                  {/each}
+                </div>
+              </div>
+            {:else if activeView==='code'}
+              <div class="flex-1 overflow-auto bg-gray-900 text-green-300 text-[11px] p-4 font-mono leading-relaxed relative">
                 {#if appSelectedFile}
-                  <pre><code>{(appValidation && appValidation[appSelectedFile]?.formatted) || appFiles[appSelectedFile]}</code></pre>
+                  <pre class="mb-4"><code>{(appValidation && appValidation[appSelectedFile]?.formatted) || appFiles[appSelectedFile]}</code></pre>
+                  <div class="mt-2 text-[10px] text-gray-400 space-y-2 bg-gray-800/40 p-3 rounded border border-gray-700">
+                    <div class="flex items-center justify-between">
+                      <span class="font-semibold text-gray-300">Diagnostics</span>
+                      <button class="text-xs underline" on:click={()=> showDiagnostics=!showDiagnostics}>{showDiagnostics ? 'masquer' : 'afficher'}</button>
+                    </div>
+                    {#if repairMessage}<div class="text-amber-400">{repairMessage}</div>{/if}
+                    {#if showDiagnostics}
+                      {#if appValidation && appValidation[appSelectedFile]}
+                        {#if appValidation[appSelectedFile].diagnostics.length === 0}
+                          <div class="text-emerald-400">Aucun diagnostic.</div>
+                        {:else}
+                          <ul class="space-y-1 max-h-56 overflow-auto pr-1">
+                            {#each appValidation[appSelectedFile].diagnostics as d, i}
+                              <li class="rounded px-2 py-1 bg-gray-800/60 border border-gray-700 flex gap-2 items-start">
+                                <span class="uppercase text-[9px] mt-0.5 tracking-wide {d.severity==='error' ? 'text-red-400' : d.severity==='warning' ? 'text-amber-300' : 'text-gray-400'}">{d.severity}</span>
+                                <span class="flex-1 leading-snug">{d.message}</span>
+                                <div class="flex flex-col items-end gap-0.5 text-[9px] text-gray-500">
+                                  {#if d.rule}<span>{d.rule}</span>{/if}
+                                  {#if d.line}<span>L{d.line}</span>{/if}
+                                </div>
+                              </li>
+                            {/each}
+                          </ul>
+                        {/if}
+                      {/if}
+                    {/if}
+                  </div>
                 {:else}
-                  <div class="h-full flex items-center justify-center text-gray-500">Choisis un fichier dans la liste.</div>
+                  <div class="h-full flex items-center justify-center text-gray-500">Sélectionne un fichier dans l'onglet Fichiers.</div>
                 {/if}
               </div>
-            {:else if activeView==='render'}
+            {:else if activeView==='preview-ssr'}
               <div class="flex-1 bg-white relative">
                 {#if !appSelectedFile}
                   <div class="h-full flex items-center justify-center text-gray-500 text-xs">Aucun fichier sélectionné.</div>
@@ -267,7 +331,7 @@
                   {/if}
                 {/if}
               </div>
-            {:else if activeView==='interactive'}
+            {:else if activeView==='preview-interactive'}
               <div class="flex-1 bg-white relative">
                 {#if !appSelectedFile}
                   <div class="h-full flex items-center justify-center text-gray-500 text-xs">Aucun fichier sélectionné.</div>
@@ -279,7 +343,7 @@
                   {:else if interactiveUrl && interactiveUrl.startsWith('error:')}
                     <div class="p-4 text-xs text-red-600 bg-red-50 h-full overflow-auto">{interactiveUrl.slice(6)}</div>
                   {:else if interactiveUrl}
-                    <iframe title="Sandbox Interactif" src={interactiveUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
+                    <iframe title="Sandbox Interactif" sandbox="allow-scripts" src={interactiveUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
                   {/if}
                 {/if}
               </div>
