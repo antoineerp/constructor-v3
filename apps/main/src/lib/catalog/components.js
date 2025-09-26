@@ -36,6 +36,200 @@ export const componentsCatalog = [
   {/if}
 </header>`
   },
+  // ====== PACK NAVIGATION ======
+  {
+    name: 'SidebarCollapsible',
+    filename: 'src/lib/components/SidebarCollapsible.svelte',
+    purpose: 'Sidebar collapsible avec sections et état actif',
+    tags: ['navigation','sidebar','layout'],
+    code: `<script>export let items=[{label:'Dashboard',icon:'fa-gauge',href:'#'},{label:'Articles',icon:'fa-newspaper',href:'#'},{label:'Statistiques',icon:'fa-chart-line',href:'#'}]; let open=true;</script>
+<aside class="bg-gray-900 text-gray-200 w-64 transition-all duration-300" class:!w-16={!open}>
+  <div class="h-14 flex items-center justify-between px-4 border-b border-gray-800">
+    <span class="font-semibold text-sm truncate">Panneau</span>
+    <button class="text-xs px-2 py-1 bg-gray-800 rounded" on:click={() => open=!open}>{open?'−':'+'}</button>
+  </div>
+  <nav class="py-3 space-y-1">
+    {#each items as it}
+      <a href={it.href} class="flex items-center gap-3 px-4 py-2 text-xs hover:bg-gray-800 rounded">
+        <i class={'fas '+it.icon+' w-4'}></i><span class="truncate" class:hidden={!open}>{it.label}</span>
+      </a>
+    {/each}
+  </nav>
+</aside>`
+  },
+  {
+    name: 'MegaMenu',
+    filename: 'src/lib/components/MegaMenu.svelte',
+    purpose: 'Menu horizontal avec panneau méga-catégories',
+    tags: ['navigation','menu'],
+    code: `<script>let open=false; export let groups=[{title:'Catégories',links:['Roadsters','Trail','Sport','Vintage']},{title:'Services',links:['Entretien','Assurance','Financement']}];</script>
+<div class="relative bg-white border-b">
+  <div class="max-w-7xl mx-auto px-6 flex h-14 items-center gap-8">
+    <a href="/" class="font-semibold text-indigo-600">MotoBlog</a>
+    <button class="text-sm hover:text-indigo-600" on:click={()=>open=!open}>Explorer <i class="fas fa-angle-down ml-1"></i></button>
+  </div>
+  {#if open}
+    <div class="absolute inset-x-0 top-full bg-white shadow-xl border-t py-8">
+      <div class="max-w-7xl mx-auto px-8 grid md:grid-cols-3 gap-10 text-sm">
+        {#each groups as g}
+          <div>
+            <h4 class="font-semibold text-gray-900 mb-3">{g.title}</h4>
+            <ul class="space-y-1">
+              {#each g.links as l}
+                <li><a href="#" class="text-gray-600 hover:text-indigo-600">{l}</a></li>
+              {/each}
+            </ul>
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
+</div>`
+  },
+  // ====== PACK FORMULAIRES ======
+  {
+    name: 'FormContactPro',
+    filename: 'src/lib/components/FormContactPro.svelte',
+    purpose: 'Formulaire de contact accessible avec validation minimale UI',
+    tags: ['form','contact'],
+    code: `<script>let data={name:'',email:'',message:''}; let sent=false; function submit(){sent=true;}</script>
+<form on:submit|preventDefault={submit} class="space-y-4 max-w-lg">
+  <div>
+    <label class="block text-sm font-medium mb-1">Nom</label>
+    <input bind:value={data.name} required class="w-full px-3 py-2 border rounded focus:ring-indigo-500 focus:border-indigo-500" />
+  </div>
+  <div>
+    <label class="block text-sm font-medium mb-1">Email</label>
+    <input type="email" bind:value={data.email} required class="w-full px-3 py-2 border rounded focus:ring-indigo-500 focus:border-indigo-500" />
+  </div>
+  <div>
+    <label class="block text-sm font-medium mb-1">Message</label>
+    <textarea rows="4" bind:value={data.message} required class="w-full px-3 py-2 border rounded focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+  </div>
+  <button class="px-5 py-2 rounded bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500">Envoyer</button>
+  {#if sent}<p class="text-green-600 text-sm mt-2">Message simulé envoyé.</p>{/if}
+</form>`
+  },
+  {
+    name: 'FormNewsletter',
+    filename: 'src/lib/components/FormNewsletter.svelte',
+    purpose: 'Formulaire email compact pour inscription newsletter',
+    tags: ['form','newsletter'],
+    code: `<script>let email=''; let ok=false; function sub(){ok=true;}</script>
+<form on:submit|preventDefault={sub} class="flex gap-2">
+  <input type="email" bind:value={email} placeholder="Votre email" class="flex-1 px-3 py-2 border rounded focus:ring-indigo-500 focus:border-indigo-500" required />
+  <button class="px-4 py-2 bg-indigo-600 text-white rounded text-sm">OK</button>
+  {#if ok}<span class="text-green-600 text-xs self-center">Merci !</span>{/if}
+</form>`
+  },
+  // ====== PACK UI ACTIONS ======
+  {
+    name: 'DropdownMenu',
+    filename: 'src/lib/components/DropdownMenu.svelte',
+    purpose: 'Petit menu déroulant accessible basique',
+    tags: ['menu','dropdown','interaction'],
+    code: `<script>let open=false; export let label='Options'; export let items=['Action 1','Action 2'];</script>
+<div class="relative inline-block text-left">
+  <button class="px-3 py-1.5 bg-gray-900 text-white rounded text-xs" on:click={()=>open=!open}>{label} <i class="fas fa-angle-down ml-1"></i></button>
+  {#if open}
+    <div class="absolute right-0 mt-1 w-40 bg-white border rounded shadow text-xs z-10">
+      {#each items as it}
+        <button class="w-full text-left px-3 py-2 hover:bg-gray-50">{it}</button>
+      {/each}
+    </div>
+  {/if}
+</div>`
+  },
+  {
+    name: 'TabsBasic',
+    filename: 'src/lib/components/TabsBasic.svelte',
+    purpose: 'Système d’onglets simple',
+    tags: ['tabs','navigation'],
+    code: `<script>export let tabs=['Infos','Détails','FAQ']; let active=0;</script>
+<div class="border-b flex gap-4 text-sm">
+  {#each tabs as t,i}
+    <button class="py-2 -mb-px border-b-2" class:border-indigo-600={i===active} class:text-indigo-600={i===active} on:click={()=>active=i}>{t}</button>
+  {/each}
+</div>
+<div class="p-4 text-sm text-gray-600">Contenu: {tabs[active]}</div>`
+  },
+  // ====== PACK DATA ======
+  {
+    name: 'TableSortable',
+    filename: 'src/lib/components/TableSortable.svelte',
+    purpose: 'Table triable client side (mock)',
+    tags: ['table','data'],
+    code: `<script>let rows=[{name:'Honda',year:2023},{name:'Yamaha',year:2022},{name:'Ducati',year:2024}]; let asc=true; function sort(){asc=!asc; rows=rows.slice().sort((a,b)=> asc? a.year-b.year : b.year-a.year);}</script>
+<table class="w-full text-sm">
+  <thead class="bg-gray-100 text-gray-600">
+    <tr><th class="p-2 text-left">Marque</th><th class="p-2 text-left cursor-pointer" on:click={sort}>Année <i class="fas fa-sort"></i></th></tr>
+  </thead>
+  <tbody>
+    {#each rows as r}
+      <tr class="border-b"><td class="p-2">{r.name}</td><td class="p-2">{r.year}</td></tr>
+    {/each}
+  </tbody>
+</table>`
+  },
+  {
+    name: 'StatCards',
+    filename: 'src/lib/components/StatCards.svelte',
+    purpose: 'Groupe de statistiques KPIs',
+    tags: ['stats','dashboard'],
+    code: `<script>export let metrics=[{label:'Lecteurs',value:1250,delta:'+4%'},{label:'Articles',value:48,delta:'+2'},{label:'Commentaires',value:320,delta:'+12'}];</script>
+<div class="grid sm:grid-cols-3 gap-4">
+  {#each metrics as m}
+    <div class="p-4 border rounded bg-white shadow-sm">
+      <p class="text-xs text-gray-500">{m.label}</p>
+      <p class="text-xl font-semibold">{m.value}</p>
+      <p class="text-[11px] text-green-600">{m.delta}</p>
+    </div>
+  {/each}
+</div>`
+  },
+  // ====== PACK INTERACTION ======
+  {
+    name: 'DragList',
+    filename: 'src/lib/components/DragList.svelte',
+    purpose: 'Liste drag & drop simplifiée (simulation sans lib externe)',
+    tags: ['drag','interaction'],
+    code: `<script>let items=['A','B','C','D']; let draggingIndex=null; function onDragStart(e,i){draggingIndex=i; e.dataTransfer.effectAllowed='move';} function onDragOver(e,i){e.preventDefault(); if(draggingIndex===null||draggingIndex===i) return; const clone=items.slice(); const el=clone.splice(draggingIndex,1)[0]; clone.splice(i,0,el); items=clone; draggingIndex=i;} </script>
+<ul class="space-y-2 text-sm">
+  {#each items as it,i}
+    <li draggable on:dragstart={(e)=>onDragStart(e,i)} on:dragover={(e)=>onDragOver(e,i)} class="px-3 py-2 rounded border bg-white cursor-move flex items-center gap-2"><i class="fas fa-grip-lines"></i>{it}</li>
+  {/each}
+</ul>`
+  },
+  // ====== PACK ECOM/BLOG ======
+  {
+    name: 'PricingTable',
+    filename: 'src/lib/components/PricingTable.svelte',
+    purpose: 'Table de pricing 3 colonnes',
+    tags: ['pricing','commerce'],
+    code: `<script>let plans=[{name:'Starter',price:'0€',features:['Basique','Communauté']},{name:'Pro',price:'19€',features:['Tout Starter','Analytics','Priorité']},{name:'Ultimate',price:'49€',features:['Tout Pro','Support 24/7']}];</script>
+<div class="grid md:grid-cols-3 gap-6">
+  {#each plans as p}
+    <div class="border rounded-lg p-6 bg-white shadow-sm flex flex-col">
+      <h3 class="font-semibold mb-1">{p.name}</h3>
+      <p class="text-2xl font-bold mb-4">{p.price}</p>
+      <ul class="text-xs text-gray-600 space-y-1 mb-4">{#each p.features as f}<li class="flex items-center gap-2"><i class="fas fa-check text-green-500"></i>{f}</li>{/each}</ul>
+      <button class="mt-auto py-2 rounded bg-indigo-600 text-white text-sm">Choisir</button>
+    </div>
+  {/each}
+</div>`
+  },
+  // ====== PACK LAYOUT ======
+  {
+    name: 'DashboardShell',
+    filename: 'src/lib/components/DashboardShell.svelte',
+    purpose: 'Shell de tableau de bord combinant sidebar + zone de contenu',
+    tags: ['layout','dashboard'],
+    code: `<script>import SidebarCollapsible from './SidebarCollapsible.svelte';</script>
+<div class="flex min-h-[60vh]">
+  <SidebarCollapsible />
+  <div class="flex-1 p-6 bg-gray-50">Slot contenu dashboard…</div>
+</div>`
+  },
   {
     name: 'FooterPro',
     filename: 'src/lib/components/FooterPro.svelte',
@@ -146,4 +340,25 @@ export const componentsCatalog = [
 // Fonction utilitaire pour résumer le catalogue sans injecter TOUT le code (économie de tokens)
 export function summarizeCatalog(maxChars = 1800){
   return componentsCatalog.map(c => `${c.name} -> ${c.filename} : ${c.purpose}`).join('\n').slice(0, maxChars);
+}
+
+// Sélection contextuelle de composants pertinents selon blueprint
+export function selectComponentsForBlueprint(blueprint, limit = 12){
+  if(!blueprint) return componentsCatalog.slice(0, limit);
+  const text = JSON.stringify(blueprint).toLowerCase();
+  const score = comp => {
+    let s = 0;
+    comp.tags.forEach(t=> { if(text.includes(t)) s += 2; });
+    if(text.includes('dashboard') && comp.tags.includes('dashboard')) s += 3;
+    if(text.includes('pricing') && comp.tags.includes('pricing')) s += 3;
+    if(text.includes('contact') && comp.tags.includes('contact')) s += 2;
+    if(text.includes('blog') && comp.tags.includes('article')) s += 2;
+    return s;
+  };
+  const ranked = componentsCatalog.map(c => ({ c, s: score(c) }))
+    .sort((a,b)=> b.s - a.s || a.c.name.localeCompare(b.c.name))
+    .filter(r => r.s > 0)
+    .map(r=> r.c);
+  const base = ranked.length ? ranked : componentsCatalog.slice(0, limit);
+  return base.slice(0, limit);
 }

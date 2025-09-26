@@ -3,7 +3,8 @@ import { openaiService } from '$lib/openaiService.js';
 import { supabase as clientSupabase } from '$lib/supabase.js';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
-import { summarizeCatalog, componentsCatalog } from '$lib/catalog/components.js';
+import { summarizeCatalog, componentsCatalog, selectComponentsForBlueprint } from '$lib/catalog/components.js';
+import { validateAndFix } from '$lib/validator/svelteValidator.js';
 
 // Orchestrateur: génère blueprint et/ou code application selon état projet.
 // Body: { query?: string, projectId?: string, regenerateFile?: string }
@@ -80,7 +81,9 @@ export async function POST({ request }) {
 
     // Construire prompt global à partir du blueprint
     let files = {};
-    const catalogSummary = summarizeCatalog();
+    const selected = selectComponentsForBlueprint(blueprint, 12);
+    const catalogSummary = selected.map(c => `${c.name} -> ${c.filename} : ${c.purpose}`).join('\n');
+    const validationIssues = {}; // new: collect issues per file
 
     if(simpleMode){
       const appPrompt = buildAppPrompt(blueprint, { simpleMode: true });
@@ -101,6 +104,12 @@ export async function POST({ request }) {
               const firstKey = Object.keys(result)[0];
               if(firstKey) files[filename] = result[firstKey]; // remap
             }
+            // validate after each per-file generation
+            if (files[filename]) {
+              const { fixed, issues } = validateAndFix(files[filename], { filename });
+              files[filename] = fixed;
+              if (issues.length) validationIssues[filename] = issues;
+            }
           } catch(e){
             console.warn('Échec génération fichier', filename, e.message);
           }
@@ -112,20 +121,30 @@ export async function POST({ request }) {
         files = await openaiService.generateApplication(fallbackPrompt, { model: 'gpt-4o-mini', maxFiles: 20 });
       }
       // Injecter composants validés manquants (si non générés) en ajoutant leur code brut
-      for(const comp of componentsCatalog){
+      for(const comp of selected){
         if(!Object.keys(files).includes(comp.filename)){
           files[comp.filename] = comp.code;
+          const { fixed, issues } = validateAndFix(files[comp.filename], { filename: comp.filename });
+          files[comp.filename] = fixed;
+          if (issues.length) validationIssues[comp.filename] = issues;
         }
       }
-      // S'assurer présence d'une page principale
-      if(!files['src/routes/+page.svelte']){
-        // Choisir la première route générée ou créer un index minimal
-        const candidate = Object.keys(files).find(k => k.startsWith('src/routes/') && k.endsWith('+page.svelte'));
-        if(candidate){
-          files['src/routes/+page.svelte'] = files[candidate];
-        } else {
-          files['src/routes/+page.svelte'] = `<script>/* page principale injectée */</script><div class='p-8 text-center text-gray-600'>Page principale non définie dans blueprint.</div>`;
-        }
+    }
+    // S'assurer présence d'une page principale (après les deux modes)
+    if(!files['src/routes/+page.svelte']){
+      const candidate = Object.keys(files).find(k => k.startsWith('src/routes/') && k.endsWith('+page.svelte'));
+      if(candidate){
+        files['src/routes/+page.svelte'] = files[candidate];
+      } else {
+        files['src/routes/+page.svelte'] = `<script>/* page principale injectée */</script><div class='p-8 text-center text-gray-600'>Page principale non définie dans blueprint.</div>`;
+      }
+    }
+    // global validation pass for all files (ensure even simpleMode gets it)
+    for (const k of Object.keys(files)) {
+      const { fixed, issues } = validateAndFix(files[k], { filename: k });
+      files[k] = fixed;
+      if (issues.length) {
+        validationIssues[k] = Array.from(new Set([...(validationIssues[k]||[]), ...issues]));
       }
     }
 
@@ -155,7 +174,7 @@ export async function POST({ request }) {
       }
     }
 
-  return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode });
+    return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues });
   } catch (e) {
     console.error('site/generate error', e);
     return json({ success:false, error:e.message }, { status:500 });
