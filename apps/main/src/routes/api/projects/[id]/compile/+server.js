@@ -3,7 +3,6 @@ import { compile } from 'svelte/compiler';
 import path from 'path';
 import { supabase as clientSupabase } from '$lib/supabase.js';
 import { computeProjectHash, getCached, setCached } from '$lib/preview/compileCache.js';
-import { supabase as clientSupabase } from '$lib/supabase.js';
 
 // POST /api/projects/:id/compile
 // Body optionnel: { entries?: string[], files?: Record<string,string> } (si files absent => charge depuis DB)

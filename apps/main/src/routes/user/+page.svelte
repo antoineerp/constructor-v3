@@ -259,6 +259,26 @@
       const res = await fetch('/api/repair/auto', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       const data = await res.json();
       if(!data.success) throw new Error(data.error||'Auto-réparation échouée');
+      appFiles[appSelectedFile] = data.fixedCode;
+      compileCache.delete(appSelectedFile); interactiveCache.delete(appSelectedFile);
+      // revalidation locale
+      try {
+        const vRes = await fetch('/api/repair', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: appSelectedFile, code: data.fixedCode, diagnostics: [] }) });
+        const vData = await vRes.json();
+        if(vData.success && vData.validation){
+          appValidation[appSelectedFile] = vData.validation;
+        }
+      } catch(e) { /* ignore */ }
+      if(data.finalDiagnostics?.length){
+        autoRepairMessage = `Auto-réparation partielle (${data.passes} passes, ${data.finalDiagnostics.length} erreur(s) restantes)`;
+      } else {
+        autoRepairMessage = `Auto-réparation réussie en ${data.passes} passe(s)`;
+      }
+    } catch(e){
+      autoRepairMessage = e.message;
+    } finally { autoRepairing = false; }
+  }
+
   async function bulkAutoRepair(){
     if(!appFiles || bulkAutoRepairing) return;
     bulkAutoRepairing = true; bulkMessage='';
@@ -289,25 +309,6 @@
       }
     } catch(e){ bulkMessage = 'Erreur globale: '+e.message; }
     finally { bulkAutoRepairing=false; }
-  }
-      appFiles[appSelectedFile] = data.fixedCode;
-      compileCache.delete(appSelectedFile); interactiveCache.delete(appSelectedFile);
-      // revalidation locale
-      try {
-        const vRes = await fetch('/api/repair', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: appSelectedFile, code: data.fixedCode, diagnostics: [] }) });
-        const vData = await vRes.json();
-        if(vData.success && vData.validation){
-          appValidation[appSelectedFile] = vData.validation;
-        }
-      } catch(e) { /* ignore */ }
-      if(data.finalDiagnostics?.length){
-        autoRepairMessage = `Auto-réparation partielle (${data.passes} passes, ${data.finalDiagnostics.length} erreur(s) restantes)`;
-      } else {
-        autoRepairMessage = `Auto-réparation réussie en ${data.passes} passe(s)`;
-      }
-    } catch(e){
-      autoRepairMessage = e.message;
-    } finally { autoRepairing = false; }
   }
 
   async function compileSelected() {
