@@ -92,7 +92,7 @@ export function seedContentIfSparse(blueprint){
   return blueprint.sample_content;
 }
 
-export async function buildGlobalGenerationPromptAsync(blueprint, selected){
+export async function buildGlobalGenerationPromptAsync(blueprint, selected, { generationProfile = 'safe' } = {}){
   let capHits = [];
   try { capHits = await detectCapabilitiesWithEmbeddings(blueprint); } catch(e){ capHits = detectCapabilities(blueprint); }
   if(capHits.length){
@@ -116,8 +116,15 @@ export async function buildGlobalGenerationPromptAsync(blueprint, selected){
   Object.values(usage).forEach(u => required.add(u.filename));
   const requiredList = Array.from(required).slice(0,25);
   const availableComponentsMeta = selected.map(c => `${c.name} :: ${c.filename} :: ${c.purpose}`).join('\n');
+  const modeBlock = generationProfile === 'external_libs'
+    ? 'MODE: external_libs (chart.js et @tanstack/table-core AUTORISÉS si réellement utilisés).'
+    : generationProfile === 'enhanced'
+      ? 'MODE: enhanced (structure optimisée, réutilisation agressive composants, AUCUNE dépendance externe).'
+      : 'MODE: safe (sortie minimalement nécessaire, aucune dépendance externe).';
+
   return { prompt: `SYSTEM:
 Tu es un architecte Senior SvelteKit. Objectif: produire TOUT le squelette d'application de haute qualité en une seule passe.
+${modeBlock}
 CAPABILITIES DETECTÉES: ${capHits.map(h=> h.id+':'+h.score.toFixed(2)+(h.similarity?'/sim:'+h.similarity.toFixed(2):'')).join(', ') || 'aucune'}
 
 DIFFERENTIATION:
@@ -150,10 +157,11 @@ RULES (ordre de priorité):
 4. Si has_layout=true fournir src/routes/+layout.svelte avec slot + imports nécessaires.
 5. Max ${requiredList.length + 5} fichiers.
 6. Accessibilité: un <h1> par page, alt sur chaque <img>.
-7. Pas de dépendances externes. Données = mocks locaux sample_content.
+7. ${generationProfile === 'external_libs' ? 'Seules dépendances externes permises: chart.js, @tanstack/table-core (inclure package.json si utilisées) sinon aucune.' : 'Pas de dépendances externes.'} Données = mocks locaux sample_content.
 8. Tailwind uniquement; réutiliser palette existante.
 9. Fichiers Svelte valides; pas de duplication markup composants.
 10. Adapter contenu aux capabilities détectées.
+11. Utiliser design tokens fournis; pour couleurs custom non palette préférer variables existantes.
 
 CONTENT TONE: moderne, professionnel, clair.
 
