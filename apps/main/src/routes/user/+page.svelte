@@ -1,6 +1,11 @@
 <script>
   // Page simplifiée: uniquement génération d'application IA
   let appPrompt = '';
+  let useBlueprintMode = false; // Toggle mode avancé
+  let blueprintData = null; // blueprint JSON retourné
+  let projectId = null; // id projet persisté (si non éphémère)
+  let blueprintValidation = null; // validation complète (mode blueprint)
+  let blueprintGenerating = false;
   let appIsGenerating = false;
   let appFiles = null; // { filename: code }
   let appValidation = null; // { filename: { diagnostics, ssrOk, domOk, formatted, ... } }
@@ -17,20 +22,169 @@
   let repairing = false;
   let repairMessage = '';
   let lastPatched = null;
+  let autoRepairing = false;
+  let autoRepairMessage = '';
+  let showDiff = false;
+  const fileHistory = new Map(); // filename -> [{code, ts}]
+  let bulkAutoRepairing = false;
+  let bulkMessage = '';
+  let restoring = false;
+  let restoreMessage = '';
+  let showHistory = false;
+  const redoStacks = new Map(); // filename -> [ {code, ts} ]
+
+  function pushHistory(filename, code){
+    if(!filename || !code) return;
+    const arr = fileHistory.get(filename) || [];
+    // éviter doublons consécutifs identiques
+    if(arr.length && arr[arr.length-1].code === code) return;
+    arr.push({ code, ts: Date.now() });
+    if(arr.length>6) arr.shift();
+    fileHistory.set(filename, arr);
+    // Invalidation de la pile redo (nouvelle branche d'historique)
+    redoStacks.set(filename, []);
+  }
+
+  function getLastVersion(filename){
+    const arr = fileHistory.get(filename) || [];
+    if(arr.length<1) return null;
+    return arr[arr.length-1].code;
+  }
+
+  async function restorePrevious(){
+    if(!appSelectedFile || restoring) return;
+    const hist = fileHistory.get(appSelectedFile);
+    if(!hist || !hist.length) { restoreMessage='Aucune version à restaurer.'; return; }
+    restoring = true; restoreMessage='';
+    try {
+      const previous = hist[hist.length-1];
+      if(!previous){ restoreMessage='Aucune version précédente.'; restoring=false; return; }
+      const current = appFiles[appSelectedFile];
+      // Pousser la version courante dans redo stack
+      const rStack = redoStacks.get(appSelectedFile) || [];
+      rStack.push({ code: current, ts: Date.now() });
+      redoStacks.set(appSelectedFile, rStack);
+      // Appliquer l'ancienne version et retirer du history
+      hist.pop();
+      appFiles[appSelectedFile] = previous.code;
+      compileCache.delete(appSelectedFile);
+      interactiveCache.delete(appSelectedFile);
+      // Revalidation rapide via endpoint repair (sans diagnostics) pour récupérer structure validation uniforme
+      try {
+        const res = await fetch('/api/repair', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: appSelectedFile, code: previous.code, diagnostics: [] }) });
+        const data = await res.json();
+        if(data.success && data.validation){
+          appValidation[appSelectedFile] = data.validation;
+        }
+      } catch(e){ /* ignore */ }
+      restoreMessage = 'Version précédente restaurée.';
+      showDiff = false;
+    } catch(e){
+      restoreMessage = 'Erreur restauration: '+ e.message;
+    } finally {
+      restoring = false;
+    }
+  }
+
+  async function restoreFromHistory(index){
+    if(!appSelectedFile || restoring) return;
+    const hist = fileHistory.get(appSelectedFile);
+    if(!hist || index < 0 || index >= hist.length){ restoreMessage='Index invalide.'; return; }
+    restoring = true; restoreMessage='';
+    try {
+      const target = hist[index];
+      const current = appFiles[appSelectedFile];
+      // Pousser version courante dans redo
+      const rStack = redoStacks.get(appSelectedFile) || [];
+      rStack.push({ code: current, ts: Date.now() });
+      redoStacks.set(appSelectedFile, rStack);
+      // Couper l'historique à index (on garde seulement les versions antérieures à target)
+      const kept = hist.slice(0, index);
+      fileHistory.set(appSelectedFile, kept);
+      appFiles[appSelectedFile] = target.code;
+      compileCache.delete(appSelectedFile);
+      interactiveCache.delete(appSelectedFile);
+      try {
+        const res = await fetch('/api/repair', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: appSelectedFile, code: target.code, diagnostics: [] }) });
+        const data = await res.json();
+        if(data.success && data.validation){
+          appValidation[appSelectedFile] = data.validation;
+        }
+      } catch(e){/* ignore */}
+      restoreMessage = 'Version sélectionnée restaurée.';
+      showDiff = false; showHistory = false;
+    } catch(e){
+      restoreMessage = 'Erreur restauration ciblée: '+ e.message;
+    } finally { restoring=false; }
+  }
+
+  async function redoPrevious(){
+    if(!appSelectedFile) return;
+    const stack = redoStacks.get(appSelectedFile) || [];
+    if(!stack.length){ restoreMessage='Rien à refaire.'; return; }
+    const next = stack.pop();
+    redoStacks.set(appSelectedFile, stack);
+    // Sauvegarder version actuelle dans l'historique avant d'appliquer redo
+    pushHistory(appSelectedFile, appFiles[appSelectedFile]);
+    appFiles[appSelectedFile] = next.code;
+    compileCache.delete(appSelectedFile); interactiveCache.delete(appSelectedFile);
+    try {
+      const res = await fetch('/api/repair', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: appSelectedFile, code: next.code, diagnostics: [] }) });
+      const data = await res.json();
+      if(data.success && data.validation) appValidation[appSelectedFile] = data.validation;
+    } catch(e){ /* ignore */ }
+    restoreMessage = 'Rétablissement effectué.';
+  }
+
+  function computeDiff(a,b){
+    if(a===b) return [{ type:'same', text:a }];
+    const aLines = a.split('\n');
+    const bLines = b.split('\n');
+    const m = aLines.length, n = bLines.length;
+    const dp = Array.from({length:m+1}, ()=> Array(n+1).fill(0));
+    for(let i=m-1;i>=0;i--){
+      for(let j=n-1;j>=0;j--){
+        if(aLines[i]===bLines[j]) dp[i][j] = 1 + dp[i+1][j+1];
+        else dp[i][j] = Math.max(dp[i+1][j], dp[i][j+1]);
+      }
+    }
+    const out = [];
+    let i=0,j=0;
+    while(i<m && j<n){
+      if(aLines[i]===bLines[j]){ out.push({ type:'same', text:aLines[i] }); i++; j++; }
+      else if(dp[i+1][j] >= dp[i][j+1]){ out.push({ type:'del', text:aLines[i] }); i++; }
+      else { out.push({ type:'add', text:bLines[j] }); j++; }
+    }
+    while(i<m){ out.push({ type:'del', text:aLines[i++] }); }
+    while(j<n){ out.push({ type:'add', text:bLines[j++] }); }
+    return out;
+  }
 
   async function generateApplication() {
     appError = '';
-    appIsGenerating = true;
+    if(useBlueprintMode){ blueprintGenerating = true; } else { appIsGenerating = true; }
     try {
-      const res = await fetch('/api/generate/app', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: appPrompt })
-      });
-  const data = await res.json();
-  if (!data.success) throw new Error(data.error || 'Erreur inconnue');
-  appFiles = data.files || null;
-  appValidation = data.validation || null;
+      let data;
+      if(useBlueprintMode){
+        const res = await fetch('/api/site/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: appPrompt, provider:'openai' }) });
+        data = await res.json();
+        if(!data.success) throw new Error(data.error||'Erreur blueprint');
+        blueprintData = data.blueprint;
+        appFiles = data.files || null;
+        blueprintValidation = data.validation || null;
+        projectId = data.project?.id || null;
+        appValidation = data.validation || null; // pour réutiliser UI existante
+      } else {
+        const res = await fetch('/api/generate/app', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: appPrompt })
+        });
+        data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Erreur inconnue');
+        appFiles = data.files || null;
+        appValidation = data.validation || null;
+      }
       if(appFiles){
         const keys = Object.keys(appFiles);
         // On privilégie le premier fichier .svelte pour que l'utilisateur voie rapidement un rendu
@@ -45,7 +199,7 @@
       console.error(e);
       appError = e.message;
     } finally {
-      appIsGenerating = false;
+      if(useBlueprintMode){ blueprintGenerating = false; } else { appIsGenerating = false; }
     }
   }
 
@@ -54,6 +208,8 @@
     appValidation = null;
     appSelectedFile = null;
     compileUrl='';
+    blueprintData=null; projectId=null; blueprintValidation=null;
+    interactiveUrl='';
   }
   function selectFile(f) { appSelectedFile = f; }
   function copyCurrent() { if(appSelectedFile) navigator.clipboard.writeText(appFiles[appSelectedFile]); }
@@ -62,7 +218,13 @@
     repairing = true; repairMessage='';
     try {
       const meta = appValidation[appSelectedFile];
-      const res = await fetch('/api/repair', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: appSelectedFile, code: meta.formatted || meta.original || appFiles[appSelectedFile], diagnostics: meta.diagnostics||[] }) });
+      pushHistory(appSelectedFile, meta.formatted || meta.original || appFiles[appSelectedFile]);
+      let res;
+      if(useBlueprintMode && projectId){
+        res = await fetch('/api/repair/project', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ projectId, filename: appSelectedFile, code: meta.formatted || meta.original || appFiles[appSelectedFile], diagnostics: meta.diagnostics||[] }) });
+      } else {
+        res = await fetch('/api/repair', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: appSelectedFile, code: meta.formatted || meta.original || appFiles[appSelectedFile], diagnostics: meta.diagnostics||[] }) });
+      }
       const data = await res.json();
       if(!data.success) throw new Error(data.error||'Échec réparation');
       lastPatched = data.patchedCode;
@@ -84,6 +246,68 @@
       }
     } catch(e){ repairMessage = e.message; }
     finally { repairing = false; }
+  }
+
+  async function autoRepairCurrent(){
+    if(!appSelectedFile) return;
+    autoRepairing = true; autoRepairMessage='';
+    try {
+      const meta = appValidation?.[appSelectedFile];
+      pushHistory(appSelectedFile, meta?.formatted || appFiles[appSelectedFile]);
+      const payload = { filename: appSelectedFile, code: meta?.formatted || appFiles[appSelectedFile], maxPasses: 3 };
+      if(useBlueprintMode && projectId) payload.projectId = projectId;
+      const res = await fetch('/api/repair/auto', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const data = await res.json();
+      if(!data.success) throw new Error(data.error||'Auto-réparation échouée');
+  async function bulkAutoRepair(){
+    if(!appFiles || bulkAutoRepairing) return;
+    bulkAutoRepairing = true; bulkMessage='';
+    try {
+      const errorFiles = Object.keys(appFiles).filter(f=> appValidation?.[f]?.diagnostics?.some(d=> d.severity==='error'));
+      if(!errorFiles.length){ bulkMessage='Aucune erreur à corriger.'; bulkAutoRepairing=false; return; }
+      for(const f of errorFiles){
+        const meta = appValidation[f];
+        pushHistory(f, meta?.formatted || appFiles[f]);
+        const payload = { filename: f, code: meta?.formatted || appFiles[f], maxPasses: 3 };
+        if(useBlueprintMode && projectId) payload.projectId = projectId;
+        const res = await fetch('/api/repair/auto', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        const data = await res.json();
+        if(data.success){
+          appFiles[f] = data.fixedCode;
+          // revalidation post modif isolée
+          try {
+            const vRes = await fetch('/api/repair', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: f, code: data.fixedCode, diagnostics: [] }) });
+            const vData = await vRes.json();
+            if(vData.success && vData.validation) appValidation[f] = vData.validation;
+          } catch(e){ /* ignore */ }
+        } else {
+          bulkMessage += `\n${f}: échec (${data.error})`;
+        }
+      }
+      if(!bulkMessage){
+        bulkMessage = 'Auto-réparation terminée.';
+      }
+    } catch(e){ bulkMessage = 'Erreur globale: '+e.message; }
+    finally { bulkAutoRepairing=false; }
+  }
+      appFiles[appSelectedFile] = data.fixedCode;
+      compileCache.delete(appSelectedFile); interactiveCache.delete(appSelectedFile);
+      // revalidation locale
+      try {
+        const vRes = await fetch('/api/repair', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename: appSelectedFile, code: data.fixedCode, diagnostics: [] }) });
+        const vData = await vRes.json();
+        if(vData.success && vData.validation){
+          appValidation[appSelectedFile] = vData.validation;
+        }
+      } catch(e) { /* ignore */ }
+      if(data.finalDiagnostics?.length){
+        autoRepairMessage = `Auto-réparation partielle (${data.passes} passes, ${data.finalDiagnostics.length} erreur(s) restantes)`;
+      } else {
+        autoRepairMessage = `Auto-réparation réussie en ${data.passes} passe(s)`;
+      }
+    } catch(e){
+      autoRepairMessage = e.message;
+    } finally { autoRepairing = false; }
   }
 
   async function compileSelected() {
@@ -176,10 +400,17 @@
         <textarea id="app_prompt" bind:value={appPrompt} rows="8" placeholder="Ex: Génère une mini app SvelteKit avec une page d'accueil, page produits et page contact. Utilise Tailwind." class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"></textarea>
         <p class="text-[11px] text-gray-500 mt-1 leading-snug">Décris architecture, pages, style, contraintes (taille, libs). Moins de 8 fichiers recommandé.</p>
       </div>
+      <div class="flex items-center gap-2 text-xs bg-gray-50 border rounded p-2">
+        <label class="flex items-center gap-2 cursor-pointer select-none">
+          <input type="checkbox" bind:checked={useBlueprintMode} class="rounded border-gray-300 text-purple-600 focus:ring-purple-500" />
+          <span class="font-medium text-gray-700">Mode Blueprint avancé</span>
+        </label>
+        <span class="text-[10px] text-gray-500">{useBlueprintMode ? 'Multi-fichiers orchestré avec blueprint, validation complète & persistance projet (si auth).' : 'Génération simple multi-fichiers rapide.'}</span>
+      </div>
       <div class="flex items-center gap-3">
-        <button class="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-purple-600 to-fuchsia-600 shadow hover:from-purple-500 hover:to-fuchsia-500 disabled:opacity-50 flex items-center gap-2" on:click={generateApplication} disabled={!appPrompt.trim() || appIsGenerating}>
-          {#if appIsGenerating}<i class="fas fa-spinner fa-spin"></i>{:else}<i class="fas fa-gears"></i>{/if}
-          Générer
+        <button class="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-purple-600 to-fuchsia-600 shadow hover:from-purple-500 hover:to-fuchsia-500 disabled:opacity-50 flex items-center gap-2" on:click={generateApplication} disabled={!appPrompt.trim() || appIsGenerating || blueprintGenerating}>
+          {#if appIsGenerating || blueprintGenerating}<i class="fas fa-spinner fa-spin"></i>{:else}<i class="fas fa-gears"></i>{/if}
+          {useBlueprintMode ? 'Générer Blueprint' : 'Générer'}
         </button>
         {#if appFiles}
           <button class="px-4 py-2 rounded-lg text-sm bg-white border hover:bg-gray-50 flex items-center gap-2" on:click={resetGeneration}><i class="fas fa-rotate-left"></i> Réinitialiser</button>
@@ -187,6 +418,19 @@
       </div>
       {#if appError}
         <div class="text-xs text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded">{appError}</div>
+      {/if}
+      {#if useBlueprintMode && blueprintData}
+        <div class="text-[11px] bg-indigo-50 border border-indigo-200 text-indigo-700 rounded p-2 space-y-1 max-h-48 overflow-auto">
+          <div class="font-semibold flex items-center gap-1"><i class="fas fa-sitemap"></i> Blueprint</div>
+          <div><span class="font-medium">Routes:</span> {blueprintData.routes?.map(r=>r.path).join(', ')}</div>
+          {#if blueprintData.core_components?.length}
+            <div><span class="font-medium">Composants:</span> {blueprintData.core_components.join(', ')}</div>
+          {/if}
+          {#if blueprintData.design_tokens?.colors?.length}
+            <div><span class="font-medium">Palette:</span> {blueprintData.design_tokens.colors.slice(0,6).join(', ')}{#if blueprintData.design_tokens.colors.length>6}...{/if}</div>
+          {/if}
+          {#if projectId}<div class="text-[10px] text-indigo-500">Projet ID: {projectId}</div>{/if}
+        </div>
       {/if}
       <div class="text-[11px] text-gray-500 leading-relaxed">
         <p class="mb-1 font-medium text-gray-700">Tips :</p>
@@ -199,64 +443,78 @@
       </div>
     </div>
 
-    <!-- Panneau droit: Résultats -->
+    <!-- Panneau droit: Résultats (onglets toujours visibles) -->
     <div class="bg-white border rounded-xl shadow-sm p-0 flex flex-col overflow-hidden lg:col-span-2 min-h-[540px]">
-      {#if !appFiles}
-        <div class="flex-1 flex items-center justify-center text-gray-400 text-sm p-10 text-center">
-          {#if appIsGenerating}
-            Génération en cours...
-          {:else}
-            Aucune application générée pour l'instant.
-          {/if}
-        </div>
-      {:else}
-        <div class="flex h-full">
-          <div class="flex-1 flex flex-col">
-            <!-- Barre onglets globaux -->
-            <div class="bg-gray-50 border-b px-4 pt-3">
+      <div class="flex h-full">
+        <div class="flex-1 flex flex-col">
+          <!-- Barre onglets globaux toujours affichée -->
+          <div class="bg-gray-50 border-b px-4 pt-3">
               <div class="flex items-center gap-6 text-[12px] font-medium">
-                <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='files' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> activeView='files'}>
-                  <i class="fas fa-folder-open mr-1"></i>Fichiers
-                </button>
-                <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='code' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> activeView='code'} disabled={!appSelectedFile}>
-                  <i class="fas fa-code mr-1"></i>Code
-                </button>
-                <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='preview-ssr' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> { if(appSelectedFile?.endsWith('.svelte')) activeView='preview-ssr'; }} disabled={!appSelectedFile || !appSelectedFile.endsWith('.svelte')}>
-                  <i class="fas fa-eye mr-1"></i>Preview SSR
-                </button>
-                <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='preview-interactive' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> { if(appSelectedFile?.endsWith('.svelte')) activeView='preview-interactive'; }} disabled={!appSelectedFile || !appSelectedFile.endsWith('.svelte')}>
-                  <i class="fas fa-play-circle mr-1"></i>Interactif
-                </button>
-              </div>
+              <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='files' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> activeView='files'}>
+                <i class="fas fa-folder-open mr-1"></i>Fichiers
+              </button>
+              <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='code' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> activeView='code'} disabled={!appSelectedFile}>
+                <i class="fas fa-code mr-1"></i>Code
+              </button>
+              <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='preview-ssr' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> { if(appSelectedFile?.endsWith('.svelte')) activeView='preview-ssr'; }} disabled={!appSelectedFile || !appSelectedFile.endsWith('.svelte')}>
+                <i class="fas fa-eye mr-1"></i>Preview SSR
+              </button>
+              <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='preview-interactive' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> { if(appSelectedFile?.endsWith('.svelte')) activeView='preview-interactive'; }} disabled={!appSelectedFile || !appSelectedFile.endsWith('.svelte')}>
+                <i class="fas fa-play-circle mr-1"></i>Interactif
+              </button>
+            </div>
               <div class="flex items-center justify-between mt-3 mb-2 text-xs">
-                <div class="flex items-center gap-2">
-                  <i class="fas fa-file-code text-purple-600"></i>
-                  <span class="font-medium truncate max-w-[240px]" title={appSelectedFile}>{appSelectedFile || 'Aucun fichier sélectionné'}</span>
-                </div>
-                <div class="flex items-center gap-3">
-                  {#if appSelectedFile}
-                    <button class="text-purple-600 hover:underline" on:click={copyCurrent}>Copier</button>
-                    {#if appValidation && appValidation[appSelectedFile]?.diagnostics?.length}
-                      <button class="text-amber-600 hover:underline disabled:opacity-50" disabled={repairing} on:click={repairCurrent}>
+              <div class="flex items-center gap-2">
+                <i class="fas fa-file-code text-purple-600"></i>
+                <span class="font-medium truncate max-w-[240px]" title={appSelectedFile}>{appSelectedFile || 'Aucun fichier sélectionné'}</span>
+              </div>
+              <div class="flex items-center gap-3">
+                {#if appSelectedFile}
+                  <button class="text-purple-600 hover:underline" on:click={copyCurrent}>Copier</button>
+                    <button class="text-gray-600 hover:underline disabled:opacity-40" disabled={!fileHistory.get(appSelectedFile)?.length} on:click={()=> showDiff=!showDiff}>{showDiff? 'Code':'Diff'}</button>
+                    <button class="text-rose-600 hover:underline disabled:opacity-40" disabled={!fileHistory.get(appSelectedFile)?.length || restoring} on:click={restorePrevious}>
+                      {#if restoring}<i class="fas fa-spinner fa-spin"></i>{:else}<i class="fas fa-rotate-left"></i>{/if} Restaurer
+                    </button>
+                    <button class="text-emerald-600 hover:underline disabled:opacity-40" disabled={!(redoStacks.get(appSelectedFile)||[]).length} on:click={redoPrevious}>
+                      <i class="fas fa-share"></i> Redo
+                    </button>
+                    <button class="text-gray-500 hover:underline disabled:opacity-40" disabled={!fileHistory.get(appSelectedFile)?.length} on:click={()=> showHistory=!showHistory}>
+                      <i class="fas fa-clock-rotate-left"></i> Historique
+                    </button>
+                  {#if appValidation && appValidation[appSelectedFile]?.diagnostics?.length}
+                    <div class="flex items-center gap-2">
+                      <button class="text-amber-600 hover:underline disabled:opacity-50" disabled={repairing || autoRepairing} on:click={repairCurrent}>
                         {#if repairing}<i class="fas fa-spinner fa-spin"></i>{:else}<i class="fas fa-wrench"></i>{/if} Réparer (IA)
                       </button>
-                    {/if}
+                      <button class="text-indigo-600 hover:underline disabled:opacity-50" disabled={autoRepairing || repairing} on:click={autoRepairCurrent}>
+                        {#if autoRepairing}<i class="fas fa-circle-notch fa-spin"></i>{:else}<i class="fas fa-robot"></i>{/if} Auto
+                      </button>
+                    </div>
                   {/if}
-                </div>
+                {/if}
               </div>
             </div>
+          </div>
 
-            <!-- Contenu suivant onglet -->
-            {#if activeView==='files'}
-              <div class="flex-1 overflow-auto p-4 bg-white text-xs space-y-1">
+          <!-- Contenu dynamique selon onglet -->
+          {#if activeView==='files'}
+            <div class="flex-1 overflow-auto p-4 bg-white text-xs space-y-1">
+              {#if !appFiles}
+                <div class="h-full flex items-center justify-center text-gray-400 text-sm text-center">
+                  {#if appIsGenerating || blueprintGenerating}
+                    <span class="flex items-center gap-2"><i class="fas fa-spinner fa-spin"></i> Génération en cours...</span>
+                  {:else}
+                    Aucune application générée pour l'instant.
+                  {/if}
+                </div>
+              {:else}
                 <div class="text-[11px] text-gray-500 mb-2">Liste des fichiers générés.</div>
                 <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-2">
                   {#each Object.keys(appFiles) as f}
                     {#key f}
                       {@const meta = appValidation && appValidation[f]}
                       <button
-                        class="relative group text-left px-2 py-2 rounded border text-[11px] break-all transition-colors
-                          {appSelectedFile === f ? 'bg-purple-50 border-purple-400 text-purple-700 font-medium' : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-600'}"
+                        class="relative group text-left px-2 py-2 rounded border text-[11px] break-all transition-colors {appSelectedFile === f ? 'bg-purple-50 border-purple-400 text-purple-700 font-medium' : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-600'}"
                         on:click={()=> { selectFile(f); if(f.endsWith('.svelte')) activeView='code'; }}
                         title={meta && meta.diagnostics?.length ? meta.diagnostics.map(d=>d.severity+': '+d.message).join('\n') : f}
                       >
@@ -279,78 +537,134 @@
                     {/key}
                   {/each}
                 </div>
-              </div>
-            {:else if activeView==='code'}
-              <div class="flex-1 overflow-auto bg-gray-900 text-green-300 text-[11px] p-4 font-mono leading-relaxed relative">
-                {#if appSelectedFile}
-                  <pre class="mb-4"><code>{(appValidation && appValidation[appSelectedFile]?.formatted) || appFiles[appSelectedFile]}</code></pre>
-                  <div class="mt-2 text-[10px] text-gray-400 space-y-2 bg-gray-800/40 p-3 rounded border border-gray-700">
-                    <div class="flex items-center justify-between">
-                      <span class="font-semibold text-gray-300">Diagnostics</span>
-                      <button class="text-xs underline" on:click={()=> showDiagnostics=!showDiagnostics}>{showDiagnostics ? 'masquer' : 'afficher'}</button>
+              {/if}
+            </div>
+          {:else if activeView==='code'}
+            <div class="flex-1 overflow-auto bg-gray-900 text-green-300 text-[11px] p-4 font-mono leading-relaxed relative">
+              {#if !appFiles}
+                <div class="h-full flex items-center justify-center text-gray-500">Aucun code – lance une génération.</div>
+              {:else if appSelectedFile}
+                {#if showDiff}
+                  {@const previous = getLastVersion(appSelectedFile)}
+                  {#if previous}
+                    {@const current = (appValidation && appValidation[appSelectedFile]?.formatted) || appFiles[appSelectedFile]}
+                    {@const diffs = computeDiff(previous, current)}
+                    <div class="mb-4 text-[11px] font-mono leading-relaxed">
+                      {#each diffs as d}
+                        <div class="whitespace-pre {d.type==='add' ? 'bg-green-900/30 text-green-300' : d.type==='del' ? 'bg-red-900/30 text-red-300 line-through' : 'text-gray-300'}">{d.text}</div>
+                      {/each}
                     </div>
-                    {#if repairMessage}<div class="text-amber-400">{repairMessage}</div>{/if}
-                    {#if showDiagnostics}
-                      {#if appValidation && appValidation[appSelectedFile]}
-                        {#if appValidation[appSelectedFile].diagnostics.length === 0}
-                          <div class="text-emerald-400">Aucun diagnostic.</div>
-                        {:else}
-                          <ul class="space-y-1 max-h-56 overflow-auto pr-1">
-                            {#each appValidation[appSelectedFile].diagnostics as d, i}
-                              <li class="rounded px-2 py-1 bg-gray-800/60 border border-gray-700 flex gap-2 items-start">
-                                <span class="uppercase text-[9px] mt-0.5 tracking-wide {d.severity==='error' ? 'text-red-400' : d.severity==='warning' ? 'text-amber-300' : 'text-gray-400'}">{d.severity}</span>
-                                <span class="flex-1 leading-snug">{d.message}</span>
-                                <div class="flex flex-col items-end gap-0.5 text-[9px] text-gray-500">
-                                  {#if d.rule}<span>{d.rule}</span>{/if}
-                                  {#if d.line}<span>L{d.line}</span>{/if}
-                                </div>
-                              </li>
-                            {/each}
-                          </ul>
-                        {/if}
-                      {/if}
+                  {:else}
+                    <div class="text-gray-500 text-xs mb-4">Aucune version précédente pour diff.</div>
+                  {/if}
+                {:else}
+                  <pre class="mb-4"><code>{(appValidation && appValidation[appSelectedFile]?.formatted) || appFiles[appSelectedFile]}</code></pre>
+                {/if}
+                {#if showHistory}
+                  {@const hist = fileHistory.get(appSelectedFile) || []}
+                  <div class="mb-4 border border-gray-700 rounded bg-gray-800/60 p-2 max-h-48 overflow-auto text-[10px] space-y-1">
+                    {#if hist.length===0}
+                      <div class="text-gray-400">Aucune version enregistrée.</div>
+                    {:else}
+                      {#each [...hist].map((h,i)=> ({...h,i})) as hObj}
+                        <div class="flex items-center justify-between gap-2">
+                          <span class="truncate flex-1 text-gray-300">{new Date(hObj.ts).toLocaleTimeString()} - {hObj.code.split('\n')[0]?.slice(0,40)}</span>
+                          <button class="px-1.5 py-0.5 text-[10px] rounded bg-gray-700 hover:bg-gray-600" on:click={()=> restoreFromHistory(hObj.i)}>Restaurer</button>
+                        </div>
+                      {/each}
                     {/if}
                   </div>
-                {:else}
-                  <div class="h-full flex items-center justify-center text-gray-500">Sélectionne un fichier dans l'onglet Fichiers.</div>
                 {/if}
+                <div class="mt-2 text-[10px] text-gray-400 space-y-2 bg-gray-800/40 p-3 rounded border border-gray-700">
+                  <div class="flex items-center justify-between">
+                    <span class="font-semibold text-gray-300">Diagnostics</span>
+                    <button class="text-xs underline" on:click={()=> showDiagnostics=!showDiagnostics}>{showDiagnostics ? 'masquer' : 'afficher'}</button>
+                  </div>
+                  {#if repairMessage}<div class="text-amber-400">{repairMessage}</div>{/if}
+                  {#if autoRepairMessage}<div class="text-indigo-400">{autoRepairMessage}</div>{/if}
+                  {#if restoreMessage}<div class="text-rose-300">{restoreMessage}</div>{/if}
+                  {#if showDiagnostics}
+          {#if activeView==='files'}
+            {#if appFiles}
+              <div class="px-4 pb-3 border-t bg-gray-50 flex items-center justify-between text-[11px]">
+                <div class="flex items-center gap-2 text-gray-500">
+                  <i class="fas fa-triangle-exclamation"></i>
+                  {#await Promise.resolve(Object.keys(appFiles).filter(f=> appValidation?.[f]?.diagnostics?.some(d=> d.severity==='error')).length) then errCount}
+                    <span>{errCount} fichier(s) avec erreurs</span>
+                  {/await}
+                </div>
+                <div class="flex items-center gap-3">
+                  <button class="text-indigo-600 hover:underline disabled:opacity-40" disabled={bulkAutoRepairing} on:click={bulkAutoRepair}>{#if bulkAutoRepairing}<i class="fas fa-spinner fa-spin"></i>{:else}<i class="fas fa-robot"></i>{/if} Auto réparer tout</button>
+                </div>
               </div>
-            {:else if activeView==='preview-ssr'}
-              <div class="flex-1 bg-white relative">
-                {#if !appSelectedFile}
-                  <div class="h-full flex items-center justify-center text-gray-500 text-xs">Aucun fichier sélectionné.</div>
-                {:else if !appSelectedFile.endsWith('.svelte')}
-                  <div class="h-full flex items-center justify-center text-gray-500 text-xs">Le rendu SSR n'est disponible que pour les fichiers .svelte</div>
-                {:else}
-                  {#if compiling && !compileUrl}
-                    <div class="h-full flex items-center justify-center text-gray-500 text-xs gap-2"><i class="fas fa-spinner fa-spin"></i> Compilation...</div>
-                  {:else if compileUrl && compileUrl.startsWith('error:')}
-                    <div class="p-4 text-xs text-red-600 bg-red-50 h-full overflow-auto">{compileUrl.slice(6)}</div>
-                  {:else if compileUrl}
-                    <iframe title="Rendu SSR" src={compileUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
-                  {/if}
-                {/if}
-              </div>
-            {:else if activeView==='preview-interactive'}
-              <div class="flex-1 bg-white relative">
-                {#if !appSelectedFile}
-                  <div class="h-full flex items-center justify-center text-gray-500 text-xs">Aucun fichier sélectionné.</div>
-                {:else if !appSelectedFile.endsWith('.svelte')}
-                  <div class="h-full flex items-center justify-center text-gray-500 text-xs">Mode interactif seulement pour .svelte</div>
-                {:else}
-                  {#if interactiveLoading && !interactiveUrl}
-                    <div class="h-full flex items-center justify-center text-gray-500 text-xs gap-2"><i class="fas fa-spinner fa-spin"></i> Construction sandbox...</div>
-                  {:else if interactiveUrl && interactiveUrl.startsWith('error:')}
-                    <div class="p-4 text-xs text-red-600 bg-red-50 h-full overflow-auto">{interactiveUrl.slice(6)}</div>
-                  {:else if interactiveUrl}
-                    <iframe title="Sandbox Interactif" sandbox="allow-scripts" src={interactiveUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
-                  {/if}
-                {/if}
-              </div>
+              {#if bulkMessage}
+                <div class="px-4 py-2 text-[10px] bg-indigo-50 text-indigo-700 border-t border-indigo-200">{bulkMessage}</div>
+              {/if}
             {/if}
-          </div>
+          {/if}
+                    {#if appValidation && appValidation[appSelectedFile]}
+                      {#if appValidation[appSelectedFile].diagnostics.length === 0}
+                        <div class="text-emerald-400">Aucun diagnostic.</div>
+                      {:else}
+                        <ul class="space-y-1 max-h-56 overflow-auto pr-1">
+                          {#each appValidation[appSelectedFile].diagnostics as d, i}
+                            <li class="rounded px-2 py-1 bg-gray-800/60 border border-gray-700 flex gap-2 items-start">
+                              <span class="uppercase text-[9px] mt-0.5 tracking-wide {d.severity==='error' ? 'text-red-400' : d.severity==='warning' ? 'text-amber-300' : 'text-gray-400'}">{d.severity}</span>
+                              <span class="flex-1 leading-snug">{d.message}</span>
+                              <div class="flex flex-col items-end gap-0.5 text-[9px] text-gray-500">
+                                {#if d.rule}<span>{d.rule}</span>{/if}
+                                {#if d.line}<span>L{d.line}</span>{/if}
+                              </div>
+                            </li>
+                          {/each}
+                        </ul>
+                      {/if}
+                    {/if}
+                  {/if}
+                </div>
+              {:else}
+                <div class="h-full flex items-center justify-center text-gray-500">Sélectionne un fichier dans l'onglet Fichiers.</div>
+              {/if}
+            </div>
+          {:else if activeView==='preview-ssr'}
+            <div class="flex-1 bg-white relative">
+              {#if !appFiles}
+                <div class="h-full flex items-center justify-center text-gray-500 text-xs">Aucun rendu – génère d'abord une application.</div>
+              {:else if !appSelectedFile}
+                <div class="h-full flex items-center justify-center text-gray-500 text-xs">Aucun fichier sélectionné.</div>
+              {:else if !appSelectedFile.endsWith('.svelte')}
+                <div class="h-full flex items-center justify-center text-gray-500 text-xs">Le rendu SSR n'est disponible que pour les fichiers .svelte</div>
+              {:else}
+                {#if compiling && !compileUrl}
+                  <div class="h-full flex items-center justify-center text-gray-500 text-xs gap-2"><i class="fas fa-spinner fa-spin"></i> Compilation...</div>
+                {:else if compileUrl && compileUrl.startsWith('error:')}
+                  <div class="p-4 text-xs text-red-600 bg-red-50 h-full overflow-auto">{compileUrl.slice(6)}</div>
+                {:else if compileUrl}
+                  <iframe title="Rendu SSR" src={compileUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
+                {/if}
+              {/if}
+            </div>
+          {:else if activeView==='preview-interactive'}
+            <div class="flex-1 bg-white relative">
+              {#if !appFiles}
+                <div class="h-full flex items-center justify-center text-gray-500 text-xs">Aucun sandbox – génère d'abord une application.</div>
+              {:else if !appSelectedFile}
+                <div class="h-full flex items-center justify-center text-gray-500 text-xs">Aucun fichier sélectionné.</div>
+              {:else if !appSelectedFile.endsWith('.svelte')}
+                <div class="h-full flex items-center justify-center text-gray-500 text-xs">Mode interactif seulement pour .svelte</div>
+              {:else}
+                {#if interactiveLoading && !interactiveUrl}
+                  <div class="h-full flex items-center justify-center text-gray-500 text-xs gap-2"><i class="fas fa-spinner fa-spin"></i> Construction sandbox...</div>
+                {:else if interactiveUrl && interactiveUrl.startsWith('error:')}
+                  <div class="p-4 text-xs text-red-600 bg-red-50 h-full overflow-auto">{interactiveUrl.slice(6)}</div>
+                {:else if interactiveUrl}
+                  <iframe title="Sandbox Interactif" sandbox="allow-scripts" src={interactiveUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
+                {/if}
+              {/if}
+            </div>
+          {/if}
         </div>
-      {/if}
+      </div>
     </div>
   </div>
 </div>

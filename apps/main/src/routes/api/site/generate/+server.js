@@ -7,6 +7,7 @@ import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/publi
 import { summarizeCatalog, componentsCatalog, selectComponentsForBlueprint } from '$lib/catalog/components.js';
 import { buildGlobalGenerationPrompt, buildGlobalGenerationPromptAsync } from '$lib/prompt/promptBuilders.js';
 import { validateAndFix, unifyPalette, addAccessibilityFixes } from '$lib/validator/svelteValidator.js';
+import { validateFiles } from '$lib/validation/validator.js';
 
 // Orchestrateur: génère blueprint et/ou code application selon état projet.
 // Body: { query?: string, projectId?: string, regenerateFile?: string }
@@ -372,7 +373,14 @@ Ancienne version:
       compileResults[fname] = { ok:false, stage:'compile', error: e.message };
     }
   }
-  return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues, singlePass: Object.keys(files).length>0, capabilities, compileResults });
+  // Validation ESLint/Prettier/Compile unifiée (nouvelle) pour chaque fichier
+  let fullValidation = null;
+  try {
+    fullValidation = await validateFiles(files);
+  } catch(e){
+    console.warn('validateFiles global failed', e.message);
+  }
+  return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues, validation: fullValidation, singlePass: Object.keys(files).length>0, capabilities, compileResults });
   } catch (e) {
     console.error('site/generate error', e);
     return json({ success:false, error:e.message }, { status:500 });

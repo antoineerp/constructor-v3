@@ -73,7 +73,53 @@ export async function validateFiles(files) {
           }
         }
       } catch (e) {
-        diagnostics.push({ severity: 'error', source: 'eslint', message: 'ESLint erreur: ' + e.message });
+        if (/Could not find config file/i.test(e.message)) {
+          // Fallback minimal inline config (évite l'erreur bloquante sur environnements sans fichier config ESLint)
+          try {
+            const fallback = new ESLint({
+              fix: true,
+              useFlatConfig: true,
+              overrideConfig: [
+                {
+                  files: ['**/*.{js,ts,svelte}'],
+                  ignores: ['dist','build','.svelte-kit','node_modules'],
+                  plugins: { 'svelte': await import('eslint-plugin-svelte') },
+                  languageOptions: {
+                    parser: (await import('svelte-eslint-parser')).default,
+                    parserOptions: { extraFileExtensions: ['.svelte'], ecmaVersion: 2022, sourceType: 'module' }
+                  },
+                  rules: {
+                    'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+                    'no-undef': 'error'
+                  }
+                }
+              ]
+            });
+            const lintResults = await fallback.lintText(working, { filePath: filename });
+            for (const lr of lintResults) {
+              if (lr.output && lr.output !== working) {
+                working = lr.output;
+                fixed = lr.output;
+                fixApplied = true;
+              }
+              if (lr.messages?.length) {
+                diagnostics.push(...lr.messages.map(m => ({
+                  severity: mapSeverity(m.severity),
+                  rule: m.ruleId || 'unknown',
+                  message: m.message,
+                  line: m.line,
+                  column: m.column,
+                  source: 'eslint-fallback'
+                })));
+              }
+            }
+            diagnostics.push({ severity: 'info', source: 'eslint', message: 'Fallback ESLint inline config utilisé.' });
+          } catch(fbErr){
+            diagnostics.push({ severity: 'error', source: 'eslint-fallback', message: 'Fallback échoué: '+fbErr.message });
+          }
+        } else {
+          diagnostics.push({ severity: 'error', source: 'eslint', message: 'ESLint erreur: ' + e.message });
+        }
       }
     } else {
       diagnostics.push({ severity: 'info', source: 'eslint', message: 'ESLint désactivé (init failed)' });

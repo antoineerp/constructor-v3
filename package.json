@@ -11,14 +11,27 @@
     "dev:main": "turbo run dev --filter=main",
     "dev:preview": "turbo run dev --filter=preview",
     "dev:admin": "turbo run dev --filter=admin",
+    "storybook": "turbo run storybook --filter=main",
+    "build:storybook": "turbo run build:storybook --filter=main",
     "init-templates": "./scripts/init-templates.sh",
     "test": "turbo run test",
-    "dev:temp-app": "node ./scripts/dev-temp-app.js"
+    "dev:temp-app": "node ./scripts/dev-temp-app.js",
+    "prepare": "husky install"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
     "turbo": "^2.5.8",
-    "typescript": "5.9.2"
+    "typescript": "5.9.2",
+    "husky": "^9.0.11",
+    "lint-staged": "^15.2.0",
+    "magic-string": "^0.30.10",
+    "recast": "^0.23.9"
+  },
+  "lint-staged": {
+    "*.{js,ts,svelte,css,md}": [
+      "prettier --write",
+      "eslint --fix"
+    ]
   },
   "packageManager": "pnpm@9.0.0",
   "engines": {

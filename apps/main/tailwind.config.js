@@ -2,6 +2,9 @@
 export default {
   content: [
     './src/**/*.{html,js,svelte,ts}',
+    // Stories Storybook
+    './src/**/*.stories.@(js|ts|svelte|mdx)',
+    './.storybook/**/*.{js,ts,svelte,mdx}',
     '../../../packages/ui/src/**/*.{html,js,svelte,ts}'
   ],
   theme: {
