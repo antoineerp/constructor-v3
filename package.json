@@ -11,7 +11,9 @@
     "dev:main": "turbo run dev --filter=main",
     "dev:preview": "turbo run dev --filter=preview",
     "dev:admin": "turbo run dev --filter=admin",
-    "init-templates": "./scripts/init-templates.sh"
+    "init-templates": "./scripts/init-templates.sh",
+    "test": "turbo run test",
+    "dev:temp-app": "node ./scripts/dev-temp-app.js"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
