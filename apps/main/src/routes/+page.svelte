@@ -12,9 +12,63 @@
   // Onglets
   const tabs = [
     { id: 'chat', label: 'Chat', icon: 'fas fa-comments' },
+    { id: 'site', label: 'Site', icon: 'fas fa-globe' },
     { id: 'components', label: 'Composants', icon: 'fas fa-puzzle-piece' },
     { id: 'preview', label: 'Aperçu', icon: 'fas fa-eye' }
   ];
+
+  // ====== Génération de site (orchestrateur) ======
+  let sitePrompt = '';
+  let siteMessages = [];
+  let siteGenerating = false;
+  let siteBlueprint = null;
+  let siteFiles = null;
+  let siteSelectedFile = null;
+  let siteError = '';
+  let siteActiveRightTab = 'preview'; // preview | files | blueprint
+
+  function addSiteMessage(msg){ siteMessages = [...siteMessages, { id: Date.now().toString()+Math.random(), ...msg, timestamp:new Date() }]; }
+
+  function buildSafePreview(code){
+    if(!code) return '<div class="text-sm text-gray-500">Aucun fichier principal trouvé.</div>';
+    // Retirer les <script> pour éviter exécution arbitraire
+    return code.replace(/<script[\s\S]*?<\/script>/gi,'').trim();
+  }
+
+  async function generateSite(){
+    if(!sitePrompt.trim() || siteGenerating) return;
+    siteError=''; siteGenerating=true; siteBlueprint=null; siteFiles=null; siteSelectedFile=null;
+    addSiteMessage({ type:'user', content: sitePrompt.trim() });
+    const current = sitePrompt.trim();
+    sitePrompt='';
+    try {
+      // Récupérer le token Supabase pour RLS côté endpoint
+      let token = null;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        token = session?.access_token || null;
+      } catch(e){ console.warn('Session Supabase indisponible', e); }
+      const headers = { 'Content-Type':'application/json' };
+      if(token) headers['Authorization'] = `Bearer ${token}`; else console.warn('Aucun token supabase: la création de projet sera refusée (401)');
+      const res = await fetch('/api/site/generate', { method:'POST', headers, body: JSON.stringify({ query: current }) });
+      if(!res.ok){ throw new Error('HTTP '+res.status); }
+      const data = await res.json();
+      if(!data.success) throw new Error(data.error || 'Erreur génération site');
+      siteBlueprint = data.blueprint;
+      siteFiles = data.files;
+      // sélectionner un fichier principal plausible
+      const mainCandidates = ['src/routes/+page.svelte','src/routes/index.svelte'];
+      for(const c of mainCandidates){ if(siteFiles[c]) { siteSelectedFile = c; break; } }
+      if(!siteSelectedFile){
+        siteSelectedFile = Object.keys(siteFiles)[0] || null;
+      }
+      addSiteMessage({ type:'ai', content: '✅ Site généré ('+ Object.keys(siteFiles).length +' fichiers). Blueprint disponible.', files: siteFiles });
+    } catch(e){
+      siteError = e.message;
+      addSiteMessage({ type:'ai', content: '❌ '+ e.message });
+    } finally { siteGenerating=false; }
+  }
+  function selectSiteFile(f){ siteSelectedFile = f; }
 
   // Détecter le type de composant
   function detectComponentType(prompt) {
@@ -397,6 +451,147 @@
           </div>
         {/if}
       </div>
+    {:else if activeTab === 'site'}
+      <!-- Génération de site complet -->
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
+        <!-- Colonne gauche: Chat / Prompt -->
+        <div class="flex flex-col h-[640px] bg-white border rounded-xl shadow-sm">
+          <div class="px-5 py-4 border-b flex items-center justify-between">
+            <h2 class="font-semibold text-gray-800 flex items-center gap-2"><i class="fas fa-globe text-blue-600"></i> Générateur de site</h2>
+            {#if siteGenerating}
+              <span class="text-xs text-blue-600 flex items-center gap-1"><i class="fas fa-spinner fa-spin"></i> Génération...</span>
+            {/if}
+          </div>
+          <div class="flex-1 overflow-y-auto p-4 space-y-4">
+            {#if siteMessages.length === 0}
+              <div class="text-center text-gray-500 text-sm mt-20">
+                Décris ton idée: "Marketplace minimal pour objets vintage avec page produit".
+              </div>
+            {/if}
+            {#each siteMessages as m}
+              <div class="flex {m.type==='user' ? 'justify-end' : 'justify-start'}">
+                <div class="max-w-[85%] rounded-lg px-3 py-2 text-sm leading-relaxed shadow {m.type==='user' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800'}">
+                  {m.content}
+                </div>
+              </div>
+            {/each}
+          </div>
+          <div class="border-t p-4">
+            <div class="flex gap-3 items-start">
+              <textarea bind:value={sitePrompt} rows="3" class="flex-1 resize-none px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm" placeholder="Décris le site à générer (pages, style, audience)..." disabled={siteGenerating}></textarea>
+              <button on:click={generateSite} class="px-5 h-24 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium disabled:opacity-50 flex items-center justify-center gap-2" disabled={!sitePrompt.trim() || siteGenerating}>
+                {#if siteGenerating}<i class="fas fa-spinner fa-spin"></i>{:else}<i class="fas fa-rocket"></i>{/if}
+                <span>Générer</span>
+              </button>
+            </div>
+            {#if siteError}<div class="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded">{siteError}</div>{/if}
+            <p class="mt-2 text-[11px] text-gray-500 flex items-center gap-1"><i class="fas fa-lightbulb"></i> Le système produit un blueprint + fichiers SvelteKit (max ~8).</p>
+          </div>
+        </div>
+        <!-- Colonne droite: Preview / Fichiers / Blueprint -->
+        <div class="flex flex-col h-[640px] bg-white border rounded-xl shadow-sm">
+          <div class="px-5 py-3 border-b flex items-center gap-6">
+            <button class="py-2 text-sm font-medium border-b-2 -mb-px {siteActiveRightTab==='preview' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}" on:click={()=> siteActiveRightTab='preview'}><i class="fas fa-eye mr-1"></i>Preview</button>
+            <button class="py-2 text-sm font-medium border-b-2 -mb-px {siteActiveRightTab==='files' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}" on:click={()=> siteActiveRightTab='files'}><i class="fas fa-folder-tree mr-1"></i>Fichiers</button>
+            <button class="py-2 text-sm font-medium border-b-2 -mb-px {siteActiveRightTab==='blueprint' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}" on:click={()=> siteActiveRightTab='blueprint'}><i class="fas fa-diagram-project mr-1"></i>Blueprint</button>
+          </div>
+          <div class="flex-1 overflow-hidden">
+            {#if !siteFiles && !siteGenerating}
+              <div class="h-full flex items-center justify-center text-gray-400 text-sm p-10 text-center">Aucun site généré encore.</div>
+            {:else if siteGenerating}
+              <div class="h-full flex flex-col items-center justify-center gap-4 text-gray-600 text-sm">
+                <i class="fas fa-spinner fa-spin text-3xl text-indigo-500"></i>
+                <p>Génération du blueprint et des fichiers...</p>
+              </div>
+            {:else}
+              {#if siteActiveRightTab==='preview'}
+                <div class="p-4 h-full overflow-auto bg-gray-50">
+                  <div class="border rounded-lg bg-white p-6 shadow-inner min-h-[300px]">
+                    {@html buildSafePreview(siteSelectedFile ? siteFiles[siteSelectedFile] : '')}
+                  </div>
+                </div>
+              {:else if siteActiveRightTab==='files'}
+                <div class="flex h-full">
+                  <div class="w-56 border-r bg-gray-50 p-3 overflow-auto text-xs space-y-1">
+                    {#each Object.keys(siteFiles) as f}
+                      <button class="block w-full text-left px-2 py-1.5 rounded border text-[11px] break-all {siteSelectedFile === f ? 'bg-white border-indigo-400 text-indigo-700 font-medium' : 'bg-white/70 hover:bg-white border-gray-200 text-gray-600'}" on:click={()=> selectSiteFile(f)}>{f}</button>
+                    {/each}
+                  </div>
+                  <div class="flex-1 flex flex-col">
+                    <div class="px-4 py-2 border-b flex items-center justify-between text-xs bg-gray-50">
+                      <div class="flex items-center gap-2"><i class="fas fa-file-code text-indigo-600"></i><span class="font-medium">{siteSelectedFile || 'Sélectionne un fichier'}</span></div>
+                      {#if siteSelectedFile}
+                        <button class="text-indigo-600 hover:underline" on:click={()=> navigator.clipboard.writeText(siteFiles[siteSelectedFile])}>Copier</button>
+                      {/if}
+                    </div>
+                    <div class="flex-1 overflow-auto bg-gray-900 text-green-300 text-[11px] p-4 font-mono leading-relaxed">
+                      {#if siteSelectedFile}
+                        <pre><code>{siteFiles[siteSelectedFile]}</code></pre>
+                      {:else}
+                        <div class="h-full flex items-center justify-center text-gray-500">Choisis un fichier dans la liste.</div>
+                      {/if}
+                    </div>
+                  </div>
+                </div>
+              {:else if siteActiveRightTab==='blueprint'}
+                <div class="p-4 h-full overflow-auto bg-gray-50 text-xs">
+                  {#if siteBlueprint}
+                    <h3 class="font-semibold text-gray-800 mb-3 flex items-center gap-2"><i class="fas fa-diagram-project text-indigo-600"></i> Blueprint</h3>
+                    <p class="text-gray-600 mb-2"><strong>Type:</strong> {siteBlueprint.detected_site_type}</p>
+                    <div class="mb-4">
+                      <p class="text-[11px] text-gray-500">Routes</p>
+                      <ul class="space-y-1">
+                        {#each siteBlueprint.routes || [] as r}
+                          <li class="px-2 py-1 bg-white rounded border flex items-center justify-between"><span class="font-mono text-[10px]">{r.path}</span><span class="text-[10px] text-gray-500">{r.sections?.length} sections</span></li>
+                        {/each}
+                      </ul>
+                    </div>
+                    <div class="mb-4">
+                      <p class="text-[11px] text-gray-500">Données</p>
+                      <ul class="space-y-1">
+                        {#each siteBlueprint.data_models || [] as m}
+                          <li class="px-2 py-1 bg-white rounded border">
+                            <span class="font-semibold">{m.name}</span>
+                            <div class="mt-1 flex flex-wrap gap-1">
+                              {#each m.fields as f}
+                                <span class="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded border text-[10px]">{f.name}:{f.type}</span>
+                              {/each}
+                            </div>
+                          </li>
+                        {/each}
+                      </ul>
+                    </div>
+                    <div class="mb-4">
+                      <p class="text-[11px] text-gray-500">Composants clés</p>
+                      <div class="flex flex-wrap gap-1">
+                        {#each siteBlueprint.core_components || [] as c}
+                          <span class="px-2 py-0.5 bg-white border rounded text-[10px]">{c}</span>
+                        {/each}
+                      </div>
+                    </div>
+                    <div>
+                      <p class="text-[11px] text-gray-500 mb-1">Prompts fichiers</p>
+                      <ul class="space-y-1">
+                        {#each siteBlueprint.recommended_prompts?.per_file || [] as pf}
+                          <li class="px-2 py-1 bg-white border rounded"><span class="font-mono text-[10px]">{pf.filename}</span></li>
+                        {/each}
+                      </ul>
+                    </div>
+                  {:else}
+                    <div class="h-full flex items-center justify-center text-gray-400">Aucun blueprint.</div>
+                  {/if}
+                </div>
+              {/if}
+            {/if}
+          </div>
+          {#if siteFiles}
+            <div class="border-t p-2 bg-gray-50 text-[11px] text-gray-600 flex items-center justify-between">
+              <span>{Object.keys(siteFiles).length} fichiers générés</span>
+              <button class="text-indigo-600 hover:underline" on:click={()=> { const blob = new Blob([JSON.stringify(siteFiles,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='site-files.json'; a.click(); URL.revokeObjectURL(url); }}>Exporter JSON</button>
+            </div>
+          {/if}
+        </div>
+      </div>
     {/if}
   </main>
 </div>
@@ -405,6 +600,7 @@
   .line-clamp-2 {
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2; /* propriété standard */
     -webkit-box-orient: vertical;
     overflow: hidden;
   }

@@ -32,6 +32,8 @@
     prompt: ''
   };
   let loading = false;
+  // Gestion session utilisateur (pour RLS Supabase)
+  let sessionUserId = null;
   
   // === ÉTAT CHAT & PRÉVISUALISATION IA ===
   let chatPrompt = '';
@@ -70,6 +72,15 @@
   function blueprintToProject(){ if(!blueprint) return; appPrompt = blueprint?.recommended_prompts?.app_level || appPrompt; activeMainTab='generate'; }
   
   onMount(async () => {
+    // Récupération session pour associer user_id aux projets et satisfaire RLS
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      sessionUserId = session?.user?.id || null;
+      // Écoute changements d'auth si l'app ajoute plus tard un flux de login
+      supabase.auth.onAuthStateChange((_event, sess) => {
+        sessionUserId = sess?.user?.id || null;
+      });
+    } catch(e){ console.warn('Impossible de récupérer la session Supabase:', e); }
     await loadProjects();
   });
   
@@ -90,45 +101,34 @@
   
   async function createProject() {
     if (!newProject.name || !newProject.prompt) return;
-    
     try {
       loading = true;
-      
-      // Simuler la génération de code (en attendant l'intégration OpenAI)
+      if(!sessionUserId){
+        // Si pas d'utilisateur, informer que la politique RLS va échouer
+        console.warn('Aucun user authentifié. La politique RLS peut bloquer l\'insert.');
+      }
       const generatedCode = {
         'README.md': '# ' + newProject.name + '\n\n' + newProject.description + '\n\nGénéré avec Constructor V3',
         'src/app.css': '@tailwind base;\n@tailwind components;\n@tailwind utilities;'
       };
-      
-      const { data, error } = await supabase
-        .from('projects')
-        .insert([
-          {
-            name: newProject.name,
-            description: newProject.description,
-            prompt_original: newProject.prompt,
-            template_id: 1, // Template par défaut
-            code_generated: generatedCode,
-            status: 'draft'
-          }
-        ])
-        .select();
-        
+      const payload = {
+        name: newProject.name,
+        description: newProject.description,
+        prompt_original: newProject.prompt,
+        template_id: 1,
+        code_generated: generatedCode,
+        status: 'draft',
+        user_id: sessionUserId // clé cruciale pour RLS (policy user_id = auth.uid())
+      };
+      const { error } = await supabase.from('projects').insert([payload]);
       if (error) throw error;
-      
-      // Reset form
       newProject = { name: '', description: '', prompt: '' };
       showNewProjectModal = false;
-      
-      // Reload projects
       await loadProjects();
-      
-    } catch (error) {
-      console.error('Erreur lors de la création du projet:', error);
-      alert('Erreur lors de la création du projet: ' + error.message);
-    } finally {
-      loading = false;
-    }
+    } catch(error){
+      console.error('Erreur création projet:', error);
+      alert('Création impossible: '+ error.message + '\nVérifie la policy RLS sur projects (insert) et la colonne user_id.');
+    } finally { loading = false; }
   }
   
   // ================= FONCTIONS CHAT =================
@@ -297,7 +297,16 @@
     <!-- En-tête -->
     <div class="flex items-center justify-between mb-8">
       <h1 class="text-2xl font-bold text-gray-900 flex items-center gap-2"><i class="fas fa-user-gear text-blue-600"></i> Tableau de bord</h1>
-      <Button on:click={() => showNewProjectModal = true} variant="primary"><i class="fas fa-plus mr-2"></i>Nouveau projet</Button>
+      <div class="flex items-center gap-3">
+        <Button on:click={() => showNewProjectModal = true} variant="primary"><i class="fas fa-plus mr-2"></i>Nouveau projet</Button>
+        {#if sessionUserId}
+          <button class="px-3 py-2 text-sm rounded-lg bg-white border hover:bg-gray-50 flex items-center gap-2" on:click={async()=>{ await supabase.auth.signOut(); sessionUserId=null; window.location.href='/auth'; }}>
+            <i class="fas fa-right-from-bracket text-gray-500"></i> Logout
+          </button>
+        {:else}
+          <a href="/auth" class="px-3 py-2 text-sm rounded-lg bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 flex items-center gap-2"><i class="fas fa-sign-in"></i> Login</a>
+        {/if}
+      </div>
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">

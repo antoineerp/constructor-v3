@@ -1,6 +1,8 @@
 import { json } from '@sveltejs/kit';
 import { openaiService } from '$lib/openaiService.js';
-import { supabase } from '$lib/supabase.js';
+import { supabase as clientSupabase } from '$lib/supabase.js';
+import { createClient } from '@supabase/supabase-js';
+import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 
 // Orchestrateur: génère blueprint et/ou code application selon état projet.
 // Body: { query?: string, projectId?: string, regenerateFile?: string }
@@ -11,14 +13,36 @@ export async function POST({ request }) {
   try {
     const body = await request.json();
     const { query, projectId, regenerateFile } = body;
+    // Récupération token Supabase (passé côté client via Authorization: Bearer <access_token>)
+    const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
+    let userId = null;
+    let serverSupabase = null;
+    if (authHeader?.toLowerCase().startsWith('bearer ')) {
+      const token = authHeader.split(' ')[1];
+      serverSupabase = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, { global: { headers: { Authorization: `Bearer ${token}` } } });
+      try {
+        const { data: { user }, error: userErr } = await serverSupabase.auth.getUser();
+        if (!userErr && user) userId = user.id;
+      } catch (e) {
+        console.warn('Impossible de récupérer user depuis token', e);
+      }
+    }
+    // Fallback: ne pas utiliser clientSupabase côté serveur pour auth sensible, mais permet encore la lecture si pas RLS stricte.
 
     if (!query && !projectId) {
       return json({ success:false, error:'query ou projectId requis' }, { status:400 });
     }
+    // Si policies RLS actives, insertion exige userId.
+    if (!userId && !projectId) {
+      return json({ success:false, error:'Authentification requise pour créer un projet (token Supabase manquant).' }, { status:401 });
+    }
 
     let project = null;
     if (projectId) {
-      const { data, error } = await supabase.from('projects').select('*').eq('id', projectId).single();
+      // Vérifier ownership si userId connu
+      const queryBuilder = clientSupabase.from('projects').select('*').eq('id', projectId);
+      if (userId) queryBuilder.eq('user_id', userId);
+      const { data, error } = await queryBuilder.single();
       if (error) throw error;
       project = data;
     }
@@ -38,7 +62,7 @@ export async function POST({ request }) {
       const newContent = result[regenerateFile] || Object.values(result)[0];
       // Mettre à jour en base
       const updatedCode = { ...project.code_generated, [regenerateFile]: newContent };
-      const { error:upErr } = await supabase.from('projects').update({ code_generated: updatedCode }).eq('id', project.id);
+      const { error:upErr } = await clientSupabase.from('projects').update({ code_generated: updatedCode }).eq('id', project.id);
       if (upErr) throw upErr;
       return json({ success:true, regenerated: regenerateFile, fileContent: newContent });
     }
@@ -62,13 +86,14 @@ export async function POST({ request }) {
         original_query: blueprint.original_query || query,
         blueprint_json: blueprint,
         code_generated: files,
-        status: 'draft'
+        status: 'draft',
+        user_id: userId
       };
-      const { data:created, error:insErr } = await supabase.from('projects').insert(insertData).select().single();
+      const { data:created, error:insErr } = await clientSupabase.from('projects').insert(insertData).select().single();
       if (insErr) throw insErr;
       project = created;
     } else {
-      const { error:updErr } = await supabase.from('projects').update({ blueprint_json: blueprint, code_generated: files }).eq('id', project.id);
+      const { error:updErr } = await clientSupabase.from('projects').update({ blueprint_json: blueprint, code_generated: files }).eq('id', project.id);
       if (updErr) throw updErr;
     }
 
