@@ -5,164 +5,136 @@
   import Input from '$lib/Input.svelte';
   import Modal from '$lib/Modal.svelte';
   import { supabase } from '$lib/supabase.js';
-  
+
   let activeTab = 'dashboard';
+
+  // ====== IA ======
   let aiProviders = [];
-  async function loadAIStatus(){
-    try { const r = await fetch('/api/ai/status'); const j = await r.json(); aiProviders = j.providers || j.data || []; } catch(e){ aiProviders=[{id:'error', label:'Erreur', status:e.message}]; }
+  async function loadAIStatus() {
+    try {
+      const r = await fetch('/api/ai/status');
+      const j = await r.json();
+      aiProviders = j.providers || j.data || [];
+    } catch (e) {
+      aiProviders = [{ id: 'error', label: 'Erreur', status: e.message }];
+    }
   }
-  // ====== SUPABASE CONFIG / TEST ======
-  let supaStatus = 'idle'; // idle|testing|success|error
+
+  // ====== SUPABASE ======
+  let supaStatus = 'idle';
   let supaMessage = '';
   let supaTemplates = [];
   let supaComponents = [];
   let supaProjects = [];
 
-  async function testSupabaseConnection(){
-    supaStatus='testing'; supaMessage='Test de connexion...';
+  async function testSupabaseConnection() {
+    supaStatus = 'testing';
+    supaMessage = 'Test de connexion...';
     try {
-      const { count, error: healthErr } = await supabase.from('templates').select('*', { count:'exact', head:true });
-      if(healthErr) throw healthErr;
-      const [{ data: t, error: tErr }, { data: c, error: cErr }, { data: p, error: pErr }] = await Promise.all([
+      const { error: healthErr } = await supabase.from('templates').select('*', { count: 'exact', head: true });
+      if (healthErr) throw healthErr;
+      const [templatesRes, componentsRes, projectsRes] = await Promise.all([
         supabase.from('templates').select('*').limit(5),
         supabase.from('components').select('*').limit(5),
         supabase.from('projects').select('*').limit(5)
       ]);
-      if(tErr||cErr||pErr) throw tErr||cErr||pErr;
-      supaTemplates = t||[]; supaComponents = c||[]; supaProjects = p||[];
-      supaStatus='success';
-      supaMessage=`✅ Connexion OK (${supaTemplates.length} templates, ${supaComponents.length} composants)`;
-    } catch(e){
-      supaStatus='error'; supaMessage='❌ '+ (e.message||'Erreur connexion');
+      if (templatesRes.error || componentsRes.error || projectsRes.error) {
+        throw (templatesRes.error || componentsRes.error || projectsRes.error);
+      }
+      supaTemplates = templatesRes.data || [];
+      supaComponents = componentsRes.data || [];
+      supaProjects = projectsRes.data || [];
+      supaStatus = 'success';
+      supaMessage = `✅ Connexion OK (${supaTemplates.length} templates, ${supaComponents.length} composants)`;
+    } catch (e) {
+      supaStatus = 'error';
+      supaMessage = '❌ ' + (e.message || 'Erreur connexion');
       console.error('Supabase test error', e);
     }
   }
 
-  async function supabaseTestCreate(){
-    if(supaStatus!=='success') return;
+  async function supabaseTestCreate() {
+    if (supaStatus !== 'success') return;
     try {
-      const { error } = await supabase.from('projects').insert([{ name:'Test Project', description:'Projet test', status:'draft', code_generated:{ note:'test' } }]);
-      if(error) throw error;
+      const { error } = await supabase.from('projects').insert([
+        { name: 'Test Project', description: 'Projet test', status: 'draft', code_generated: { note: 'test' } }
+      ]);
+      if (error) throw error;
       await testSupabaseConnection();
       alert('Création test réussie');
-    } catch(e){ alert('Erreur création: '+ e.message); }
+    } catch (e) {
+      alert('Erreur création: ' + e.message);
+    }
   }
-  let stats = {
-    totalProjects: 0,
-    totalPrompts: 0,
-    totalTemplates: 0,
-    totalComponents: 0
-  };
-  
+
+  // ====== DATA DASHBOARD ======
+  let stats = { totalProjects: 0, totalPrompts: 0, totalTemplates: 0, totalComponents: 0 };
   let projects = [];
   let templates = [];
   let components = [];
   let usageStats = [];
-  
-  // Modales
+
+  // ====== MODALES ======
   let showNewTemplateModal = false;
   let showNewComponentModal = false;
   let newTemplate = { name: '', type: 'e-commerce', description: '', structure: '' };
   let newComponent = { name: '', type: 'button', category: 'ui', code: '' };
-  
+
   onMount(async () => {
     await loadDashboardData();
     await loadAIStatus();
   });
-  
+
   async function loadDashboardData() {
     try {
-      // Charger les statistiques
       const [projectsRes, templatesRes, componentsRes, statsRes] = await Promise.all([
         supabase.from('projects').select('*').limit(5),
         supabase.from('templates').select('*'),
         supabase.from('components').select('*'),
         supabase.from('usage_stats').select('*').order('date', { ascending: false }).limit(7)
       ]);
-      
       projects = projectsRes.data || [];
       templates = templatesRes.data || [];
       components = componentsRes.data || [];
       usageStats = statsRes.data || [];
-      
       stats = {
         totalProjects: projects.length,
         totalPrompts: usageStats.reduce((sum, stat) => sum + (stat.total_prompts || 0), 0),
         totalTemplates: templates.length,
         totalComponents: components.length
       };
-      
     } catch (error) {
       console.error('Erreur lors du chargement des données:', error);
     }
   }
-  
+
   async function createTemplate() {
     if (!newTemplate.name || !newTemplate.description) return;
-    
     try {
       let structure;
-      try {
-        structure = JSON.parse(newTemplate.structure || '{}');
-      } catch {
-        structure = { routes: [], components: [], features: [] };
-      }
-      
-      const { error } = await supabase
-        .from('templates')
-        .insert([{
-          name: newTemplate.name,
-          type: newTemplate.type,
-          description: newTemplate.description,
-          structure: structure
-        }]);
-        
+      try { structure = JSON.parse(newTemplate.structure || '{}'); } catch { structure = { routes: [], components: [], features: [] }; }
+      const { error } = await supabase.from('templates').insert([{ name: newTemplate.name, type: newTemplate.type, description: newTemplate.description, structure }]);
       if (error) throw error;
-      
       newTemplate = { name: '', type: 'e-commerce', description: '', structure: '' };
       showNewTemplateModal = false;
       await loadDashboardData();
-      
-    } catch (error) {
-      alert('Erreur lors de la création du template: ' + error.message);
-    }
+    } catch (error) { alert('Erreur lors de la création du template: ' + error.message); }
   }
-  
+
   async function createComponent() {
     if (!newComponent.name || !newComponent.code) return;
-    
     try {
-      const { error } = await supabase
-        .from('components')
-        .insert([{
-          name: newComponent.name,
-          type: newComponent.type,
-          category: newComponent.category,
-          code: newComponent.code,
-          props: {}
-        }]);
-        
+      const { error } = await supabase.from('components').insert([{ name: newComponent.name, type: newComponent.type, category: newComponent.category, code: newComponent.code, props: {} }]);
       if (error) throw error;
-      
       newComponent = { name: '', type: 'button', category: 'ui', code: '' };
       showNewComponentModal = false;
       await loadDashboardData();
-      
-    } catch (error) {
-      alert('Erreur lors de la création du composant: ' + error.message);
-    }
+    } catch (error) { alert('Erreur lors de la création du composant: ' + error.message); }
   }
-  
-  function formatDate(dateString) {
-    return new Date(dateString).toLocaleDateString('fr-FR');
-  }
-  
+
+  function formatDate(dateString) { return new Date(dateString).toLocaleDateString('fr-FR'); }
   function getStatusBadge(status) {
-    const badges = {
-      draft: 'bg-yellow-100 text-yellow-800',
-      completed: 'bg-green-100 text-green-800',
-      published: 'bg-blue-100 text-blue-800'
-    };
+    const badges = { draft: 'bg-yellow-100 text-yellow-800', completed: 'bg-green-100 text-green-800', published: 'bg-blue-100 text-blue-800' };
     return badges[status] || 'bg-gray-100 text-gray-800';
   }
 </script>
@@ -637,8 +609,8 @@
       />
       
       <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
-        <select
+  <label for="template-type" class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+  <select id="template-type"
           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
           bind:value={newTemplate.type}
         >
@@ -652,8 +624,9 @@
       </div>
       
       <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+        <label for="template-description" class="block text-sm font-medium text-gray-700 mb-1">Description</label>
         <textarea
+          id="template-description"
           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
           placeholder="Description du template..."
           bind:value={newTemplate.description}
@@ -663,8 +636,9 @@
       </div>
       
       <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Structure (JSON)</label>
+        <label for="template-structure" class="block text-sm font-medium text-gray-700 mb-1">Structure (JSON)</label>
         <textarea
+          id="template-structure"
           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm"
           placeholder={'{"routes": [], "components": [], "features": []}'}
           bind:value={newTemplate.structure}
@@ -699,8 +673,8 @@
         />
         
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
-          <select
+          <label for="component-type" class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+          <select id="component-type"
             class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             bind:value={newComponent.type}
           >
@@ -716,8 +690,8 @@
       </div>
       
       <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Catégorie</label>
-        <select
+  <label for="component-category" class="block text-sm font-medium text-gray-700 mb-1">Catégorie</label>
+  <select id="component-category"
           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
           bind:value={newComponent.category}
         >
@@ -730,16 +704,10 @@
       </div>
       
       <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Code Svelte</label>
-        <textarea
+  <label for="component-code" class="block text-sm font-medium text-gray-700 mb-1">Code Svelte</label>
+  <textarea id="component-code"
           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-          placeholder="<script>
-  // Props et logique
-</script>
-
-<button>
-  <slot />
-</button>"
+          placeholder="&lt;script&gt;\n  // Props et logique\n&lt;/script&gt;\n\n&lt;button&gt;\n  &lt;slot /&gt;\n&lt;/button&gt;"
           bind:value={newComponent.code}
           rows="12"
           required

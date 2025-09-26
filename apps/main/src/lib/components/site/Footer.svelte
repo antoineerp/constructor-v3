@@ -16,9 +16,9 @@
         <h3 class="text-lg font-semibold text-white mb-4">{brand}</h3>
         <p class="text-sm leading-relaxed text-gray-400 max-w-sm">Plateforme modulaire pour générer et assembler rapidement des interfaces professionnelles Svelte.</p>
         <div class="flex items-center gap-4 mt-6 text-xl text-gray-400">
-          <a href="#" aria-label="Twitter" class="hover:text-white transition-colors"><i class="fab fa-x-twitter"></i></a>
-          <a href="#" aria-label="GitHub" class="hover:text-white transition-colors"><i class="fab fa-github"></i></a>
-          <a href="#" aria-label="Discord" class="hover:text-white transition-colors"><i class="fab fa-discord"></i></a>
+          <a href="https://twitter.com" rel="noopener" target="_blank" aria-label="Twitter" class="hover:text-white transition-colors"><i class="fab fa-x-twitter"></i></a>
+          <a href="https://github.com" rel="noopener" target="_blank" aria-label="GitHub" class="hover:text-white transition-colors"><i class="fab fa-github"></i></a>
+          <a href="https://discord.com" rel="noopener" target="_blank" aria-label="Discord" class="hover:text-white transition-colors"><i class="fab fa-discord"></i></a>
         </div>
       </div>
       {#each columns as col}
@@ -26,7 +26,7 @@
           <h4 class="text-sm font-semibold tracking-wide text-white mb-4 uppercase">{col.title}</h4>
             <ul class="space-y-2 text-sm">
               {#each col.links as l}
-                <li><a href="#" class="hover:text-white transition-colors">{l}</a></li>
+                <li><button type="button" class="hover:text-white transition-colors text-left focus:outline-none focus:ring-2 focus:ring-blue-500/50 rounded px-1">{l}</button></li>
               {/each}
             </ul>
         </div>
@@ -35,9 +35,9 @@
     <div class="mt-12 border-t border-white/10 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-500">
       <p>© {year} {brand}. Tous droits réservés.</p>
       <div class="flex gap-4">
-        <a href="#" class="hover:text-gray-300">Confidentialité</a>
-        <a href="#" class="hover:text-gray-300">Conditions</a>
-        <a href="#" class="hover:text-gray-300">Cookies</a>
+  <button type="button" class="hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500/40 rounded px-1">Confidentialité</button>
+  <button type="button" class="hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500/40 rounded px-1">Conditions</button>
+  <button type="button" class="hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500/40 rounded px-1">Cookies</button>
       </div>
     </div>
   </div>

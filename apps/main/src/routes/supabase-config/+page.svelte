@@ -265,26 +265,22 @@ PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...</code></pre>
 
 <style>
   code {
-    @apply bg-gray-100 px-2 py-1 rounded text-sm font-mono;
+    background: #f3f4f6; /* gray-100 */
+    padding: 0.25rem 0.5rem; /* px-2 py-1 */
+    border-radius: 0.375rem; /* rounded */
+    font-size: 0.875rem; /* text-sm */
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
-  
   pre code {
-    @apply block bg-gray-800 text-gray-100 p-4 rounded-lg overflow-x-auto;
+    display: block;
+    background: #1f2937; /* gray-800 */
+    color: #f3f4f6; /* gray-100 */
+    padding: 1rem; /* p-4 */
+    border-radius: 0.5rem; /* rounded-lg */
+    overflow-x: auto;
   }
-  
-  .prose ul, .prose ol {
-    @apply pl-6;
-  }
-  
-  .prose li {
-    @apply mb-1;
-  }
-  
-  .prose h4 {
-    @apply text-lg font-semibold text-gray-900 mt-6 mb-2;
-  }
-  
-  .prose p {
-    @apply mb-3 text-gray-700;
-  }
+  .prose ul, .prose ol { padding-left: 1.5rem; }
+  .prose li { margin-bottom: 0.25rem; }
+  .prose h4 { font-size: 1.125rem; font-weight:600; color:#111827; margin-top:1.5rem; margin-bottom:0.5rem; }
+  .prose p { margin-bottom:0.75rem; color:#374151; }
 </style>

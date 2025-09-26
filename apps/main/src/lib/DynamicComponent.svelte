@@ -93,11 +93,12 @@
 {/if}
 
 <style>
-  :global(.generated-component) {
-    /* Styles pour les composants générés */
-  }
-  
-  :global(.generated-component *) {
-    /* Hériter des styles Tailwind */
+  :global(.generated-component pre) {
+    background: #111827; /* gray-900 */
+    color: #f3f4f6; /* gray-100 */
+    font-size: 0.75rem; /* text-xs */
+    padding: 0.75rem; /* p-3 */
+    border-radius: 0.5rem; /* rounded */
+    overflow-x: auto;
   }
 </style>

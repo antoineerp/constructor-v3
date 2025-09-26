@@ -16,7 +16,7 @@ import { validateAndFix, unifyPalette, addAccessibilityFixes } from '$lib/valida
 export async function POST({ request }) {
   try {
     const body = await request.json();
-  const { query, projectId, regenerateFile, simpleMode, forceSinglePass, generationProfile = 'safe', provider='openai' } = body;
+  const { query, projectId, regenerateFile, simpleMode, forceSinglePass, generationProfile = 'safe', provider='openai', chatContext = [] } = body;
     // Récupération token Supabase (passé côté client via Authorization: Bearer <access_token>)
     const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
     let userId = null;
@@ -36,17 +36,26 @@ export async function POST({ request }) {
     if (!query && !projectId) {
       return json({ success:false, error:'query ou projectId requis' }, { status:400 });
     }
-    // Mode éphémère: si pas d'userId et pas de projectId on autorise génération (pas de persistance)
-    const ephemeral = !userId && !projectId;
+  // Mode éphémère: si pas d'userId et pas de projectId on autorise génération (pas de persistance)
+  let ephemeral = !userId && !projectId;
 
     let project = null;
     if (projectId) {
-      // Vérifier ownership si userId connu
-      const queryBuilder = clientSupabase.from('projects').select('*').eq('id', projectId);
-      if (userId) queryBuilder.eq('user_id', userId);
-      const { data, error } = await queryBuilder.single();
-      if (error) throw error;
-      project = data;
+      try {
+        // Vérifier ownership si userId connu
+        const queryBuilder = clientSupabase.from('projects').select('*').eq('id', projectId);
+        if (userId) queryBuilder.eq('user_id', userId);
+        const { data, error } = await queryBuilder.single();
+        if (error) throw error;
+        project = data;
+      } catch(dbErr){
+        if(/relation .* does not exist/i.test(dbErr.message||'')){
+          console.warn('[site/generate] Table projects absente, fallback mode éphémère.');
+          ephemeral = true; project = null; // on continue sans persistance
+        } else {
+          throw dbErr;
+        }
+      }
     }
 
     // Si régénération d'un fichier spécifique
@@ -77,11 +86,41 @@ export async function POST({ request }) {
     if (!blueprint) {
       const effectiveQuery = query || project?.original_query;
       if (!effectiveQuery) return json({ success:false, error:'Impossible de déterminer la requête de base' }, { status:400 });
+      // Construire un contexte conversationnel (dernier messages utilisateur) pour enrichir si fourni
+      let conversationSnippet = '';
+      if (Array.isArray(chatContext) && chatContext.length) {
+        const trimmed = chatContext.map(m=> (m||'').toString().slice(0,160)).slice(-6);
+        conversationSnippet = trimmed.join(' \n ');
+      }
+      let compositeQuery = effectiveQuery;
+      if (conversationSnippet && conversationSnippet.length > 20) {
+        compositeQuery = `Contexte conversation (extraits récents):\n${conversationSnippet}\nRequête finale: ${effectiveQuery}`.slice(0,4000);
+      }
       // Intent expansion (Phase C) avant blueprint pour enrichir le contexte
       let intentExpansion = null;
-      try { intentExpansion = await openaiService.generateIntentExpansion(effectiveQuery); } catch(e){ console.warn('Intent expansion failed', e.message); }
-  blueprint = await openaiService.generateBlueprint(intentExpansion?.enriched_query || effectiveQuery, { provider });
+      try { intentExpansion = await openaiService.generateIntentExpansion(compositeQuery, { provider }); } catch(e){ console.warn('Intent expansion failed', e.message); }
+      blueprint = await openaiService.generateBlueprint(intentExpansion?.enriched_query || compositeQuery, { provider });
       if(intentExpansion) blueprint.intent_expansion = intentExpansion;
+
+      // Heuristique anti-généricité: si titres d'articles trop génériques, regénère un bloc sample_content enrichi
+      try {
+        const articles = blueprint?.sample_content?.articles || [];
+        const genericTitles = articles.filter(a=> /Article \d+|Hello World|Mon Site/i.test(a.title||''));
+        if(genericTitles.length === articles.length && articles.length){
+          const enrichPrompt = `Tu reçois un blueprint JSON partiel pour un site. Ta tâche: RÉÉCRIRE uniquement le champ sample_content.articles avec des titres, slugs, excerpts et body_markdown BEAUCOUP plus spécifiques et différenciants (domaines: technologie, produit SaaS ou niche plausible dérivée de la requête utilisateur). Retourne UNIQUEMENT un JSON: { "sample_content": { "articles": [...] } } avec 3 à 5 articles.
+Requête utilisateur initiale: ${effectiveQuery}
+Conversation (si dispo): ${conversationSnippet.slice(0,400)}
+Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.sample_content }).slice(0,800)}\nFIN.`;
+          // On réutilise generateApplication pour forcer un JSON strict généraliste à 1 clé
+          try {
+            const enrichRes = await openaiService.generateApplication(enrichPrompt, { maxFiles: 1, provider });
+            const sc = enrichRes.sample_content || enrichRes['sample_content.json'] || enrichRes['sample_content'];
+            if(sc?.articles){
+              blueprint.sample_content.articles = sc.articles;
+            }
+          } catch(enrichErr){ console.warn('Enrichissement sample_content échoué', enrichErr.message); }
+        }
+      } catch(enrichOuter){ console.warn('Heuristique enrichissement ignorée', enrichOuter.message); }
     }
 
     // Construire prompt global à partir du blueprint
@@ -93,8 +132,9 @@ export async function POST({ request }) {
     // Nouvelle stratégie: tentative single-pass globale si non simpleMode
     if(!simpleMode){
       try {
-  const { prompt: globalPrompt } = await buildGlobalGenerationPromptAsync(blueprint, selected, { generationProfile });
+  const { prompt: globalPrompt, capabilities: detectedCaps } = await buildGlobalGenerationPromptAsync(blueprint, selected, { generationProfile });
     const singleResult = await openaiService.generateApplication(globalPrompt, { model: 'gpt-4o-mini', maxFiles: 30, provider });
+    if(detectedCaps) blueprint._capability_hits = detectedCaps.map(c=> ({ id:c.id, score:c.score, similarity:c.similarity }));
         // heuristique: si on a au moins 3 fichiers dont +page.svelte ou +layout.svelte, on adopte
         const keys = Object.keys(singleResult||{});
         const hasCore = keys.some(k => k.endsWith('+page.svelte'));
@@ -210,27 +250,48 @@ export async function POST({ request }) {
 
     // Mise à jour / création projet
     if (!project && !ephemeral) {
-      const insertData = {
-        name: blueprint.seo_meta?.title?.slice(0,60) || 'Projet sans nom',
-        original_query: blueprint.original_query || query,
-        blueprint_json: blueprint,
-        code_generated: files,
-        status: 'draft',
-        user_id: userId
-      };
-      const { data:created, error:insErr } = await clientSupabase.from('projects').insert(insertData).select().single();
-      if (insErr) throw insErr;
-      project = created;
+      try {
+        const insertData = {
+          name: blueprint.seo_meta?.title?.slice(0,60) || 'Projet sans nom',
+          original_query: blueprint.original_query || query,
+          blueprint_json: blueprint,
+          code_generated: files,
+          status: 'draft',
+          user_id: userId
+        };
+        const { data:created, error:insErr } = await clientSupabase.from('projects').insert(insertData).select().single();
+        if (insErr) throw insErr;
+        project = created;
+      } catch(dbInsErr){
+        if(/relation .* does not exist/i.test(dbInsErr.message||'')){
+          console.warn('[site/generate] Tables absentes lors insert, fallback éphémère.');
+          ephemeral = true; project = null;
+        } else throw dbInsErr;
+      }
     } else if(project && !ephemeral) {
-      const { error:updErr } = await clientSupabase.from('projects').update({ blueprint_json: blueprint, code_generated: files }).eq('id', project.id);
-      if (updErr) throw updErr;
+      try {
+        const { error:updErr } = await clientSupabase.from('projects').update({ blueprint_json: blueprint, code_generated: files }).eq('id', project.id);
+        if (updErr) throw updErr;
+      } catch(dbUpdErr){
+        if(/relation .* does not exist/i.test(dbUpdErr.message||'')){
+          console.warn('[site/generate] Table projects absente lors update, fallback éphémère.');
+          ephemeral = true; project = null;
+        } else throw dbUpdErr;
+      }
     }
 
     // Stocker chaque fichier dans project_files (upsert pour idempotence)
     if(!ephemeral && project){
-      const fileEntries = Object.entries(files || {});
-      for (const [filename, content] of fileEntries) {
-        await clientSupabase.from('project_files').upsert({ project_id: project.id, filename, content, stage: 'final', pass_index: 0 }, { onConflict: 'project_id,filename' });
+      try {
+        const fileEntries = Object.entries(files || {});
+        for (const [filename, content] of fileEntries) {
+          await clientSupabase.from('project_files').upsert({ project_id: project.id, filename, content, stage: 'final', pass_index: 0 }, { onConflict: 'project_id,filename' });
+        }
+      } catch(dbFileErr){
+        if(/relation .* does not exist/i.test(dbFileErr.message||'')){
+          console.warn('[site/generate] Table project_files absente, désactivation persistance fichiers.');
+          ephemeral = true; // on passe en ephemeral mais on continue à retourner la génération
+        } else throw dbFileErr;
       }
     }
 
@@ -257,7 +318,9 @@ export async function POST({ request }) {
       }
       let score = 100 - criticalCount*5 - nonCriticalOver*1 + Math.min(5, accessibilityBonus);
       if(score<0) score=0; if(score>100) score=100;
-      await clientSupabase.from('projects').update({ code_generated: files, last_auto_refine_score: score }).eq('id', project.id);
+      try {
+        await clientSupabase.from('projects').update({ code_generated: files, last_auto_refine_score: score }).eq('id', project.id);
+      } catch(dbRefineErr){ console.warn('[site/generate] update refine ignoré:', dbRefineErr.message); }
 
       // Régénération ciblée (max 2 fichiers) si score < 85
       if(score < 85){
@@ -281,11 +344,12 @@ Ancienne version:
             }
           } catch(err){ console.warn('Targeted regen failed', fname, err.message); }
         }
-        await clientSupabase.from('projects').update({ code_generated: files }).eq('id', project.id);
+  try { await clientSupabase.from('projects').update({ code_generated: files }).eq('id', project.id); } catch(eu){ console.warn('[site/generate] update post-regen échoué:', eu.message); }
       }
     }
 
-  return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues, singlePass: Object.keys(files).length>0 });
+  const capabilities = blueprint._capability_hits || [];
+  return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues, singlePass: Object.keys(files).length>0, capabilities });
   } catch (e) {
     console.error('site/generate error', e);
     return json({ success:false, error:e.message }, { status:500 });
