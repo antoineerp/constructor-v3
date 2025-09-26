@@ -3,7 +3,7 @@ import { openaiService } from '$lib/openaiService.js';
 import { supabase as clientSupabase } from '$lib/supabase.js';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
-import { summarizeCatalog } from '$lib/catalog/components.js';
+import { summarizeCatalog, componentsCatalog } from '$lib/catalog/components.js';
 
 // Orchestrateur: génère blueprint et/ou code application selon état projet.
 // Body: { query?: string, projectId?: string, regenerateFile?: string }
@@ -79,8 +79,55 @@ export async function POST({ request }) {
     }
 
     // Construire prompt global à partir du blueprint
-  const appPrompt = buildAppPrompt(blueprint, { simpleMode });
-  const files = await openaiService.generateApplication(appPrompt, { model: 'gpt-4o-mini', maxFiles: 20 });
+    let files = {};
+    const catalogSummary = summarizeCatalog();
+
+    if(simpleMode){
+      const appPrompt = buildAppPrompt(blueprint, { simpleMode: true });
+      files = await openaiService.generateApplication(appPrompt, { model: 'gpt-4o-mini', maxFiles: 5 });
+    } else {
+      // Étape 2: génération orchestrée fichier par fichier
+      const perFile = blueprint?.recommended_prompts?.per_file || [];
+      if(perFile.length){
+        for(const entry of perFile){
+          const { filename, prompt: filePrompt } = entry;
+          if(!filename || !filePrompt) continue;
+          try {
+            const context = buildPerFilePrompt({ blueprint, filePrompt, filename, already: files, catalogSummary });
+            const result = await openaiService.generateApplication(context, { model: 'gpt-4o-mini', maxFiles: 1 });
+            // On attend exactement 1 clé (filename attendu). Sinon on tente de récupérer la première.
+            if(result[filename]) files[filename] = result[filename];
+            else {
+              const firstKey = Object.keys(result)[0];
+              if(firstKey) files[filename] = result[firstKey]; // remap
+            }
+          } catch(e){
+            console.warn('Échec génération fichier', filename, e.message);
+          }
+        }
+      }
+      // Fallback: si rien généré, utiliser ancien mode global
+      if(Object.keys(files).length === 0){
+        const fallbackPrompt = buildAppPrompt(blueprint, { simpleMode: false });
+        files = await openaiService.generateApplication(fallbackPrompt, { model: 'gpt-4o-mini', maxFiles: 20 });
+      }
+      // Injecter composants validés manquants (si non générés) en ajoutant leur code brut
+      for(const comp of componentsCatalog){
+        if(!Object.keys(files).includes(comp.filename)){
+          files[comp.filename] = comp.code;
+        }
+      }
+      // S'assurer présence d'une page principale
+      if(!files['src/routes/+page.svelte']){
+        // Choisir la première route générée ou créer un index minimal
+        const candidate = Object.keys(files).find(k => k.startsWith('src/routes/') && k.endsWith('+page.svelte'));
+        if(candidate){
+          files['src/routes/+page.svelte'] = files[candidate];
+        } else {
+          files['src/routes/+page.svelte'] = `<script>/* page principale injectée */</script><div class='p-8 text-center text-gray-600'>Page principale non définie dans blueprint.</div>`;
+        }
+      }
+    }
 
     // Mise à jour / création projet
     if (!project && !ephemeral) {
@@ -108,7 +155,7 @@ export async function POST({ request }) {
       }
     }
 
-  return json({ success:true, blueprint, files, project: project || null, ephemeral });
+  return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode });
   } catch (e) {
     console.error('site/generate error', e);
     return json({ success:false, error:e.message }, { status:500 });
@@ -167,5 +214,28 @@ Contraintes STRICTES:
 - Pour la page dynamique, inclure un exemple d'affichage d'un article (données mock locales)
 - Fournir contenu pertinent dans chaque route
 - Max 20 fichiers, prioriser ceux listés
+FIN.`.trim();
+}
+
+// Construit un prompt dédié à un fichier unique en intégrant contexte blueprint + fichiers déjà générés.
+function buildPerFilePrompt({ blueprint, filePrompt, filename, already, catalogSummary }){
+  const { seo_meta = {}, color_palette = [], routes = [], core_components = [] } = blueprint || {};
+  const previousList = Object.keys(already||{}).slice(-6); // limiter contexte
+  return `Tu génères UNIQUEMENT le fichier Svelte suivant: ${filename}.
+Contexte site:
+Titre: ${seo_meta.title}
+Palette: ${color_palette.join(', ')}
+Routes: ${routes.map(r=> r.path).join(', ')}
+Composants à réutiliser si utiles: ${core_components.join(', ')}
+Catalogue validé:\n${catalogSummary}\n
+Fichiers déjà générés (référence uniquement, ne pas les réécrire): ${previousList.join(', ') || 'aucun'}
+Instruction spécifique:
+${filePrompt}
+Contraintes STRICTES:
+- Retourne JSON: { "${filename}": "CONTENU" }
+- Pas de texte hors JSON
+- Pas de commentaires superflus
+- Utilise Tailwind pour la mise en page
+- Si le fichier est une page article dynamique, inclure données mock locales.
 FIN.`.trim();
 }
