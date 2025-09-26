@@ -18,6 +18,8 @@ import { runSvelteCheckSnippet } from '$lib/validation/svelteCheckRunner.js';
 //  - Génération initiale: { success, blueprint, files, project }
 //  - Régénération fichier: { success, regenerated: filename, fileContent }
 export async function POST(event) {
+  const t0 = Date.now();
+  const timings = { start: t0 };
   const { request, locals } = event;
   try {
     const body = await request.json();
@@ -91,7 +93,8 @@ export async function POST(event) {
     }
 
     // Génération complète si pas encore blueprint
-    let blueprint = project?.blueprint_json;
+  let blueprint = project?.blueprint_json;
+  const tBeforeBlueprint = Date.now();
     if (!blueprint) {
       const effectiveQuery = query || project?.original_query;
       if (!effectiveQuery) return json({ success:false, error:'Impossible de déterminer la requête de base' }, { status:400 });
@@ -108,7 +111,8 @@ export async function POST(event) {
       // Intent expansion (Phase C) avant blueprint pour enrichir le contexte
       let intentExpansion = null;
       try { intentExpansion = await openaiService.generateIntentExpansion(compositeQuery, { provider }); } catch(e){ console.warn('Intent expansion failed', e.message); }
-      blueprint = await openaiService.generateBlueprint(intentExpansion?.enriched_query || compositeQuery, { provider });
+  blueprint = await openaiService.generateBlueprint(intentExpansion?.enriched_query || compositeQuery, { provider });
+  timings.blueprint = Date.now();
       if(intentExpansion) blueprint.intent_expansion = intentExpansion;
 
       // Heuristique anti-généricité: si titres d'articles trop génériques, regénère un bloc sample_content enrichi
@@ -139,7 +143,8 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
     const validationIssues = {}; // new: collect issues per file
 
     // Nouvelle stratégie: tentative single-pass globale si non simpleMode
-    if(!simpleMode){
+  const tBeforeSingle = Date.now();
+  if(!simpleMode){
       try {
   const { prompt: globalPrompt, capabilities: detectedCaps } = await buildGlobalGenerationPromptAsync(blueprint, selected, { generationProfile });
     const singleResult = await openaiService.generateApplication(globalPrompt, { model: 'gpt-4o-mini', maxFiles: 30, provider });
@@ -155,12 +160,14 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
       }
     }
 
-    if(simpleMode){
+  timings.singlePassAttempt = Date.now();
+  if(simpleMode){
   const appPrompt = buildAppPrompt(blueprint, { simpleMode: true, generationProfile });
     files = await openaiService.generateApplication(appPrompt, { model: 'gpt-4o-mini', maxFiles: 5, provider });
     } else if(Object.keys(files).length === 0) {
       // Ancien mode orchestré seulement si single-pass non satisfaisant
-      const perFile = blueprint?.recommended_prompts?.per_file || [];
+  const perFile = blueprint?.recommended_prompts?.per_file || [];
+  const tBeforePerFile = Date.now();
       if(perFile.length){
         for(const entry of perFile){
           const { filename, prompt: filePrompt } = entry;
@@ -190,6 +197,7 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
   const fallbackPrompt = buildAppPrompt(blueprint, { simpleMode: false, generationProfile });
     files = await openaiService.generateApplication(fallbackPrompt, { model: 'gpt-4o-mini', maxFiles: 20, provider });
       }
+      timings.perFile = Date.now();
       // Injecter composants validés manquants (si non générés) en ajoutant leur code brut
       for(const comp of selected){
         if(!Object.keys(files).includes(comp.filename)){
@@ -249,7 +257,8 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
       }
     }
     // global validation pass for all files (ensure even simpleMode gets it)
-    for (const k of Object.keys(files)) {
+  const tBeforeGlobalValidation = Date.now();
+  for (const k of Object.keys(files)) {
       const { fixed, issues } = validateAndFix(files[k], { filename: k });
       files[k] = fixed;
       if (issues.length) {
@@ -308,7 +317,8 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
     // --- AUTO SELF-REFINE (Phase A) ---
     // Heuristique: si >5 fichiers avec issues ou palette incohérente -> passage refine rapide en mémoire puis persistance
     const issueFiles = Object.keys(validationIssues).length;
-    if(!simpleMode && issueFiles > 5 && !ephemeral){
+  timings.preRefine = Date.now();
+  if(!simpleMode && issueFiles > 5 && !ephemeral){
       let criticalCount = 0; let nonCriticalOver = 0; let accessibilityBonus = 0;
       const blueprintPalette = blueprint.color_palette || [];
       for(const [fname, content] of Object.entries(files)){
@@ -423,7 +433,15 @@ Ancienne version:
       });
     }
   } catch(e){ /* ignore logs errors */ }
-  return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues, validation: fullValidation, singlePass: Object.keys(files).length>0, capabilities, compileResults });
+  timings.end = Date.now();
+  timings.durations = {
+    total_ms: timings.end - t0,
+    blueprint_ms: timings.blueprint ? timings.blueprint - tBeforeBlueprint : 0,
+    single_attempt_ms: timings.singlePassAttempt ? timings.singlePassAttempt - tBeforeSingle : 0,
+    per_file_ms: timings.perFile ? timings.perFile - (timings.singlePassAttempt||tBeforeSingle) : 0,
+    refine_and_validation_ms: timings.end - (timings.preRefine || tBeforeGlobalValidation)
+  };
+  return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues, validation: fullValidation, singlePass: Object.keys(files).length>0, capabilities, compileResults, timings });
   } catch (err) {
     console.error('site/generate error', err);
     return json({ success:false, error:err.message }, { status:500 });
