@@ -4,7 +4,6 @@ import { supabase as clientSupabase } from '$lib/supabase.js';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { summarizeCatalog, componentsCatalog, selectComponentsForBlueprint } from '$lib/catalog/components.js';
-import { validateAndFix } from '$lib/validator/svelteValidator.js';
 import { buildGlobalGenerationPrompt, buildGlobalGenerationPromptAsync } from '$lib/prompt/promptBuilders.js';
 import { validateAndFix, unifyPalette, addAccessibilityFixes } from '$lib/validator/svelteValidator.js';
 
