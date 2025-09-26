@@ -11,6 +11,24 @@ importers:
       '@eslint/js':
         specifier: ^9.11.0
         version: 9.34.0
+      '@tailwindcss/forms':
+        specifier: ^0.5.10
+        version: 0.5.10(tailwindcss@3.4.17)
+      '@tailwindcss/typography':
+        specifier: ^0.5.19
+        version: 0.5.19(tailwindcss@3.4.17)
+      '@testing-library/svelte':
+        specifier: ^5.1.0
+        version: 5.2.8(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3))(vitest@0.33.0(jsdom@25.0.1))
+      '@testing-library/user-event':
+        specifier: ^14.5.2
+        version: 14.6.1(@testing-library/dom@10.4.1)
+      '@vitest/coverage-c8':
+        specifier: ^0.33.0
+        version: 0.33.0(vitest@0.33.0(jsdom@25.0.1))
+      autoprefixer:
+        specifier: ^10.4.0
+        version: 10.4.21(postcss@8.5.6)
       eslint:
         specifier: ^9.11.0
         version: 9.34.0(jiti@1.21.7)
@@ -26,12 +44,18 @@ importers:
       eslint-plugin-unused-imports:
         specifier: ^4.1.4
         version: 4.2.0(@typescript-eslint/eslint-plugin@8.44.1(@typescript-eslint/parser@8.44.1(eslint@9.34.0(jiti@1.21.7))(typescript@5.9.2))(eslint@9.34.0(jiti@1.21.7))(typescript@5.9.2))(eslint@9.34.0(jiti@1.21.7))
+      jsdom:
+        specifier: ^25.0.0
+        version: 25.0.1
       lint-staged:
         specifier: ^15.2.0
         version: 15.5.2
       magic-string:
         specifier: ^0.30.10
         version: 0.30.19
+      postcss:
+        specifier: ^8.4.0
+        version: 8.5.6
       prettier:
         specifier: ^3.6.2
         version: 3.6.2
@@ -44,6 +68,12 @@ importers:
       recast:
         specifier: ^0.23.9
         version: 0.23.11
+      svelte-preprocess:
+        specifier: ^5.1.4
+        version: 5.1.4(postcss-load-config@4.0.2(postcss@8.5.6))(postcss@8.5.6)(svelte@5.39.6)(typescript@5.9.2)
+      tailwindcss:
+        specifier: ^3.4.0
+        version: 3.4.17
       turbo:
         specifier: ^2.5.8
         version: 2.5.8
@@ -53,6 +83,9 @@ importers:
       typescript-eslint:
         specifier: ^8.8.0
         version: 8.44.1(eslint@9.34.0(jiti@1.21.7))(typescript@5.9.2)
+      vitest:
+        specifier: ^0.33.0
+        version: 0.33.0(jsdom@25.0.1)
 
   apps/admin:
     dependencies:
@@ -75,33 +108,15 @@ importers:
       '@sveltejs/vite-plugin-svelte':
         specifier: ^4.0.0
         version: 4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3))
-      '@types/eslint':
-        specifier: ^8.56.0
-        version: 8.56.12
       autoprefixer:
         specifier: ^10.4.0
         version: 10.4.21(postcss@8.4.31)
       eslint:
         specifier: ^9.0.0
         version: 9.34.0(jiti@1.21.7)
-      eslint-config-prettier:
-        specifier: ^9.1.0
-        version: 9.1.2(eslint@9.34.0(jiti@1.21.7))
-      eslint-plugin-svelte:
-        specifier: ^2.36.0
-        version: 2.46.1(eslint@9.34.0(jiti@1.21.7))(svelte@5.39.6)
-      globals:
-        specifier: ^15.0.0
-        version: 15.15.0
       postcss:
         specifier: ^8.4.0
         version: 8.4.31
-      prettier:
-        specifier: ^3.1.1
-        version: 3.6.2
-      prettier-plugin-svelte:
-        specifier: ^3.1.2
-        version: 3.4.0(prettier@3.6.2)(svelte@5.39.6)
       svelte:
         specifier: ^5.0.0
         version: 5.39.6
@@ -150,7 +165,7 @@ importers:
         version: 8.6.14(@types/react@19.1.13)(storybook@8.6.14(prettier@3.6.2))
       '@storybook/sveltekit':
         specifier: ^8.2.0
-        version: 8.6.14(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3)))(postcss-load-config@4.0.2(postcss@8.4.31))(postcss@8.4.31)(storybook@8.6.14(prettier@3.6.2))(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3))
+        version: 8.6.14(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3)))(postcss-load-config@4.0.2(postcss@8.5.6))(postcss@8.5.6)(storybook@8.6.14(prettier@3.6.2))(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3))
       '@sveltejs/adapter-vercel':
         specifier: ^5.10.2
         version: 5.10.2(@sveltejs/kit@2.43.4(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3)))(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3)))(rollup@4.52.2)
@@ -160,51 +175,24 @@ importers:
       '@sveltejs/vite-plugin-svelte':
         specifier: ^4.0.0
         version: 4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3))
-      '@tailwindcss/forms':
-        specifier: ^0.5.10
-        version: 0.5.10(tailwindcss@3.4.17)
-      '@tailwindcss/typography':
-        specifier: ^0.5.19
-        version: 0.5.19(tailwindcss@3.4.17)
       '@testing-library/svelte':
         specifier: ^5.1.0
         version: 5.2.8(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3))(vitest@0.33.0(jsdom@25.0.1))
       '@testing-library/user-event':
         specifier: ^14.5.2
         version: 14.6.1(@testing-library/dom@10.4.0)
-      '@types/eslint':
-        specifier: ^8.56.0
-        version: 8.56.12
       '@vitest/coverage-c8':
         specifier: ^0.33.0
         version: 0.33.0(vitest@0.33.0(jsdom@25.0.1))
       autoprefixer:
-        specifier: ^10.4.21
-        version: 10.4.21(postcss@8.4.31)
-      eslint:
-        specifier: ^9.0.0
-        version: 9.34.0(jiti@1.21.7)
-      eslint-config-prettier:
-        specifier: ^9.1.0
-        version: 9.1.2(eslint@9.34.0(jiti@1.21.7))
-      eslint-plugin-svelte:
-        specifier: ^2.36.0
-        version: 2.46.1(eslint@9.34.0(jiti@1.21.7))(svelte@5.39.6)
-      globals:
-        specifier: ^15.0.0
-        version: 15.15.0
+        specifier: ^10.4.0
+        version: 10.4.21(postcss@8.5.6)
       jsdom:
         specifier: ^25.0.0
         version: 25.0.1
       postcss:
-        specifier: ^8.4.31
-        version: 8.4.31
-      prettier:
-        specifier: ^3.1.1
-        version: 3.6.2
-      prettier-plugin-svelte:
-        specifier: ^3.1.2
-        version: 3.4.0(prettier@3.6.2)(svelte@5.39.6)
+        specifier: ^8.4.0
+        version: 8.5.6
       svelte:
         specifier: ^5.0.0
         version: 5.39.6
@@ -213,9 +201,9 @@ importers:
         version: 4.3.2(picomatch@4.0.3)(svelte@5.39.6)(typescript@5.9.2)
       svelte-preprocess:
         specifier: ^5.1.4
-        version: 5.1.4(postcss-load-config@4.0.2(postcss@8.4.31))(postcss@8.4.31)(svelte@5.39.6)(typescript@5.9.2)
+        version: 5.1.4(postcss-load-config@4.0.2(postcss@8.5.6))(postcss@8.5.6)(svelte@5.39.6)(typescript@5.9.2)
       tailwindcss:
-        specifier: ^3.4.17
+        specifier: ^3.4.0
         version: 3.4.17
       typescript:
         specifier: ^5.0.0
@@ -242,33 +230,15 @@ importers:
       '@sveltejs/vite-plugin-svelte':
         specifier: ^4.0.0
         version: 4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3))
-      '@types/eslint':
-        specifier: ^8.56.0
-        version: 8.56.12
       autoprefixer:
         specifier: ^10.4.0
         version: 10.4.21(postcss@8.4.31)
       eslint:
         specifier: ^9.0.0
         version: 9.34.0(jiti@1.21.7)
-      eslint-config-prettier:
-        specifier: ^9.1.0
-        version: 9.1.2(eslint@9.34.0(jiti@1.21.7))
-      eslint-plugin-svelte:
-        specifier: ^2.36.0
-        version: 2.46.1(eslint@9.34.0(jiti@1.21.7))(svelte@5.39.6)
-      globals:
-        specifier: ^15.0.0
-        version: 15.15.0
       postcss:
         specifier: ^8.4.0
         version: 8.4.31
-      prettier:
-        specifier: ^3.1.1
-        version: 3.6.2
-      prettier-plugin-svelte:
-        specifier: ^3.1.2
-        version: 3.4.0(prettier@3.6.2)(svelte@5.39.6)
       svelte:
         specifier: ^5.0.0
         version: 5.39.6
@@ -1423,9 +1393,6 @@ packages:
   '@types/cors@2.8.19':
     resolution: {integrity: sha512-mFNylyeyqN93lfe/9CSxOGREz8cpzAhH+E93xJ4xWQf62V8sQ/24reV2nyzUWM6H6Xji+GGHpkbLe7pVoUEskg==}
 
-  '@types/eslint@8.56.12':
-    resolution: {integrity: sha512-03ruubjWyOHlmljCVoxSuNDdmfZDzsrrz0P2LeJsOXr+ZwFQ+0yQIwNCwt/GYhV7Z31fgtXJTAEs+FYlEL851g==}
-
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
@@ -2202,12 +2169,6 @@ packages:
     peerDependencies:
       eslint: '>=6.0.0'
 
-  eslint-config-prettier@9.1.2:
-    resolution: {integrity: sha512-iI1f+D2ViGn+uvv5HuHVUamg8ll4tN+JRHGc6IJi4TP9Kl976C57fzPXgseXNs8v0iA8aSJpHsTWjDb9QJamGQ==}
-    hasBin: true
-    peerDependencies:
-      eslint: '>=7.0.0'
-
   eslint-import-resolver-node@0.3.9:
     resolution: {integrity: sha512-WFj2isz22JahUv+B788TlO3N6zL3nNJGU8CcZbPZvVEkBPaJdCV4vy5wyghty5ROFbCRnm132v8BScu5/1BQ8g==}
 
@@ -2519,10 +2480,6 @@ packages:
 
   globals@14.0.0:
     resolution: {integrity: sha512-oahGvuMGQlPw/ivIYBjVSrWAfWLBeku5tpPE2fOPLi+WHffIWbuh2tCjhyQhTBPMf5E9jDEH4FOmTYgYwbKwtQ==}
-    engines: {node: '>=18'}
-
-  globals@15.15.0:
-    resolution: {integrity: sha512-7ACyT3wmyp3I61S4fG682L0VA2RGD9otkqGJIwNUMF1SWUombIIk+af1unuDYgMm082aHYwD+mzJvv9Iu8dsgg==}
     engines: {node: '>=18'}
 
   globalthis@1.0.4:
@@ -5156,7 +5113,7 @@ snapshots:
       react-dom: 19.1.1(react@19.1.1)
       storybook: 8.6.14(prettier@3.6.2)
 
-  '@storybook/svelte-vite@8.6.14(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3)))(postcss-load-config@4.0.2(postcss@8.4.31))(postcss@8.4.31)(storybook@8.6.14(prettier@3.6.2))(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3))':
+  '@storybook/svelte-vite@8.6.14(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3)))(postcss-load-config@4.0.2(postcss@8.5.6))(postcss@8.5.6)(storybook@8.6.14(prettier@3.6.2))(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3))':
     dependencies:
       '@storybook/builder-vite': 8.6.14(storybook@8.6.14(prettier@3.6.2))(vite@5.4.20(@types/node@22.15.3))
       '@storybook/svelte': 8.6.14(storybook@8.6.14(prettier@3.6.2))(svelte@5.39.6)
@@ -5164,7 +5121,7 @@ snapshots:
       magic-string: 0.30.19
       storybook: 8.6.14(prettier@3.6.2)
       svelte: 5.39.6
-      svelte-preprocess: 5.1.4(postcss-load-config@4.0.2(postcss@8.4.31))(postcss@8.4.31)(svelte@5.39.6)(typescript@5.9.2)
+      svelte-preprocess: 5.1.4(postcss-load-config@4.0.2(postcss@8.5.6))(postcss@8.5.6)(svelte@5.39.6)(typescript@5.9.2)
       svelte2tsx: 0.7.44(svelte@5.39.6)(typescript@5.9.2)
       sveltedoc-parser: 4.2.1
       ts-dedent: 2.2.0
@@ -5198,12 +5155,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@storybook/sveltekit@8.6.14(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3)))(postcss-load-config@4.0.2(postcss@8.4.31))(postcss@8.4.31)(storybook@8.6.14(prettier@3.6.2))(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3))':
+  '@storybook/sveltekit@8.6.14(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3)))(postcss-load-config@4.0.2(postcss@8.5.6))(postcss@8.5.6)(storybook@8.6.14(prettier@3.6.2))(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3))':
     dependencies:
       '@storybook/addon-actions': 8.6.14(storybook@8.6.14(prettier@3.6.2))
       '@storybook/builder-vite': 8.6.14(storybook@8.6.14(prettier@3.6.2))(vite@5.4.20(@types/node@22.15.3))
       '@storybook/svelte': 8.6.14(storybook@8.6.14(prettier@3.6.2))(svelte@5.39.6)
-      '@storybook/svelte-vite': 8.6.14(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3)))(postcss-load-config@4.0.2(postcss@8.4.31))(postcss@8.4.31)(storybook@8.6.14(prettier@3.6.2))(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3))
+      '@storybook/svelte-vite': 8.6.14(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3)))(postcss-load-config@4.0.2(postcss@8.5.6))(postcss@8.5.6)(storybook@8.6.14(prettier@3.6.2))(svelte@5.39.6)(vite@5.4.20(@types/node@22.15.3))
       storybook: 8.6.14(prettier@3.6.2)
       svelte: 5.39.6
       vite: 5.4.20(@types/node@22.15.3)
@@ -5406,6 +5363,10 @@ snapshots:
     dependencies:
       '@testing-library/dom': 10.4.0
 
+  '@testing-library/user-event@14.6.1(@testing-library/dom@10.4.1)':
+    dependencies:
+      '@testing-library/dom': 10.4.1
+
   '@types/aria-query@5.0.4': {}
 
   '@types/chai-subset@1.3.6(@types/chai@4.3.20)':
@@ -5419,11 +5380,6 @@ snapshots:
   '@types/cors@2.8.19':
     dependencies:
       '@types/node': 22.15.3
-
-  '@types/eslint@8.56.12':
-    dependencies:
-      '@types/estree': 1.0.8
-      '@types/json-schema': 7.0.15
 
   '@types/estree@1.0.8': {}
 
@@ -5792,6 +5748,16 @@ snapshots:
       normalize-range: 0.1.2
       picocolors: 1.1.1
       postcss: 8.4.31
+      postcss-value-parser: 4.2.0
+
+  autoprefixer@10.4.21(postcss@8.5.6):
+    dependencies:
+      browserslist: 4.26.2
+      caniuse-lite: 1.0.30001745
+      fraction.js: 4.3.7
+      normalize-range: 0.1.2
+      picocolors: 1.1.1
+      postcss: 8.5.6
       postcss-value-parser: 4.2.0
 
   available-typed-arrays@1.0.7:
@@ -6379,10 +6345,6 @@ snapshots:
       eslint: 9.34.0(jiti@1.21.7)
       semver: 7.7.2
 
-  eslint-config-prettier@9.1.2(eslint@9.34.0(jiti@1.21.7)):
-    dependencies:
-      eslint: 9.34.0(jiti@1.21.7)
-
   eslint-import-resolver-node@0.3.9:
     dependencies:
       debug: 3.2.7
@@ -6797,8 +6759,6 @@ snapshots:
       type-fest: 0.20.2
 
   globals@14.0.0: {}
-
-  globals@15.15.0: {}
 
   globalthis@1.0.4:
     dependencies:
@@ -7581,14 +7541,6 @@ snapshots:
     optionalDependencies:
       postcss: 8.5.6
 
-  postcss-load-config@4.0.2(postcss@8.4.31):
-    dependencies:
-      lilconfig: 3.1.3
-      yaml: 2.8.1
-    optionalDependencies:
-      postcss: 8.4.31
-    optional: true
-
   postcss-load-config@4.0.2(postcss@8.5.6):
     dependencies:
       lilconfig: 3.1.3
@@ -8127,7 +8079,7 @@ snapshots:
     optionalDependencies:
       svelte: 5.39.6
 
-  svelte-preprocess@5.1.4(postcss-load-config@4.0.2(postcss@8.4.31))(postcss@8.4.31)(svelte@5.39.6)(typescript@5.9.2):
+  svelte-preprocess@5.1.4(postcss-load-config@4.0.2(postcss@8.5.6))(postcss@8.5.6)(svelte@5.39.6)(typescript@5.9.2):
     dependencies:
       '@types/pug': 2.0.10
       detect-indent: 6.1.0
@@ -8136,8 +8088,8 @@ snapshots:
       strip-indent: 3.0.0
       svelte: 5.39.6
     optionalDependencies:
-      postcss: 8.4.31
-      postcss-load-config: 4.0.2(postcss@8.4.31)
+      postcss: 8.5.6
+      postcss-load-config: 4.0.2(postcss@8.5.6)
       typescript: 5.9.2
 
   svelte2tsx@0.7.44(svelte@5.39.6)(typescript@5.9.2):
