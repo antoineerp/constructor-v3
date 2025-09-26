@@ -5,6 +5,8 @@ import { supabase as clientSupabase } from '$lib/supabase.js';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { summarizeCatalog, selectComponentsForBlueprint } from '$lib/catalog/components.js';
+import { buildDiagnostics, shouldTriggerCritic, buildCriticPrompt } from '$lib/ai/critic.js';
+import { computeQuality } from '$lib/quality/qualityMetrics.js';
 import { buildGlobalGenerationPromptAsync } from '$lib/prompt/promptBuilders.js';
 import { validateAndFix, unifyPalette, addAccessibilityFixes } from '$lib/validator/svelteValidator.js';
 import { validateFiles } from '$lib/validation/validator.js';
@@ -209,14 +211,7 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
       }
     }
     // S'assurer présence d'une page principale (après les deux modes)
-    if(!files['src/routes/+page.svelte']){
-      const candidate = Object.keys(files).find(k => k.startsWith('src/routes/') && k.endsWith('+page.svelte'));
-      if(candidate){
-        files['src/routes/+page.svelte'] = files[candidate];
-      } else {
-        files['src/routes/+page.svelte'] = `<script>/* page principale injectée */</script><div class='p-8 text-center text-gray-600'>Page principale non définie dans blueprint.</div>`;
-      }
-    }
+    // Suppression du fallback automatique de page principale: on laisse l'absence remonter comme un problème éventuel pour critic.
     // Layout moderne automatique si blueprint.layout_plan.has_layout mais fichier absent
     const wantsLayout = blueprint?.layout_plan?.has_layout;
     if(wantsLayout && !files['src/routes/+layout.svelte']){
@@ -441,7 +436,69 @@ Ancienne version:
     per_file_ms: timings.perFile ? timings.perFile - (timings.singlePassAttempt||tBeforeSingle) : 0,
     refine_and_validation_ms: timings.end - (timings.preRefine || tBeforeGlobalValidation)
   };
-  return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues, validation: fullValidation, singlePass: Object.keys(files).length>0, capabilities, compileResults, timings });
+  // Filtrer clés techniques avant réponse/persistance
+  const metaRetrieval = files.__retrieval_meta || null;
+  delete files.__retrieval_meta;
+
+  // Critic pass (post-validation) si conditions
+  let critic = null;
+  let criticPatchedFiles = [];
+  try {
+    const diagnostics = buildDiagnostics(files, blueprint);
+    if(shouldTriggerCritic(diagnostics)){
+      const criticEnvelope = buildCriticPrompt({ blueprint, diagnostics, files });
+      const patches = await openaiService.generateCriticPatches(criticEnvelope, { provider });
+      let applied = 0;
+      for(const [fname, content] of Object.entries(patches||{})){
+        if(typeof content === 'string' && content.trim()){
+          files[fname] = content;
+          criticPatchedFiles.push(fname);
+          applied++;
+        }
+      }
+      critic = { diagnostics, applied, patchKeys: Object.keys(patches||{}) };
+    }
+  } catch(e){ critic = { error: e.message }; }
+
+  // Revalidation ciblée des fichiers patchés par critic
+  if(criticPatchedFiles.length){
+    for(const fname of criticPatchedFiles){
+      try {
+        const { fixed, issues } = validateAndFix(files[fname], { filename: fname });
+        files[fname] = fixed;
+        if(issues?.length){
+          validationIssues[fname] = Array.from(new Set([...(validationIssues[fname]||[]), ...issues]));
+        }
+      } catch(e){ /* ignore */ }
+    }
+  }
+
+  // Calcul qualité global (post-critic)
+  const quality = computeQuality({ files, validationIssues, compileResults, blueprint, critic });
+
+  // Persistance finale generation_logs (après critic + quality)
+  try {
+    if(!ephemeral){
+      await clientSupabase.from('generation_logs').insert({
+        user_id: project?.owner_id || project?.user_id || userId || null,
+        project_id: project?.id || null,
+        type: 'generation',
+        pass_count: 1,
+        duration_ms: timings.durations?.total_ms || null,
+        meta: {
+          file_count: Object.keys(files).length,
+            simpleMode: !!simpleMode,
+            retrieval: metaRetrieval,
+            critic,
+            quality,
+            timings: timings.durations,
+            validation_summary: Object.fromEntries(Object.entries(validationIssues).map(([k,v])=>[k,v.length]))
+        }
+      });
+    }
+  } catch(e){ console.warn('generation_logs insert post-critic failed', e.message); }
+
+  return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues, validation: fullValidation, singlePass: Object.keys(files).length>0, capabilities, compileResults, timings, retrieval: metaRetrieval, critic, quality });
   } catch (err) {
     console.error('site/generate error', err);
     return json({ success:false, error:err.message }, { status:500 });

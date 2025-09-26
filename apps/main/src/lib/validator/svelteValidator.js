@@ -79,8 +79,7 @@ export function validateAndFix(content, { filename } = {}) {
 
   if (filename && filename.endsWith('+page.svelte')) {
     if (!/<main[\s>]/.test(fixed) && !/<section[\s>]/.test(fixed) && !/<div[\s>]/.test(fixed)) {
-      fixed += '\n<div class="p-8 text-gray-500">(Page vide)</div>';
-      issues.push('Inserted fallback container in empty page');
+      issues.push('Empty page structure (no main/section/div root)');
     }
   }
 

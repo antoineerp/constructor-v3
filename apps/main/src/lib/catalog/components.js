@@ -571,3 +571,14 @@ export function selectComponentsForBlueprint(blueprint, limit = 12){
   const base = ranked.length ? ranked : componentsCatalog.slice(0, limit);
   return base.slice(0, limit);
 }
+
+// Renvoie top-k composants (même scoring) mais avec extrait de code tronqué
+export function topComponentCodeSnippets(blueprint, limit = 5, maxCharsPer = 380){
+  const selected = selectComponentsForBlueprint(blueprint, limit * 2); // sur‑sélection puis coupe
+  return selected.slice(0, limit).map(c => ({
+    name: c.name,
+    filename: c.filename,
+    purpose: c.purpose,
+    snippet: (c.code || '').trim().slice(0, maxCharsPer)
+  }));
+}

@@ -1,6 +1,37 @@
 // IMPORTANT: utilisation de $env/dynamic/private pour éviter l'injection statique
 // afin que la clé ne soit pas écrite en dur dans le bundle build côté serveur.
 import { env } from '$env/dynamic/private';
+import { extractJson, withJsonEnvelope } from '$lib/ai/jsonExtractor.js';
+import { simpleCache } from '$lib/quality/simpleCache.js';
+import { topComponentCodeSnippets } from '$lib/catalog/components.js';
+
+// Résolution simplifiée des imports relatifs vers des fichiers Svelte.
+// from: fichier courant (ex: src/routes/+page.svelte)
+// target: chemin relatif importé (./Header, ../lib/components/Card.svelte, etc.)
+// Retourne un chemin normalisé avec extension .svelte si manquante.
+function resolveRelativeSvelte(from, target) {
+  try {
+    if (!from || !target) return null;
+    const baseSegs = from.split('/');
+    baseSegs.pop(); // enlever le nom du fichier
+    const relSegs = target.split('/');
+    for (const seg of relSegs) {
+      if (seg === '.' || seg === '') continue;
+      if (seg === '..') {
+        if (baseSegs.length) baseSegs.pop();
+      } else {
+        baseSegs.push(seg);
+      }
+    }
+    let out = baseSegs.join('/');
+    if (!/\.svelte$/i.test(out)) out += '.svelte';
+    // normalisation double slash éventuel
+    out = out.replace(/\/+/g, '/');
+    return out;
+  } catch (_e) {
+    return null;
+  }
+}
 
 export class OpenAIService {
   constructor() {
@@ -11,6 +42,9 @@ export class OpenAIService {
   async generateEmbedding(input, { model = 'text-embedding-3-small' } = {}) {
     if(!this.apiKey) throw new Error('Clé API OpenAI manquante');
     const cleaned = typeof input === 'string' ? input.slice(0,8000) : JSON.stringify(input).slice(0,8000);
+    const cacheKey = simpleCache.key('embedding', { model, input: cleaned });
+    const cached = simpleCache.get(cacheKey);
+    if(cached) return cached;
     const response = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: { 'Content-Type':'application/json', Authorization: `Bearer ${this.apiKey}` },
@@ -21,7 +55,9 @@ export class OpenAIService {
       throw new Error('Erreur embedding: '+txt);
     }
     const data = await response.json();
-    return data.data?.[0]?.embedding || [];
+    const emb = data.data?.[0]?.embedding || [];
+    simpleCache.set(cacheKey, emb, 60*30); // 30 min
+    return emb;
   }
 
   async generateComponent(prompt, type = 'generic', { model = 'gpt-4o-mini', provider='openai' } = {}) {
@@ -111,7 +147,7 @@ Retourne uniquement le contenu brut du fichier .svelte.`;
     }
   }
 
-  async generateApplication(prompt, { model = 'gpt-4o-mini', maxFiles = 20, provider='openai' } = {}) {
+  async generateApplication(prompt, { model = 'gpt-4o-mini', maxFiles = 20, provider='openai', blueprint=null } = {}) {
     if(provider==='claude'){
       if(!this.claudeKey) throw new Error('Clé API Claude manquante');
       const system = `Tu génères une application SvelteKit. Retourne UNIQUEMENT JSON objet { "filename":"CONTENU" }. Max ${maxFiles} fichiers.`;
@@ -129,7 +165,32 @@ Retourne uniquement le contenu brut du fichier .svelte.`;
       return parsed;
     }
     if (!this.apiKey) throw new Error('Clé API OpenAI manquante');
-  const system = `Tu es un assistant qui génère une application SvelteKit modulaire.
+    // Injection top-k composants (code tronqué) pour favoriser la réutilisation réelle
+    let componentContext = '';
+    if(blueprint){
+      try {
+        const top = topComponentCodeSnippets(blueprint, 5);
+        if(top.length){
+          componentContext = top.map(t=>`// COMPONENT: ${t.name} (${t.filename})\n/* ${t.purpose} */\n${t.snippet}\n`).join('\n');
+          if (componentContext.length > 8000) {
+            componentContext = componentContext.slice(0, 8000) + '\n/* ...contexte composants tronqué... */\n';
+          }
+        }
+      } catch(e){ /* ignore */ }
+    }
+    // --- Retrieval vectoriel (snippets existants) ---
+    let retrievalContext = '';
+    let retrievalStats = null;
+    if(blueprint){
+      try {
+        const { buildRetrievalContext } = await import('$lib/ai/retrieval.js');
+        const { contextBlock, stats } = await buildRetrievalContext(blueprint, { k:8, maxInject:5, maxChars:480, minScore:0.74 });
+        retrievalContext = contextBlock;
+        retrievalStats = stats;
+      } catch(e){ /* ignore retrieval errors */ }
+    }
+
+    const system = `Tu es un assistant qui génère une application SvelteKit modulaire.
 Chaque fichier .svelte doit être un composant/route Svelte VALIDE avec une balise <script> (sauf cas purement statique évident) exportant éventuellement des props ou définissant un petit état (ex: let items = [...] ; let loading = false). Pas de dépendances externes non demandées. Préfère la réactivité Svelte plutôt que du simple HTML statique.
 Retourne STRICTEMENT un objet JSON (aucun texte hors JSON) où chaque clé est un nom de fichier (chemins relatifs) et chaque valeur son contenu COMPLET.
 Contraintes:
@@ -140,31 +201,65 @@ Contraintes:
 - Pas de fences markdown
 - Maximum ${maxFiles} fichiers (priorise les routes et composants clés)
 - Les fichiers Svelte doivent être valides.
+// Réutilise composants ci-dessous plutôt que réécrire si alignés avec besoin:
+${componentContext}
+${retrievalContext}
 `;
-    const user = `Génère une application basée sur: ${prompt}`;
-    const body = {
-      model,
-      messages: [ { role:'system', content: system }, { role:'user', content: user } ],
-      temperature: 0.6,
-      max_tokens: 1800
+    const enveloped = withJsonEnvelope(`Génère une application basée sur: ${prompt}`);
+    const attempt = async (retryIndex=0) => {
+      const body = { model, messages:[{role:'system',content:system},{role:'user',content:enveloped}], temperature:0.2, max_tokens:1800 };
+      const cacheKey = simpleCache.key('generateApplication', { prompt, model, retryIndex });
+      const cached = simpleCache.get(cacheKey);
+      if(cached) return cached;
+      const response = await fetch('https://api.openai.com/v1/chat/completions', { method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${this.apiKey}`}, body: JSON.stringify(body) });
+      if(!response.ok){ const txt = await response.text(); throw new Error('Erreur OpenAI app: '+txt); }
+      const data = await response.json();
+      const raw = data.choices?.[0]?.message?.content?.trim();
+      if(!raw){ if(retryIndex===0) return attempt(1); throw new Error('Réponse vide'); }
+      const extracted = extractJson(raw, { allowArrays:false });
+      if(!extracted.ok){ if(retryIndex===0) return attempt(1); throw new Error('Extraction JSON échouée: '+extracted.error); }
+      const files = extracted.data;
+      try {
+        const { validateApplicationFiles } = await import('$lib/ai/schemas.js');
+        const res = validateApplicationFiles(files);
+        if(!res.ok){
+          if(retryIndex===0) return attempt(1);
+          files.__schema_errors = res.errors;
+        }
+      } catch(e){ /* ignore schema load */ }
+      if(retrievalStats) files.__retrieval_meta = retrievalStats;
+      simpleCache.set(cacheKey, files, 60*10); // 10 min
+      return files;
     };
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json', Authorization: `Bearer ${this.apiKey}` },
-      body: JSON.stringify(body)
-    });
-    if (!response.ok) {
-      let errTxt = await response.text();
-      throw new Error('Erreur OpenAI app: ' + errTxt);
+    const files = await attempt(0);
+    // Vérification imports manquants simples
+    const missingImports = [];
+    const fileNames = new Set(Object.keys(files));
+    for(const [fname, content] of Object.entries(files)){
+      if(!fname.endsWith('.svelte')) continue;
+      const importRegex = /import\s+[^'";]+from\s+['"]([^'";]+)['"]/g;
+      let m; while((m = importRegex.exec(content))){
+        const target = m[1];
+        if(target.startsWith('.') || target.startsWith('..')){
+          // relative path -> derive probable file
+          const resolved = resolveRelativeSvelte(fname, target);
+          if(resolved && !fileNames.has(resolved)) missingImports.push({ source: fname, target: resolved });
+        }
+      }
     }
-    const data = await response.json();
-    let raw = data.choices?.[0]?.message?.content?.trim();
-    if (!raw) throw new Error('Réponse vide');
-    // Nettoyage éventuel de fences
-    raw = raw.replace(/^```(json)?/i,'').replace(/```$/,'').trim();
-    let parsed;
-    try { parsed = JSON.parse(raw); } catch(e) { throw new Error('JSON invalide renvoyé: '+ e.message); }
-    return parsed;
+    if(missingImports.length){
+      // Dédoublonnage
+      const unique = new Map();
+      for (const mi of missingImports) if(!unique.has(mi.target)) unique.set(mi.target, mi);
+      const capped = Array.from(unique.values()).slice(0, 10); // limite sécurité
+      for(const miss of capped){
+        if(!fileNames.has(miss.target)){
+          files[miss.target] = `<script>/* Stub auto-généré pour dépendance manquante ${miss.target} */\n  // TODO: Implémenter le composant réel\n  export let data;\n</script>\n<div class=\"stub-component border border-dashed p-2 text-sm text-gray-500\">Stub: ${miss.target}</div>\n`;
+          fileNames.add(miss.target);
+        }
+      }
+    } // fin if missingImports
+    return files;
   }
 
   async generateBlueprint(query, { model = 'gpt-4o-mini', provider='openai' } = {}) {
@@ -180,70 +275,39 @@ Contraintes:
       try { return JSON.parse(raw); } catch(e){ throw new Error('JSON blueprint invalide Claude: '+e.message); }
     }
     if(!this.apiKey) throw new Error('Clé API OpenAI manquante');
-    const system = `Tu es un architecte logiciel spécialisé en SvelteKit, Tailwind et génération de sites (blog, e-commerce, portfolio, SaaS, documentation).
-Reçois une requête utilisateur courte (ex: "blog sur les motos") et PRODUIS UNIQUEMENT un JSON (pas de markdown) détaillant un blueprint.
-Format strict JSON:
-{
-  "original_query": string,
-  "detected_site_type": string,             // blog | ecommerce | portfolio | saas | docs | landing | mix
-  "audience": string,
-  "goals": [string],
-  "keywords": [string],
-  "seo_meta": { "title": string, "description": string, "primary_keywords": [string] },
-  "color_palette": [string],                // 4-6 hex
-  "routes": [ { "path": string, "purpose": string, "sections": [string] } ],
-  "core_components": [string],              // liste de composants réutilisables (Header, Hero, ArticleCard...)
-  "data_models": [ { "name": string, "fields": [ {"name": string, "type": string, "required": boolean } ] } ],
-  "sample_content": {                       // ex articles ou produits
-     "articles": [ { "title": string, "slug": string, "excerpt": string, "hero_image_prompt": string, "body_markdown": string } ]
-  },
-  "generation_strategy": {
-     "files": [ { "filename": string, "role": string, "depends_on": [string] } ],
-     "priority_order": [string]
-  },
-  "recommended_prompts": {                  // prompts détaillés prêts à injecter pour génération multi-fichiers
-     "app_level": string,
-     "per_file": [ { "filename": string, "prompt": string } ]
-  }
-}
-Règles:
-- AUCUNE explication hors JSON
-- Pas de commentaires
-- Contenu concis mais exploitable
-- 3 à 5 articles d'exemple si blog
-- Hex sans # ? NON -> toujours avec #
-SI la requête est ambiguë: fais des hypothèses raisonnables et note-les discrètement dans "goals".
-`;
-    const user = `Requête: ${query}`;
-    const body = {
-      model,
-      messages: [ { role:'system', content: system }, { role:'user', content: user } ],
-      temperature: 0.65,
-      max_tokens: 1800
-    };
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', Authorization: `Bearer ${this.apiKey}` },
-      body: JSON.stringify(body)
-    });
-    if(!response.ok){
-      const txt = await response.text();
-      throw new Error('Erreur OpenAI blueprint: '+txt);
-    }
-    const data = await response.json();
-    let raw = data.choices?.[0]?.message?.content?.trim();
-    if(!raw) throw new Error('Réponse vide');
-    raw = raw.replace(/^```json\n?/i,'').replace(/```$/,'').trim();
-    try {
-      return JSON.parse(raw);
-    } catch(e){
-      // stratégie de récupération simple: tenter d'extraire bloc JSON principal
-      const match = raw.match(/\{[\s\S]*\}/);
-      if(match){
-        try { return JSON.parse(match[0]); } catch(_){}
+    const system = `Tu es un architecte logiciel spécialisé en SvelteKit. Retourne STRICTEMENT un JSON validant le schéma conceptuel du blueprint. AUCUN texte hors JSON.`;
+    const envelope = withJsonEnvelope(`Génère un blueprint complet pour la requête: ${query}\nExigences clés: routes structurées, 3-5 articles si blog, palette 4-6 hex (#...), prompts par fichier.`);
+    const attempt = async (retryIndex=0) => {
+      const body = { model, messages:[{role:'system',content:system},{role:'user',content:envelope}], temperature: 0.4, max_tokens: 1800 };
+      const cacheKey = simpleCache.key('generateBlueprint', { query, model, retryIndex });
+      const cached = simpleCache.get(cacheKey);
+      if(cached) return cached;
+      const response = await fetch('https://api.openai.com/v1/chat/completions', { method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${this.apiKey}`}, body: JSON.stringify(body) });
+      if(!response.ok){ const txt = await response.text(); throw new Error('Erreur OpenAI blueprint: '+txt); }
+      const data = await response.json();
+      const raw = data.choices?.[0]?.message?.content?.trim() || '';
+      const extracted = extractJson(raw, { allowArrays:false });
+      if(!extracted.ok){
+        if(retryIndex===0) return attempt(1);
+        throw new Error('Extraction JSON blueprint échouée: '+extracted.error);
       }
-      throw new Error('JSON blueprint invalide: '+ e.message);
-    }
+      const blueprint = extracted.data;
+      // Validation légère
+      try {
+        const { validateBlueprint } = await import('$lib/ai/schemas.js');
+        const res = validateBlueprint(blueprint);
+        if(!res.ok){
+          if(retryIndex===0){
+            // tenter une 2ème fois avec message d'erreurs
+            return attempt(1);
+          }
+          blueprint._schema_errors = res.errors;
+        }
+      } catch(e){ /* ignore validation load errors */ }
+      simpleCache.set(cacheKey, blueprint, 60*15); // 15 min
+      return blueprint;
+    };
+    return attempt(0);
   }
 
   async generateIntentExpansion(query, { model = 'gpt-4o-mini', provider='openai' } = {}) {
@@ -274,14 +338,38 @@ Règles:
 - feature_hints uniquement pertinents (parmi auth,dashboard,search,i18n,invoicing,blog,docs,notifications)
 - enriched_query < 280 caractères, fusion claire des intentions.`;
     const user = `Requête: ${query}`;
-    const body = { model, messages:[{role:'system',content:system},{role:'user',content:user}], temperature:0.5, max_tokens:400 };
-    const response = await fetch('https://api.openai.com/v1/chat/completions', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${this.apiKey}` }, body: JSON.stringify(body) });
+  const body = { model, messages:[{role:'system',content:system},{role:'user',content:user}], temperature:0.5, max_tokens:400 };
+  const cacheKey = simpleCache.key('intentExpansion', { query });
+  const cached = simpleCache.get(cacheKey);
+  if(cached) return cached;
+  const response = await fetch('https://api.openai.com/v1/chat/completions', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${this.apiKey}` }, body: JSON.stringify(body) });
     if(!response.ok){ const txt = await response.text(); throw new Error('Erreur expansion intent: '+txt); }
     const data = await response.json();
     let raw = data.choices?.[0]?.message?.content?.trim();
     if(!raw) throw new Error('Réponse vide expansion');
     raw = raw.replace(/^```json\n?/i,'').replace(/```$/,'').trim();
-    try { return JSON.parse(raw); } catch(e){ throw new Error('JSON expansion invalide: '+e.message); }
+    try { const parsed = JSON.parse(raw); simpleCache.set(cacheKey, parsed, 60*10); return parsed; } catch(e){ throw new Error('JSON expansion invalide: '+e.message); }
+  }
+
+  async generateCriticPatches(envelopedPrompt, { model='gpt-4o-mini', provider='openai' } = {}) {
+    if(provider==='claude') throw new Error('Critic Claude non implémenté');
+    if(!this.apiKey) throw new Error('Clé API OpenAI manquante');
+    const system = 'Tu es un assistant correctif SvelteKit. Retourne STRICTEMENT JSON {"filename":"CONTENU",...} sans texte additionnel.';
+    const attempt = async (retry=0) => {
+      const body = { model, messages:[{role:'system',content:system},{role:'user',content:envelopedPrompt}], temperature:0.1, max_tokens:1200 };
+      const cacheKey = simpleCache.key('criticPatches', { hash: envelopedPrompt.slice(0,200) });
+      const cached = simpleCache.get(cacheKey);
+      if(cached) return cached;
+      const response = await fetch('https://api.openai.com/v1/chat/completions',{ method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${this.apiKey}`}, body: JSON.stringify(body) });
+      if(!response.ok){ const t= await response.text(); throw new Error('Erreur OpenAI critic: '+t); }
+      const data = await response.json();
+      const raw = data.choices?.[0]?.message?.content?.trim() || '';
+      const extracted = extractJson(raw, { allowArrays:false });
+      if(!extracted.ok){ if(retry===0) return attempt(1); throw new Error('Extraction critic échouée: '+extracted.error); }
+      simpleCache.set(cacheKey, extracted.data, 60*5); // courte durée
+      return extracted.data;
+    };
+    return attempt(0);
   }
 }
 
