@@ -61,7 +61,10 @@
       if(!data.success) throw new Error(data.error || 'Erreur génération site');
   siteBlueprint = data.blueprint;
   siteFiles = data.files;
-  siteProjectId = data.project?.id || siteProjectId;
+  siteProjectId = data.ephemeral ? null : (data.project?.id || siteProjectId);
+  if(data.ephemeral){
+    addSiteMessage({ type:'ai', content: '⚠️ Mode éphémère (non connecté): rien n\'est sauvegardé.' });
+  }
   updateSandbox();
       // sélectionner un fichier principal plausible
       const mainCandidates = ['src/routes/+page.svelte','src/routes/index.svelte'];

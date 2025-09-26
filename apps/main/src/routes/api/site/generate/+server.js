@@ -33,10 +33,8 @@ export async function POST({ request }) {
     if (!query && !projectId) {
       return json({ success:false, error:'query ou projectId requis' }, { status:400 });
     }
-    // Si policies RLS actives, insertion exige userId.
-    if (!userId && !projectId) {
-      return json({ success:false, error:'Authentification requise pour créer un projet (token Supabase manquant).' }, { status:401 });
-    }
+    // Mode éphémère: si pas d'userId et pas de projectId on autorise génération (pas de persistance)
+    const ephemeral = !userId && !projectId;
 
     let project = null;
     if (projectId) {
@@ -84,7 +82,7 @@ export async function POST({ request }) {
   const files = await openaiService.generateApplication(appPrompt, { model: 'gpt-4o-mini', maxFiles: 20 });
 
     // Mise à jour / création projet
-    if (!project) {
+    if (!project && !ephemeral) {
       const insertData = {
         name: blueprint.seo_meta?.title?.slice(0,60) || 'Projet sans nom',
         original_query: blueprint.original_query || query,
@@ -96,18 +94,20 @@ export async function POST({ request }) {
       const { data:created, error:insErr } = await clientSupabase.from('projects').insert(insertData).select().single();
       if (insErr) throw insErr;
       project = created;
-    } else {
+    } else if(project && !ephemeral) {
       const { error:updErr } = await clientSupabase.from('projects').update({ blueprint_json: blueprint, code_generated: files }).eq('id', project.id);
       if (updErr) throw updErr;
     }
 
     // Stocker chaque fichier dans project_files (upsert pour idempotence)
-    const fileEntries = Object.entries(files || {});
-    for (const [filename, content] of fileEntries) {
-      await clientSupabase.from('project_files').upsert({ project_id: project.id, filename, content, stage: 'final', pass_index: 0 }, { onConflict: 'project_id,filename' });
+    if(!ephemeral && project){
+      const fileEntries = Object.entries(files || {});
+      for (const [filename, content] of fileEntries) {
+        await clientSupabase.from('project_files').upsert({ project_id: project.id, filename, content, stage: 'final', pass_index: 0 }, { onConflict: 'project_id,filename' });
+      }
     }
 
-  return json({ success:true, blueprint, files, project });
+  return json({ success:true, blueprint, files, project: project || null, ephemeral });
   } catch (e) {
     console.error('site/generate error', e);
     return json({ success:false, error:e.message }, { status:500 });
