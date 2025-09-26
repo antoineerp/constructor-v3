@@ -5,6 +5,10 @@
   let appFiles = null; // { filename: code }
   let appSelectedFile = null;
   let appError = '';
+  let compileUrl = '';
+  let compiling = false;
+  let activeView = 'code'; // 'code' | 'render'
+  const compileCache = new Map(); // filename -> objectURL
 
   async function generateApplication() {
     appError = '';
@@ -30,9 +34,37 @@
   function resetGeneration() {
     appFiles = null;
     appSelectedFile = null;
+    compileUrl='';
   }
   function selectFile(f) { appSelectedFile = f; }
   function copyCurrent() { if(appSelectedFile) navigator.clipboard.writeText(appFiles[appSelectedFile]); }
+
+  async function compileSelected() {
+    if(!appSelectedFile || !appSelectedFile.endsWith('.svelte')) { compileUrl=''; return; }
+    compiling = true; compileUrl='';
+    try {
+      // Utilise endpoint component compile direct sans projet persistant
+      const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: appFiles[appSelectedFile] }) });
+      if(!res.ok){ compileUrl='error:'+ (await res.text()); }
+      else {
+        // On ne peut pas directement iframer la réponse POST; on fabrique un blob local.
+        const html = await res.text();
+        const blob = new Blob([html], { type:'text/html' });
+        compileUrl = URL.createObjectURL(blob);
+        compileCache.set(appSelectedFile, compileUrl);
+      }
+    } catch(e){ compileUrl = 'error:'+e.message; }
+    finally { compiling = false; }
+  }
+
+  $: if(activeView === 'render' && appSelectedFile?.endsWith('.svelte')) {
+    // Charger depuis cache sinon compiler
+    if(compileCache.has(appSelectedFile)) {
+      compileUrl = compileCache.get(appSelectedFile);
+    } else if(!compiling) {
+      compileSelected();
+    }
+  }
 </script>
 
 <div class="max-w-6xl mx-auto px-4 py-10">
@@ -90,22 +122,57 @@
             {/each}
           </div>
           <div class="flex-1 flex flex-col">
-            <div class="px-4 py-2 border-b flex items-center justify-between text-xs bg-gray-50">
-              <div class="flex items-center gap-2">
-                <i class="fas fa-file-code text-purple-600"></i>
-                <span class="font-medium">{appSelectedFile || 'Sélectionne un fichier'}</span>
+            <div class="px-4 pt-2 border-b bg-gray-50">
+              <div class="flex items-center justify-between mb-2 text-xs">
+                <div class="flex items-center gap-2">
+                  <i class="fas fa-file-code text-purple-600"></i>
+                  <span class="font-medium truncate max-w-[240px]" title={appSelectedFile}>{appSelectedFile || 'Sélectionne un fichier'}</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  {#if appSelectedFile}
+                    <button class="text-purple-600 hover:underline" on:click={copyCurrent}>Copier</button>
+                  {/if}
+                </div>
               </div>
-              {#if appSelectedFile}
-                <button class="text-purple-600 hover:underline" on:click={copyCurrent}>Copier</button>
-              {/if}
+              <div class="flex items-center gap-4 text-[11px] font-medium">
+                <button
+                  class="pb-2 border-b-2 -mb-px px-1 border-transparent text-gray-500 hover:text-gray-700"
+                  class:border-purple-600={activeView==='code'}
+                  class:text-purple-600={activeView==='code'}
+                  on:click={()=> activeView='code'}>Code</button>
+                <button
+                  class="pb-2 border-b-2 -mb-px px-1 border-transparent text-gray-500 hover:text-gray-700 disabled:opacity-40"
+                  class:border-purple-600={activeView==='render'}
+                  class:text-purple-600={activeView==='render'}
+                  on:click={()=> { if(appSelectedFile?.endsWith('.svelte')) activeView='render'; }}
+                  disabled={!appSelectedFile || !appSelectedFile.endsWith('.svelte')}>Rendu SSR</button>
+              </div>
             </div>
-            <div class="flex-1 overflow-auto bg-gray-900 text-green-300 text-[11px] p-4 font-mono leading-relaxed">
-              {#if appSelectedFile}
-                <pre><code>{appFiles[appSelectedFile]}</code></pre>
-              {:else}
-                <div class="h-full flex items-center justify-center text-gray-500">Choisis un fichier dans la liste.</div>
-              {/if}
-            </div>
+            {#if activeView==='code'}
+              <div class="flex-1 overflow-auto bg-gray-900 text-green-300 text-[11px] p-4 font-mono leading-relaxed">
+                {#if appSelectedFile}
+                  <pre><code>{appFiles[appSelectedFile]}</code></pre>
+                {:else}
+                  <div class="h-full flex items-center justify-center text-gray-500">Choisis un fichier dans la liste.</div>
+                {/if}
+              </div>
+            {:else if activeView==='render'}
+              <div class="flex-1 bg-white relative">
+                {#if !appSelectedFile}
+                  <div class="h-full flex items-center justify-center text-gray-500 text-xs">Aucun fichier sélectionné.</div>
+                {:else if !appSelectedFile.endsWith('.svelte')}
+                  <div class="h-full flex items-center justify-center text-gray-500 text-xs">Le rendu SSR n'est disponible que pour les fichiers .svelte</div>
+                {:else}
+                  {#if compiling && !compileUrl}
+                    <div class="h-full flex items-center justify-center text-gray-500 text-xs gap-2"><i class="fas fa-spinner fa-spin"></i> Compilation...</div>
+                  {:else if compileUrl && compileUrl.startsWith('error:')}
+                    <div class="p-4 text-xs text-red-600 bg-red-50 h-full overflow-auto">{compileUrl.slice(6)}</div>
+                  {:else if compileUrl}
+                    <iframe title="Rendu SSR" src={compileUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
+                  {/if}
+                {/if}
+              </div>
+            {/if}
           </div>
         </div>
       {/if}

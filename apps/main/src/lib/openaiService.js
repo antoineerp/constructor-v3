@@ -51,22 +51,18 @@ export class OpenAIService {
     }
     if (!this.apiKey) throw new Error('Clé API OpenAI manquante');
 
-    const systemPrompt = `Tu es un expert en développement Svelte. Génère UNIQUEMENT le code HTML/CSS du composant demandé, sans balises <script> ni imports. Le composant doit être responsive avec TailwindCSS et fonctionnel.
+  const systemPrompt = `Tu es un expert en développement Svelte. Génère un composant Svelte complet et minimaliste.
 
-Règles importantes :
-- Utilise uniquement du HTML avec des classes TailwindCSS
-- Ne génère PAS de balises <script>, <style> ou imports
-- Rends le composant interactif avec des événements on:click, on:input, etc.
-- Assure-toi que le design soit moderne et responsive
-- Utilise des icônes Font Awesome si nécessaire (fas fa-*)
+Règles:
+- Le composant PEUT contenir une balise <script> unique (module ou instance) pour gérer un état léger (variables, fonctions, events) mais pas de dépendances externes non demandées.
+- Évite tout <style> global, utilise TailwindCSS (classes utilitaires) pour la mise en forme.
+- Le code doit être VALID Svelte (balises équilibrées, pas d'attributs invalides) et responsive.
+- Pas de commentaires verbeux, pas de markdown, pas de backticks triple.
+- Utilise des icônes Font Awesome si utile (classes fas fa-*), sans importer explicitement la lib.
+- Préfère une structure claire: <script> (optionnel), markup.
 
-Types de composants supportés :
-- button: boutons avec hover states
-- card: cartes avec titre, contenu et actions
-- input: champs de formulaire avec labels
-- modal: modales avec overlay
-- navigation: menus de navigation
-- generic: composants personnalisés`;
+Types possibles: button | card | input | modal | navigation | generic.
+Retourne uniquement le contenu brut du fichier .svelte.`;
 
     const userPrompt = `Crée un composant ${type} : ${prompt}`;
 
@@ -134,6 +130,7 @@ Types de composants supportés :
     }
     if (!this.apiKey) throw new Error('Clé API OpenAI manquante');
   const system = `Tu es un assistant qui génère une application SvelteKit modulaire.
+Chaque fichier .svelte doit être un composant/route Svelte VALIDE avec une balise <script> (sauf cas purement statique évident) exportant éventuellement des props ou définissant un petit état (ex: let items = [...] ; let loading = false). Pas de dépendances externes non demandées. Préfère la réactivité Svelte plutôt que du simple HTML statique.
 Retourne STRICTEMENT un objet JSON (aucun texte hors JSON) où chaque clé est un nom de fichier (chemins relatifs) et chaque valeur son contenu COMPLET.
 Contraintes:
 - Inclure si non déjà présent: README.md, package.json, src/routes/+page.svelte

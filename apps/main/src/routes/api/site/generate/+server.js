@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { compile } from 'svelte/compiler';
 import { openaiService } from '$lib/openaiService.js';
 import { supabase as clientSupabase } from '$lib/supabase.js';
 import { createClient } from '@supabase/supabase-js';
@@ -349,7 +350,29 @@ Ancienne version:
     }
 
   const capabilities = blueprint._capability_hits || [];
-  return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues, singlePass: Object.keys(files).length>0, capabilities });
+  // === PHASE: COMPILATION SSR pour validation réelle ===
+  const compileResults = {};
+  for(const [fname, content] of Object.entries(files)){
+    if(!fname.endsWith('.svelte')) continue;
+    try {
+      const c = compile(content, { generate: 'ssr', css: false });
+      // tester render
+      try {
+        const fn = new Function('require','module','exports', c.js.code);
+        const mod = { exports: {} };
+        fn((n)=> (n==='svelte/internal'? require('svelte/internal'): require(n)), mod, mod.exports);
+        const Comp = mod.exports.default || mod.exports;
+        if(!Comp?.render) throw new Error('render() manquant');
+        const { html='' } = Comp.render({});
+        compileResults[fname] = { ok:true, bytes: content.length, snippet: html.slice(0,180) };
+      } catch(e){
+        compileResults[fname] = { ok:false, stage:'execute', error: e.message };
+      }
+    } catch(e){
+      compileResults[fname] = { ok:false, stage:'compile', error: e.message };
+    }
+  }
+  return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues, singlePass: Object.keys(files).length>0, capabilities, compileResults });
   } catch (e) {
     console.error('site/generate error', e);
     return json({ success:false, error:e.message }, { status:500 });
