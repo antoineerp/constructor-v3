@@ -4,7 +4,6 @@ import { openaiService } from '$lib/openaiService.js';
 import { supabase as clientSupabase } from '$lib/supabase.js';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
-import { summarizeCatalog, componentsCatalog, selectComponentsForBlueprint } from '$lib/catalog/components.js';
 import { summarizeCatalog, selectComponentsForBlueprint } from '$lib/catalog/components.js';
 import { buildGlobalGenerationPromptAsync } from '$lib/prompt/promptBuilders.js';
 import { validateAndFix, unifyPalette, addAccessibilityFixes } from '$lib/validator/svelteValidator.js';
@@ -425,9 +424,9 @@ Ancienne version:
     }
   } catch(e){ /* ignore logs errors */ }
   return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues, validation: fullValidation, singlePass: Object.keys(files).length>0, capabilities, compileResults });
-  } catch (e) {
-    console.error('site/generate error', e);
-    return json({ success:false, error:e.message }, { status:500 });
+  } catch (err) {
+    console.error('site/generate error', err);
+    return json({ success:false, error:err.message }, { status:500 });
   }
 }
 
