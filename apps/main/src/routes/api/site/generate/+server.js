@@ -16,7 +16,7 @@ import { validateAndFix, unifyPalette, addAccessibilityFixes } from '$lib/valida
 export async function POST({ request }) {
   try {
     const body = await request.json();
-    const { query, projectId, regenerateFile, simpleMode, forceSinglePass } = body;
+  const { query, projectId, regenerateFile, simpleMode, forceSinglePass, generationProfile = 'safe' } = body;
     // Récupération token Supabase (passé côté client via Authorization: Bearer <access_token>)
     const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
     let userId = null;
@@ -93,7 +93,7 @@ export async function POST({ request }) {
     // Nouvelle stratégie: tentative single-pass globale si non simpleMode
     if(!simpleMode){
       try {
-        const { prompt: globalPrompt } = await buildGlobalGenerationPromptAsync(blueprint, selected);
+  const { prompt: globalPrompt } = await buildGlobalGenerationPromptAsync(blueprint, selected, { generationProfile });
         const singleResult = await openaiService.generateApplication(globalPrompt, { model: 'gpt-4o-mini', maxFiles: 30 });
         // heuristique: si on a au moins 3 fichiers dont +page.svelte ou +layout.svelte, on adopte
         const keys = Object.keys(singleResult||{});
@@ -107,7 +107,7 @@ export async function POST({ request }) {
     }
 
     if(simpleMode){
-      const appPrompt = buildAppPrompt(blueprint, { simpleMode: true });
+  const appPrompt = buildAppPrompt(blueprint, { simpleMode: true, generationProfile });
       files = await openaiService.generateApplication(appPrompt, { model: 'gpt-4o-mini', maxFiles: 5 });
     } else if(Object.keys(files).length === 0) {
       // Ancien mode orchestré seulement si single-pass non satisfaisant
@@ -138,7 +138,7 @@ export async function POST({ request }) {
       }
       // Fallback: si rien généré, utiliser ancien mode global
       if(Object.keys(files).length === 0){
-        const fallbackPrompt = buildAppPrompt(blueprint, { simpleMode: false });
+  const fallbackPrompt = buildAppPrompt(blueprint, { simpleMode: false, generationProfile });
         files = await openaiService.generateApplication(fallbackPrompt, { model: 'gpt-4o-mini', maxFiles: 20 });
       }
       // Injecter composants validés manquants (si non générés) en ajoutant leur code brut
@@ -292,7 +292,7 @@ Ancienne version:
   }
 }
 
-function buildAppPrompt(blueprint, { simpleMode } = {}){
+function buildAppPrompt(blueprint, { simpleMode, generationProfile = 'safe' } = {}){
   const { routes = [], core_components = [], color_palette = [], sample_content = {}, seo_meta = {} } = blueprint || {};
   const articles = sample_content.articles || [];
   if(simpleMode){
@@ -326,7 +326,13 @@ Retourne JSON: {"src/routes/+page.svelte":"CONTENU"}`.trim();
   });
   const expectedFiles = [...uniqueRoutes, ...componentFiles].slice(0, 20);
   const catalogSummary = summarizeCatalog();
+  const profileBlock = generationProfile === 'external_libs'
+    ? `MODE: external_libs autorisées (chart.js, @tanstack/table-core) – UNIQUEMENT si utilisées.`
+    : generationProfile === 'enhanced'
+      ? `MODE: enhanced (structure optimisée, zéro dépendance externe).`
+      : `MODE: safe (strict, aucune dépendance externe).`;
   return `Crée une application SvelteKit multi-fichiers.
+${profileBlock}
 Contexte:
 Routes: ${routes.map(r=> r.path+ ' => '+ (r.sections||[]).join(',')).join(' | ')}
 Composants: ${core_components.join(', ')}
@@ -344,6 +350,7 @@ Contraintes STRICTES:
 - Pour la page dynamique, inclure un exemple d'affichage d'un article (données mock locales)
 - Fournir contenu pertinent dans chaque route
 - Max 20 fichiers, prioriser ceux listés
+- Si MODE external_libs: inclure package.json avec seulement chart.js et/ou @tanstack/table-core SI un composant démontre leur usage, sinon ne pas les ajouter
 FIN.`.trim();
 }
 

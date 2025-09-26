@@ -36,6 +36,102 @@ export const componentsCatalog = [
   {/if}
 </header>`
   },
+  {
+    name: 'KpiCards',
+    filename: 'src/lib/components/KpiCards.svelte',
+    purpose: 'Groupe de cartes KPI (CRM / Analytics)',
+    tags: ['dashboard','analytics','crm'],
+    code: `<script>export let kpis=[{label:'Clients',value:128},{label:'MRR',value:'3.4k€'},{label:'Churn',value:'2.1%'},{label:'Conversion',value:'12%'}];</script>
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+ {#each kpis as k}
+  <div class="rounded-lg border bg-white shadow-sm p-4 flex flex-col">
+    <span class="text-xs uppercase tracking-wide text-slate-500">{k.label}</span>
+    <span class="mt-2 text-xl font-semibold text-slate-800">{k.value}</span>
+  </div>
+ {/each}
+</div>`
+  },
+  {
+    name: 'SalesChart',
+    filename: 'src/lib/components/SalesChart.svelte',
+    purpose: 'Placeholder graphique ventes (sans dépendance)',
+    tags: ['analytics','chart','crm'],
+    code: `<script>export let data=[12,19,8,15,22,17,25];</script>
+<div class="p-4 rounded-lg border bg-white shadow-sm">
+  <h3 class="text-sm font-medium mb-3">Evolution des ventes (mock)</h3>
+  <div class="h-32 relative flex items-end gap-1">
+    {#each data as v,i}
+      <div class="bg-indigo-500/70 hover:bg-indigo-500 transition-colors w-full rounded-t" style=\"height:{5+v}px\" title=\"Mois {i+1}: {v}\"></div>
+    {/each}
+    <div class="absolute inset-0 pointer-events-none bg-[repeating-linear-gradient(to_top,transparent,transparent_7px,rgba(0,0,0,0.05)_8px)]"></div>
+  </div>
+</div>`
+  },
+  {
+    name: 'DataTable',
+    filename: 'src/lib/components/DataTable.svelte',
+    purpose: 'Table générique triable (mock)',
+    tags: ['table','data','crm','data_table'],
+    code: `<script>
+  export let rows=[{name:'Acme',mrr:1200,status:'Actif'},{name:'Globex',mrr:560,status:'Actif'},{name:'Initech',mrr:300,status:'Churn'},{name:'Umbrella',mrr:980,status:'Actif'}];
+  let sortKey='name'; let asc=true;
+  $: sorted = [...rows].sort((a,b)=> (a[sortKey]>b[sortKey]?1:-1)*(asc?1:-1));
+  function sort(k){ if(sortKey===k) asc=!asc; else {sortKey=k; asc=true;} }
+</script>
+<table class="w-full text-sm">
+  <thead class="bg-slate-50 text-slate-600 text-xs">
+    <tr>
+      <th class="p-2 text-left cursor-pointer" on:click={()=>sort('name')}>Client</th>
+      <th class="p-2 text-left cursor-pointer" on:click={()=>sort('mrr')}>MRR</th>
+      <th class="p-2 text-left">Statut</th>
+    </tr>
+  </thead>
+  <tbody>
+    {#each sorted as r}
+    <tr class="border-b last:border-0 hover:bg-slate-50">
+      <td class="p-2">{r.name}</td>
+      <td class="p-2 font-mono">{r.mrr} €</td>
+      <td class="p-2"><span class="px-2 py-0.5 rounded bg-slate-200 text-xs">{r.status}</span></td>
+    </tr>
+    {/each}
+  </tbody>
+</table>`
+  },
+  {
+    name: 'CustomerList',
+    filename: 'src/lib/components/CustomerList.svelte',
+    purpose: 'Liste clients cliquable',
+    tags: ['crm','list'],
+    code: `<script>export let customers=[{id:'c1',name:'Acme SA',value:1200},{id:'c2',name:'Globex',value:560},{id:'c3',name:'Initech',value:300}];</script>
+<ul class="divide-y rounded border bg-white shadow-sm">
+ {#each customers as c}
+  <li class="p-3 flex items-center justify-between hover:bg-slate-50">
+    <a class="font-medium text-sm" href={'/clients/'+c.id}>{c.name}</a>
+    <span class="text-xs text-slate-500">{c.value} €</span>
+  </li>
+ {/each}
+</ul>`
+  },
+  {
+    name: 'CustomerDetail',
+    filename: 'src/lib/components/CustomerDetail.svelte',
+    purpose: 'Fiche client simple (mock)',
+    tags: ['crm','detail'],
+    code: `<script>export let customer={id:'c1',name:'Acme SA',lifetime:4200,notes:['Appel le 12/09','Demande démo']};</script>
+<div class="rounded-lg border bg-white shadow-sm p-4 space-y-3">
+  <div class="flex items-center justify-between">
+    <h2 class="font-semibold text-lg">{customer.name}</h2>
+    <span class="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700">ID {customer.id}</span>
+  </div>
+  <div class="text-sm text-slate-600">Valeur vie: <strong>{customer.lifetime} €</strong></div>
+  <div>
+    <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Notes</h3>
+    <ul class="text-xs list-disc ml-5 space-y-0.5">
+      {#each customer.notes as n}<li>{n}</li>{/each}
+    </ul>
+  </div>
+</div>`
+  },
   // ====== PACK NAVIGATION ======
   {
     name: 'SidebarCollapsible',

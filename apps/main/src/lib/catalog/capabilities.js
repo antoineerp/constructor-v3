@@ -86,6 +86,27 @@ export const CAPABILITIES = [
     suggestedRoutes: ['/hello'],
     weight: 4
   }
+  ,{
+    id: 'crm',
+    keywords: ['crm','client','clients','pipeline','prospect','prospects','deal','deals','opportunité','opportunites','relation client','gestion client'],
+    requiredComponents: ['CustomerList','CustomerDetail','KpiCards'],
+    suggestedRoutes: ['/clients','/clients/:id','/dashboard'],
+    weight: 7
+  }
+  ,{
+    id: 'analytics',
+    keywords: ['analytics','analyse','kpi','graphique','chart','statistiques','metrics'],
+    requiredComponents: ['SalesChart','KpiCards'],
+    suggestedRoutes: ['/dashboard'],
+    weight: 6
+  }
+  ,{
+    id: 'data_table',
+    keywords: ['table','tableau','liste','pagination','tri','filtre','filter'],
+    requiredComponents: ['DataTable'],
+    suggestedRoutes: ['/clients'],
+    weight: 5
+  }
 ];
 
 export function detectCapabilities(blueprint){
