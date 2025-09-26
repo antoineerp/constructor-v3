@@ -7,6 +7,22 @@ export class OpenAIService {
   this.apiKey = env.OPENAI_API_KEY;
   }
 
+  async generateEmbedding(input, { model = 'text-embedding-3-small' } = {}) {
+    if(!this.apiKey) throw new Error('Clé API OpenAI manquante');
+    const cleaned = typeof input === 'string' ? input.slice(0,8000) : JSON.stringify(input).slice(0,8000);
+    const response = await fetch('https://api.openai.com/v1/embeddings', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', Authorization: `Bearer ${this.apiKey}` },
+      body: JSON.stringify({ model, input: cleaned })
+    });
+    if(!response.ok){
+      const txt = await response.text();
+      throw new Error('Erreur embedding: '+txt);
+    }
+    const data = await response.json();
+    return data.data?.[0]?.embedding || [];
+  }
+
   async generateComponent(prompt, type = 'generic', { model = 'gpt-4o-mini' } = {}) {
     if (!this.apiKey) {
       throw new Error('Clé API OpenAI manquante');
@@ -181,6 +197,33 @@ SI la requête est ambiguë: fais des hypothèses raisonnables et note-les discr
       }
       throw new Error('JSON blueprint invalide: '+ e.message);
     }
+  }
+
+  async generateIntentExpansion(query, { model = 'gpt-4o-mini' } = {}) {
+    if(!this.apiKey) throw new Error('Clé API OpenAI manquante');
+    const system = `Tu es un assistant produit. Reçois une requête brute utilisateur courte et produis UNIQUEMENT un JSON enrichi.
+Format JSON strict:
+{
+  "original_query": string,
+  "enriched_query": string,
+  "style_keywords": [string],
+  "feature_hints": [string],
+  "tone_keywords": [string]
+}
+Règles:
+- Pas de texte hors JSON
+- 3 à 6 style_keywords max
+- feature_hints uniquement pertinents (parmi auth,dashboard,search,i18n,invoicing,blog,docs,notifications)
+- enriched_query < 280 caractères, fusion claire des intentions.`;
+    const user = `Requête: ${query}`;
+    const body = { model, messages:[{role:'system',content:system},{role:'user',content:user}], temperature:0.5, max_tokens:400 };
+    const response = await fetch('https://api.openai.com/v1/chat/completions', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${this.apiKey}` }, body: JSON.stringify(body) });
+    if(!response.ok){ const txt = await response.text(); throw new Error('Erreur expansion intent: '+txt); }
+    const data = await response.json();
+    let raw = data.choices?.[0]?.message?.content?.trim();
+    if(!raw) throw new Error('Réponse vide expansion');
+    raw = raw.replace(/^```json\n?/i,'').replace(/```$/,'').trim();
+    try { return JSON.parse(raw); } catch(e){ throw new Error('JSON expansion invalide: '+e.message); }
   }
 }
 

@@ -66,6 +66,15 @@ export async function GET({ url, request }) {
     let raw = mapping[chosen] || '';
     // Sanitize: retirer scripts
     raw = raw.replace(/<script[\s\S]*?<\/script>/gi, '');
+    // Réécriture des liens internes absolus pour rester dans le sandbox
+    // On réécrit href="/xxx" en href="?projectId=...&route=/xxx"
+    const internalRouteRegex = /href=("|')\/(?!\/)([^"'#? ]+[^"'# ]?)("|')/g;
+    raw = raw.replace(internalRouteRegex, (m, q1, path, q3) => {
+      const cleaned = '/' + path.replace(/\/$/, '');
+      return `href="?projectId=${encodeURIComponent(projectId)}&route=${encodeURIComponent(cleaned)}"`;
+    });
+    // Ajout d'une classe sur <a> non réécrits internes relatifs potentiels
+    raw = raw.replace(/<a /g, '<a class="preview-link" ');
     // Heuristique: si composant Svelte contient {#each} etc., on laisse tel quel (pas d'exécution) → afficher comme code.
     const isLikelySvelte = /{#each|{#if|on:click=/.test(raw);
 
@@ -80,6 +89,22 @@ ${routesList.map(r=> `<a href="?projectId=${encodeURIComponent(projectId)}&route
 </div>
 <h1 class="text-sm font-semibold mb-3 text-slate-700">Fichier: <code>${chosen}</code></h1>
 ${ isLikelySvelte ? `<div class="mb-3 p-3 bg-amber-50 border border-amber-200 text-amber-800 text-[11px] rounded">Syntaxe Svelte détectée – rendu statique (code affiché).</div><pre>${escapeHtml(raw)}</pre>` : raw }
+<script>
+// Interception navigation pour rester dans le sandbox quand param route manquant
+document.addEventListener('click', (e)=>{
+  const a = e.target.closest('a');
+  if(!a) return;
+  if(a.getAttribute('href') && a.getAttribute('href').startsWith('?projectId=')) return; // déjà réécrit
+  if(a.getAttribute('href') && a.getAttribute('href').startsWith('/')){
+    e.preventDefault();
+    const target = a.getAttribute('href').replace(/#.*$/,'');
+    const url = new URL(window.location.href);
+    url.searchParams.set('projectId', '${projectId}');
+    url.searchParams.set('route', target);
+    window.location.href = url.toString();
+  }
+});
+</script>
 </div></body></html>`;
 
     return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });

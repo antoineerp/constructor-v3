@@ -5,6 +5,8 @@ import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { summarizeCatalog, componentsCatalog, selectComponentsForBlueprint } from '$lib/catalog/components.js';
 import { validateAndFix } from '$lib/validator/svelteValidator.js';
+import { buildGlobalGenerationPrompt, buildGlobalGenerationPromptAsync } from '$lib/prompt/promptBuilders.js';
+import { validateAndFix, unifyPalette, addAccessibilityFixes } from '$lib/validator/svelteValidator.js';
 
 // Orchestrateur: génère blueprint et/ou code application selon état projet.
 // Body: { query?: string, projectId?: string, regenerateFile?: string }
@@ -15,7 +17,7 @@ import { validateAndFix } from '$lib/validator/svelteValidator.js';
 export async function POST({ request }) {
   try {
     const body = await request.json();
-  const { query, projectId, regenerateFile, simpleMode } = body;
+    const { query, projectId, regenerateFile, simpleMode, forceSinglePass } = body;
     // Récupération token Supabase (passé côté client via Authorization: Bearer <access_token>)
     const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
     let userId = null;
@@ -76,7 +78,11 @@ export async function POST({ request }) {
     if (!blueprint) {
       const effectiveQuery = query || project?.original_query;
       if (!effectiveQuery) return json({ success:false, error:'Impossible de déterminer la requête de base' }, { status:400 });
-      blueprint = await openaiService.generateBlueprint(effectiveQuery);
+      // Intent expansion (Phase C) avant blueprint pour enrichir le contexte
+      let intentExpansion = null;
+      try { intentExpansion = await openaiService.generateIntentExpansion(effectiveQuery); } catch(e){ console.warn('Intent expansion failed', e.message); }
+      blueprint = await openaiService.generateBlueprint(intentExpansion?.enriched_query || effectiveQuery);
+      if(intentExpansion) blueprint.intent_expansion = intentExpansion;
     }
 
     // Construire prompt global à partir du blueprint
@@ -85,11 +91,27 @@ export async function POST({ request }) {
     const catalogSummary = selected.map(c => `${c.name} -> ${c.filename} : ${c.purpose}`).join('\n');
     const validationIssues = {}; // new: collect issues per file
 
+    // Nouvelle stratégie: tentative single-pass globale si non simpleMode
+    if(!simpleMode){
+      try {
+        const { prompt: globalPrompt } = await buildGlobalGenerationPromptAsync(blueprint, selected);
+        const singleResult = await openaiService.generateApplication(globalPrompt, { model: 'gpt-4o-mini', maxFiles: 30 });
+        // heuristique: si on a au moins 3 fichiers dont +page.svelte ou +layout.svelte, on adopte
+        const keys = Object.keys(singleResult||{});
+        const hasCore = keys.some(k => k.endsWith('+page.svelte'));
+        if (hasCore && keys.length >= 3) {
+          files = singleResult;
+        }
+      } catch(e){
+        console.warn('Single-pass global failed, fallback orchestrated', e.message);
+      }
+    }
+
     if(simpleMode){
       const appPrompt = buildAppPrompt(blueprint, { simpleMode: true });
       files = await openaiService.generateApplication(appPrompt, { model: 'gpt-4o-mini', maxFiles: 5 });
-    } else {
-      // Étape 2: génération orchestrée fichier par fichier
+    } else if(Object.keys(files).length === 0) {
+      // Ancien mode orchestré seulement si single-pass non satisfaisant
       const perFile = blueprint?.recommended_prompts?.per_file || [];
       if(perFile.length){
         for(const entry of perFile){
@@ -139,6 +161,45 @@ export async function POST({ request }) {
         files['src/routes/+page.svelte'] = `<script>/* page principale injectée */</script><div class='p-8 text-center text-gray-600'>Page principale non définie dans blueprint.</div>`;
       }
     }
+    // Layout moderne automatique si blueprint.layout_plan.has_layout mais fichier absent
+    const wantsLayout = blueprint?.layout_plan?.has_layout;
+    if(wantsLayout && !files['src/routes/+layout.svelte']){
+      files['src/routes/+layout.svelte'] = `<script>import LanguageSwitcher from '../lib/components/LanguageSwitcher.svelte';</script>
+<div class="min-h-screen flex flex-col bg-gradient-to-br from-slate-50 via-white to-slate-100 text-slate-800">
+  <header class="sticky top-0 z-40 backdrop-blur bg-white/70 border-b border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-3 font-semibold tracking-tight">
+        <span class="w-8 h-8 rounded bg-indigo-600 text-white grid place-items-center text-sm shadow">AI</span>
+        <a href="/" class="hover:text-indigo-600 transition-colors">{import.meta.env?.VITE_APP_NAME || 'Site'}</a>
+      </div>
+      <nav class="flex items-center gap-6 text-sm">
+        <a href="/" class="hover:text-indigo-600">Accueil</a>
+        <a href="/blog" class="hover:text-indigo-600">Blog</a>
+        <a href="/products" class="hover:text-indigo-600">Produits</a>
+        <a href="/invoices" class="hover:text-indigo-600">Factures</a>
+        <LanguageSwitcher />
+      </nav>
+    </div>
+  </header>
+  <main class="flex-1">
+    <slot />
+  </main>
+  <footer class="mt-12 border-t border-slate-200 bg-white/60 backdrop-blur">
+    <div class="max-w-7xl mx-auto px-4 py-8 text-xs text-slate-500 flex flex-col sm:flex-row gap-2 sm:items-center justify-between">
+      <p>&copy; {new Date().getFullYear()} - Généré. Tous droits réservés.</p>
+      <div class="flex gap-3"><a href="/legal" class="hover:text-indigo-600">Mentions</a><a href="/privacy" class="hover:text-indigo-600">Confidentialité</a></div>
+    </div>
+  </footer>
+</div>`;
+    }
+    // Thème CSS variables (tokens) si absent
+    if(!files['src/lib/theme/tokens.css']){
+      files['src/lib/theme/tokens.css'] = `/* Design tokens générés */\n:root{\n  --radius-sm:4px;\n  --radius-md:8px;\n  --radius-lg:16px;\n  --shadow-sm:0 1px 2px rgba(0,0,0,0.05);\n  --shadow-md:0 4px 8px -2px rgba(0,0,0,0.08);\n}\n/* Palette dynamique (peut être enrichie côté client) */\n/* Utilisation: bg-[var(--c0)] etc. */\n`;
+      const palette = (blueprint.design_tokens?.colors)||[];
+      if(palette.length){
+        files['src/lib/theme/tokens.css'] += ':root{'+palette.map((c,i)=>`--c${i}:${c};`).join('')+'}';
+      }
+    }
     // global validation pass for all files (ensure even simpleMode gets it)
     for (const k of Object.keys(files)) {
       const { fixed, issues } = validateAndFix(files[k], { filename: k });
@@ -174,7 +235,58 @@ export async function POST({ request }) {
       }
     }
 
-    return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues });
+    // --- AUTO SELF-REFINE (Phase A) ---
+    // Heuristique: si >5 fichiers avec issues ou palette incohérente -> passage refine rapide en mémoire puis persistance
+    const issueFiles = Object.keys(validationIssues).length;
+    if(!simpleMode && issueFiles > 5 && !ephemeral){
+      let criticalCount = 0; let nonCriticalOver = 0; let accessibilityBonus = 0;
+      const blueprintPalette = blueprint.color_palette || [];
+      for(const [fname, content] of Object.entries(files)){
+        let current = content; const aggregatedIssues = [];
+        const { fixed, issues, critical } = validateAndFix(current, { filename: fname });
+        current = fixed; aggregatedIssues.push(...issues); if(critical) criticalCount++; if(issues.length>3 && !critical) nonCriticalOver++;
+        if(blueprintPalette.length){
+          const { content: c2, replacements } = unifyPalette(current, blueprintPalette);
+          if(replacements){ current = c2; aggregatedIssues.push(`Palette normalized (${replacements})`); }
+        }
+        const { content: c3, issues: accIssues } = addAccessibilityFixes(current);
+        if(accIssues.length){ current = c3; aggregatedIssues.push(...accIssues); accessibilityBonus += accIssues.includes('Added empty alt to img') ? 1 : 0; }
+        if(current !== files[fname]){
+          files[fname] = current;
+          await clientSupabase.from('project_files').upsert({ project_id: project.id, filename: fname, content: current, stage: 'refined-auto', pass_index: 1 }, { onConflict: 'project_id,filename' });
+        }
+      }
+      let score = 100 - criticalCount*5 - nonCriticalOver*1 + Math.min(5, accessibilityBonus);
+      if(score<0) score=0; if(score>100) score=100;
+      await clientSupabase.from('projects').update({ code_generated: files, last_auto_refine_score: score }).eq('id', project.id);
+
+      // Régénération ciblée (max 2 fichiers) si score < 85
+      if(score < 85){
+        const problematic = Object.entries(validationIssues)
+          .sort((a,b)=> (b[1].length) - (a[1].length))
+          .slice(0,2)
+          .map(e=> e[0]);
+        for(const fname of problematic){
+          try {
+            const regenPrompt = `Améliore ce fichier Svelte pour cohérence design tokens (palette fournie), accessibilité et structure Tailwind moderne.
+Palette: ${(blueprint.design_tokens?.colors||[]).join(', ')}
+Rappels: un seul <h1> global, classes Tailwind concises, réutilise variables éventuelles.
+Retourne JSON: { "${fname}": "CONTENU" }
+Ancienne version:
+` + files[fname].slice(0,4000);
+            const regenRes = await openaiService.generateApplication(regenPrompt, { model: 'gpt-4o-mini', maxFiles: 1 });
+            if(regenRes[fname]){
+              const { fixed } = validateAndFix(regenRes[fname], { filename: fname });
+              files[fname] = fixed;
+              await clientSupabase.from('project_files').upsert({ project_id: project.id, filename: fname, content: fixed, stage: 'refined-regen', pass_index: 2 }, { onConflict: 'project_id,filename' });
+            }
+          } catch(err){ console.warn('Targeted regen failed', fname, err.message); }
+        }
+        await clientSupabase.from('projects').update({ code_generated: files }).eq('id', project.id);
+      }
+    }
+
+  return json({ success:true, blueprint, files, project: project || null, ephemeral, orchestrated: !simpleMode, validationIssues, singlePass: Object.keys(files).length>0 });
   } catch (e) {
     console.error('site/generate error', e);
     return json({ success:false, error:e.message }, { status:500 });

@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import { componentsCatalog } from '$lib/catalog/components.js';
+	import { dedupeComponents, lightweightHash } from '$lib/catalog/utils.js';
 
 	let showComponents = false;
 	let showTemplates = false;
@@ -31,13 +32,32 @@
 	}
 
 	function toggleTemplates(){ showTemplates = !showTemplates; if(showTemplates && templates.length===0) loadTemplates(); }
-	let filtered = componentsCatalog;
+	let rawComponents = componentsCatalog;
+	let filtered = dedupeComponents(rawComponents).map(c => ({ ...c, hash: lightweightHash(c.code) }));
 	let compSearch = '';
 
 	function filterComponents(){
 		const q = compSearch.toLowerCase().trim();
-		if(!q) { filtered = componentsCatalog; return; }
-		filtered = componentsCatalog.filter(c => c.name.toLowerCase().includes(q) || c.purpose.toLowerCase().includes(q) || c.tags.some(t=> t.toLowerCase().includes(q)));
+		const base = dedupeComponents(rawComponents);
+		let res = base;
+		if(q){
+			res = base.filter(c => c.name.toLowerCase().includes(q) || c.purpose.toLowerCase().includes(q) || c.tags.some(t=> t.toLowerCase().includes(q)));
+		}
+		filtered = res.map(c => ({ ...c, hash: lightweightHash(c.code) }));
+	}
+
+	async function importExternalCatalog(url){
+		// Téléchargement JSON attendu: [{name, filename, purpose, tags[], code}]
+		try {
+			const r = await fetch(url);
+			if(!r.ok) throw new Error('HTTP '+r.status);
+			const data = await r.json();
+			if(!Array.isArray(data)) throw new Error('Format catalogue invalide');
+			rawComponents = dedupeComponents([...rawComponents, ...data.filter(d => d && d.name && d.filename && d.code)]);
+			filterComponents();
+		} catch(e){
+			alert('Import échoué: '+ e.message);
+		}
 	}
 	
 	let stats = {
@@ -189,9 +209,13 @@
 					<h2 class="text-lg font-semibold text-gray-900 flex items-center gap-2"><i class="fas fa-puzzle-piece text-purple-500"></i> Composants disponibles pour l'IA</h2>
 					<div class="ml-auto flex items-center gap-2">
 						<input type="text" placeholder="Filtrer..." bind:value={compSearch} on:input={filterComponents} class="px-3 py-1.5 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
-						<span class="text-xs text-gray-500">{filtered.length} / {componentsCatalog.length}</span>
+						<span class="text-xs text-gray-500">{filtered.length} / {rawComponents.length}</span>
 					</div>
 				</header>
+				<div class="px-6 pt-4 flex gap-2 items-center text-[11px] text-gray-600">
+					<input id="catalogUrl" placeholder="URL catalogue externe (JSON)" class="flex-1 px-3 py-1.5 border rounded focus:ring-2 focus:ring-purple-500" />
+					<button class="px-3 py-1.5 bg-purple-600 text-white rounded" on:click={() => { const u = document.getElementById('catalogUrl').value.trim(); if(u) importExternalCatalog(u); }}>Importer</button>
+				</div>
 				<div class="p-6 grid md:grid-cols-2 lg:grid-cols-3 gap-5 text-sm">
 					{#each filtered as comp}
 						<div class="border rounded-lg p-4 bg-gradient-to-br from-gray-50 to-white flex flex-col">
@@ -200,6 +224,10 @@
 								<span class="text-[10px] px-2 py-0.5 rounded bg-purple-100 text-purple-700">{comp.tags.join(', ')}</span>
 							</div>
 							<p class="text-gray-600 text-xs mb-3 leading-relaxed line-clamp-3">{comp.purpose}</p>
+							<div class="flex items-center justify-between text-[10px] text-gray-400 mb-1">
+								<span class="truncate">{comp.filename}</span>
+								<span title="Hash du code">{comp.hash}</span>
+							</div>
 							<div class="mt-auto">
 								<details class="group">
 									<summary class="cursor-pointer text-[11px] text-indigo-600 hover:underline flex items-center gap-1"><i class="fas fa-code"></i>Voir code</summary>

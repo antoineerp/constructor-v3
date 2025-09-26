@@ -334,7 +334,120 @@ export const componentsCatalog = [
     <button type="button" class="px-5 py-2 rounded bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500">Envoyer</button>
   </form>
 </section>`
+  },
+  {
+    name: 'AuthLoginForm',
+    filename: 'src/lib/components/AuthLoginForm.svelte',
+    purpose: 'Formulaire de connexion / inscription toggle local',
+    tags: ['auth','form'],
+    code: `<script>let mode='login'; let data={email:'',password:''}; function toggle(){mode= mode==='login'?'register':'login';}</script>
+<div class="max-w-sm mx-auto border rounded p-6 bg-white shadow-sm">
+  <h2 class="text-lg font-semibold mb-4">{mode==='login'?'Connexion':'Créer un compte'}</h2>
+  <form class="space-y-3">
+    <div><label class="text-xs font-medium">Email</label><input type="email" bind:value={data.email} required class="w-full px-3 py-2 border rounded mt-1"/></div>
+    <div><label class="text-xs font-medium">Mot de passe</label><input type="password" bind:value={data.password} required class="w-full px-3 py-2 border rounded mt-1"/></div>
+    <button type="button" class="w-full py-2 rounded bg-indigo-600 text-white text-sm">{mode==='login'?'Se connecter':'Créer un compte'}</button>
+  </form>
+  <button class="mt-4 text-xs text-indigo-600 hover:underline" on:click={toggle}>{mode==='login'?'Nouveau ? Créer un compte':'Déjà un compte ? Connexion'}</button>
+</div>`
+  },
+  {
+    name: 'MarkdownRenderer',
+    filename: 'src/lib/components/MarkdownRenderer.svelte',
+    purpose: 'Affichage markdown basique (whitelist) via marked-lite interne simplifiée',
+    tags: ['docs','markdown'],
+    code: `<script>
+  export let source='';
+  function render(md){
+    return md
+      .replace(/^### (.*)$/gm,'<h3>$1</h3>')
+      .replace(/^## (.*)$/gm,'<h2>$1</h2>')
+      .replace(/^# (.*)$/gm,'<h1>$1</h1>')
+      .replace(/\\*\\*(.*?)\\*\\*/g,'<strong>$1</strong>')
+      .replace(/\\*(.*?)\\*/g,'<em>$1</em>')
+      .replace(/\`([^\`]+)\`/g,'<code class=\\"px-1 bg-gray-100 rounded text-xs\\">$1</code>')
+      .replace(/\n\n/g,'<br/><br/>' );
   }
+  $: html = render(source||'');
+</script>
+<div class=\"prose prose-sm max-w-none\" {@html html}></div>`
+  },
+  {
+    name: 'SearchBar',
+    filename: 'src/lib/components/SearchBar.svelte',
+    purpose: 'Barre de recherche filtrage local mock',
+    tags: ['search','filter'],
+    code: `<script>import { createEventDispatcher } from 'svelte'; export let placeholder='Rechercher...'; let q=''; const dispatch=createEventDispatcher(); $: dispatch('input', q);</script>
+<div class="relative">
+  <input bind:value={q} placeholder={placeholder} class="w-full pl-9 pr-3 py-2 border rounded focus:ring-indigo-500 focus:border-indigo-500 text-sm" />
+  <i class="fas fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+</div>`
+  },
+  {
+    name: 'NotificationToast',
+    filename: 'src/lib/components/NotificationToast.svelte',
+    purpose: 'Stack de notifications locale simple',
+    tags: ['notification','toast'],
+    code: `<script>let messages=['Bienvenue']; function close(i){messages.splice(i,1);} </script>
+<div class="fixed top-4 right-4 space-y-2 z-50">
+  {#each messages as m,i}
+    <div class="px-4 py-2 bg-gray-900 text-white text-sm rounded shadow flex items-center gap-2">
+      <span>{m}</span>
+      <button class="text-xs opacity-70 hover:opacity-100" on:click={()=>close(i)}>×</button>
+    </div>
+  {/each}
+</div>`
+  },
+  {
+    name: 'InvoiceList',
+    filename: 'src/lib/components/InvoiceList.svelte',
+    purpose: 'Liste de factures (mock) avec statut et montant',
+    tags: ['invoicing','data'],
+    code: `<script>let invoices=[{id:'INV-001',client:'Acme SA',amount:1200,status:'Payée'},{id:'INV-002',client:'Globex',amount:560,status:'En attente'},{id:'INV-003',client:'Stark',amount:980,status:'En retard'}];</script>
+<table class="w-full text-sm">
+ <thead class="bg-gray-100 text-gray-600"><tr><th class="p-2 text-left">ID</th><th class="p-2 text-left">Client</th><th class="p-2 text-left">Montant</th><th class="p-2 text-left">Statut</th></tr></thead>
+ <tbody>{#each invoices as f}<tr class="border-b"><td class="p-2 font-mono">{f.id}</td><td class="p-2">{f.client}</td><td class="p-2">{f.amount} €</td><td class="p-2"><span class="px-2 py-0.5 rounded bg-gray-200 text-xs">{f.status}</span></td></tr>{/each}</tbody>
+</table>`
+  },
+  {
+    name: 'InvoiceEditor',
+    filename: 'src/lib/components/InvoiceEditor.svelte',
+    purpose: 'Formulaire édition / création facture (mock local)',
+    tags: ['invoicing','form'],
+    code: `<script>let invoice={id:'INV-004',client:'',lines:[{desc:'Service',qty:1,price:100}]}; function addLine(){invoice.lines=[...invoice.lines,{desc:'',qty:1,price:0}]}; $: total = invoice.lines.reduce((t,l)=>t+l.qty*l.price,0);</script>
+<div class="space-y-4">
+ <div class="flex gap-4"><div class="flex-1"><label class="text-xs font-medium">Client</label><input bind:value={invoice.client} class="w-full px-3 py-2 border rounded mt-1"/></div><div><label class="text-xs font-medium">ID</label><input bind:value={invoice.id} class="px-3 py-2 border rounded mt-1 w-32"/></div></div>
+ <table class="w-full text-xs">
+  <thead><tr class="text-gray-500"><th class="p-2 text-left">Description</th><th class="p-2">Qté</th><th class="p-2">Prix</th><th class="p-2">Sous-total</th></tr></thead>
+  <tbody>{#each invoice.lines as l,i}<tr class="border-b"><td class="p-2"><input bind:value={l.desc} class="w-full px-2 py-1 border rounded"/></td><td class="p-2"><input type="number" min="1" bind:value={l.qty} class="w-16 px-2 py-1 border rounded"/></td><td class="p-2"><input type="number" min="0" bind:value={l.price} class="w-20 px-2 py-1 border rounded"/></td><td class="p-2 text-right">{(l.qty*l.price).toFixed(2)} €</td></tr>{/each}</tbody>
+ </table>
+ <button class="px-3 py-1.5 text-xs bg-gray-900 text-white rounded" on:click={addLine}>Ajouter ligne</button>
+ <div class="text-right font-semibold text-sm">Total: {total.toFixed(2)} €</div>
+</div>`
+  },
+  {
+    name: 'LanguageSwitcher',
+    filename: 'src/lib/components/LanguageSwitcher.svelte',
+    purpose: 'Sélecteur de langue local simple',
+    tags: ['i18n','lang'],
+    code: `<script>
+import { getLocale, setLocale, availableLocales, onLocaleChange } from '../i18n/index.js';
+import { onMount } from 'svelte';
+let current = getLocale();
+let locales = availableLocales();
+onMount(()=> onLocaleChange(l => current = l));
+function choose(l){ setLocale(l); try{ localStorage.setItem('lang', l);}catch(e){} }
+onMount(()=> { try{ const saved = localStorage.getItem('lang'); if(saved && locales.includes(saved)) setLocale(saved); }catch(e){} });
+</script>
+<div class="inline-flex items-center gap-1 bg-white/60 backdrop-blur px-1.5 py-1 rounded border border-gray-200 shadow-sm">
+ {#each locales as l}
+  <button on:click={()=>choose(l)} class="px-2 py-1 text-[11px] rounded transition-colors"
+    class:bg-indigo-600={l===current} class:text-white={l===current}
+    class:border={l!==current} class:border-gray-300={l!==current}
+    aria-current={l===current ? 'true':'false'}>{l.toUpperCase()}</button>
+ {/each}
+</div>`
+  },
 ];
 
 // Fonction utilitaire pour résumer le catalogue sans injecter TOUT le code (économie de tokens)
