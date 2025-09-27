@@ -235,7 +235,27 @@ export async function POST({ request }) {
         const rootFactory = new Function('module','exports','require','__import', rootTransformed + '\n;');
         execFactory(rootFactory);
         Component = module.exports.default || module.exports;
-        if(!Component || typeof Component.render !== 'function') throw new Error('render() absent');
+        if(!Component){
+          throw new Error('export default manquant');
+        }
+        if(typeof Component.render !== 'function'){
+          // Fallback Svelte: présence possible de $$render (pattern interne)
+          if(typeof Component.$$render === 'function'){
+            const base = Component;
+            Component = {
+              render: (props)=>{
+                try {
+                  const html = base.$$render({}, props||{}, {}, {});
+                  return { html };
+                } catch(e){
+                  return { html: `<pre data-render-error>$$render error: ${e.message.replace(/</g,'&lt;')}</pre>` };
+                }
+              }
+            };
+          } else {
+            throw new Error('render() absent');
+          }
+        }
         // Stocker transformation pour debug
         globalThis.__LAST_SSR_TRANSFORM__ = rootTransformed;
       } catch(e){
