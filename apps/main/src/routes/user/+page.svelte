@@ -11,6 +11,13 @@
   let appValidation = null; // { filename: { diagnostics, ssrOk, domOk, formatted, ... } }
   let appSelectedFile = null;
   let appError = '';
+  // Fichiers / analyses
+  let uploading = false;
+  let analyzing = false;
+  let uploadedFiles = []; // { name, hash, mime, signedUrl }
+  let selectedFileHash = null;
+  let analyses = {}; // hash -> analysis summary
+  let fileHashesForGeneration = []; // sélection utilisateur envoyée à generate/app
   let compileUrl = '';
   let compiling = false;
   let activeView = 'code'; // 'files' | 'code' | 'preview-ssr' | 'preview-interactive'
@@ -178,7 +185,7 @@
         const res = await fetch('/api/generate/app', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: appPrompt })
+          body: JSON.stringify({ prompt: appPrompt, fileHashes: fileHashesForGeneration })
         });
         data = await res.json();
         if (!data.success) throw new Error(data.error || 'Erreur inconnue');
@@ -201,6 +208,45 @@
     } finally {
       if(useBlueprintMode){ blueprintGenerating = false; } else { appIsGenerating = false; }
     }
+  }
+
+  async function handleFileInput(e){
+    const files = Array.from(e.target.files||[]);
+    for(const f of files){ await uploadSingle(f); }
+    e.target.value='';
+  }
+  async function uploadSingle(file){
+    uploading = true; appError='';
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const res = await fetch('/api/files/upload', { method:'POST', body: fd });
+      const data = await res.json();
+      if(!data.success) throw new Error(data.error||'Upload échoué');
+      uploadedFiles = [...uploadedFiles.filter(u=> u.hash!==data.hash), { name: data.name, hash: data.hash, mime: data.mime, signedUrl: data.signedUrl }];
+    } catch(e){ appError = e.message; }
+    finally { uploading = false; }
+  }
+  async function analyzeFile(u){
+    analyzing = true; appError='';
+    try {
+      // L'analyse se base sur hash (si déjà en base) => re-download non nécessaire : mais notre endpoint attend contenu; on n'a pas bucketObject ici car private.
+      // Stratégie: si on a signedUrl temporaire on le fetch puis re-post.
+      let buf=null; let mime=u.mime;
+      if(u.signedUrl){
+        const r = await fetch(u.signedUrl); const arr = await r.arrayBuffer(); buf = new Uint8Array(arr); }
+      if(!buf){ appError='Impossible de récupérer contenu pour analyse'; analyzing=false; return; }
+      const b64 = btoa(String.fromCharCode(...buf));
+      const res = await fetch('/api/files/analyze', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ base64: b64, mime }) });
+      const data = await res.json();
+      if(!data.success) throw new Error(data.error||'Analyse échouée');
+      analyses[u.hash] = data.analysis || { summary: data.analysis?.summary || 'Analyse indisponible' };
+      if(!fileHashesForGeneration.includes(u.hash)) fileHashesForGeneration = [...fileHashesForGeneration, u.hash];
+    } catch(e){ appError = e.message; }
+    finally { analyzing = false; }
+  }
+  function toggleHashSelection(h){
+    if(fileHashesForGeneration.includes(h)) fileHashesForGeneration = fileHashesForGeneration.filter(x=> x!==h);
+    else fileHashesForGeneration = [...fileHashesForGeneration, h];
   }
 
   function resetGeneration() {
@@ -434,6 +480,12 @@
           {#if appIsGenerating || blueprintGenerating}<i class="fas fa-spinner fa-spin"></i>{:else}<i class="fas fa-gears"></i>{/if}
           {useBlueprintMode ? 'Générer Blueprint' : 'Générer'}
         </button>
+        <div class="relative">
+          <label class="px-4 py-2 rounded-lg text-sm bg-white border hover:bg-gray-50 flex items-center gap-2 cursor-pointer">
+            <i class="fas fa-upload"></i> {uploading ? 'Upload...' : 'Ajouter fichiers'}
+            <input type="file" class="hidden" multiple on:change={handleFileInput} accept="image/png,image/jpeg,image/webp,image/gif" />
+          </label>
+        </div>
         {#if appFiles}
           <button class="px-4 py-2 rounded-lg text-sm bg-white border hover:bg-gray-50 flex items-center gap-2" on:click={resetGeneration}><i class="fas fa-rotate-left"></i> Réinitialiser</button>
         {/if}
@@ -452,6 +504,31 @@
             <div><span class="font-medium">Palette:</span> {blueprintData.design_tokens.colors.slice(0,6).join(', ')}{#if blueprintData.design_tokens.colors.length>6}...{/if}</div>
           {/if}
           {#if projectId}<div class="text-[10px] text-indigo-500">Projet ID: {projectId}</div>{/if}
+        </div>
+      {/if}
+      {#if uploadedFiles.length}
+        <div class="border rounded p-2 space-y-2 bg-gray-50">
+          <div class="text-[11px] font-semibold flex items-center gap-2 text-gray-700"><i class="fas fa-photo-film text-purple-500"></i> Fichiers ({uploadedFiles.length})</div>
+          <div class="space-y-1 max-h-40 overflow-auto pr-1">
+            {#each uploadedFiles as f}
+              <div class="flex items-start gap-2 p-1 rounded border bg-white text-[11px]">
+                <div class="flex-1 min-w-0">
+                  <div class="truncate font-medium" title={f.name}>{f.name}</div>
+                  <div class="text-[10px] text-gray-500 truncate">{f.hash}</div>
+                  <div class="flex gap-2 mt-1 items-center">
+                    <button class="px-2 py-0.5 rounded bg-purple-600 text-white text-[10px] hover:bg-purple-500 disabled:opacity-50" disabled={analyzing || analyses[f.hash]} on:click={()=> analyzeFile(f)}>{analyses[f.hash] ? 'Analysé' : (analyzing ? '...' : 'Analyser')}</button>
+                    <button class="px-2 py-0.5 rounded border text-[10px] hover:bg-gray-100" class:!bg-emerald-100={fileHashesForGeneration.includes(f.hash)} on:click={()=> toggleHashSelection(f.hash)}>{fileHashesForGeneration.includes(f.hash) ? 'Sélectionné' : 'Sélect.'}</button>
+                  </div>
+                </div>
+                {#if f.signedUrl && f.mime.startsWith('image/')}
+                  <img src={f.signedUrl} alt={f.name} class="w-12 h-12 object-cover rounded border" />
+                {/if}
+              </div>
+            {/each}
+          </div>
+          {#if fileHashesForGeneration.length}
+            <div class="text-[10px] text-gray-600">Hashes utilisés pour la génération: {fileHashesForGeneration.slice(0,4).join(', ')}{#if fileHashesForGeneration.length>4}…{/if}</div>
+          {/if}
         </div>
       {/if}
       <div class="text-[11px] text-gray-500 leading-relaxed">

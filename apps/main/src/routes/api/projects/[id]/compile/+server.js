@@ -36,8 +36,10 @@ export async function POST(event){
   if(!projectFiles[entry]) entry = svelteEntries[0][0];
     const hash = computeProjectHash(projectFiles, { entry, variant:'dom-esm' });
     const cached = getCached(hash);
+    if(typeof globalThis.__COMPILE_REQS === 'undefined') globalThis.__COMPILE_REQS = 0;
+    globalThis.__COMPILE_REQS++;
     if(cached){
-      return json({ success:true, cached:true, ...cached });
+      return json({ success:true, cached:true, projectHash: hash, requestCount: globalThis.__COMPILE_REQS, ...cached });
     }
   const modules = [];
   const pageFiles = []; // conserver liste pages pour wrappers
@@ -184,7 +186,7 @@ export async function POST(event){
   }));
   const result = { modules: [...modules, ...wrapperModules], entry, cached:false, timings:{ total_ms: Date.now()-t0 }, routes: routeCandidates, wrappers, quality, validation_summary, css: globalCss, cssHash, guardMeta, variantMeta };
     setCached(hash, result, 2*60*1000); // 2 min
-    return json({ success:true, ...result });
+  return json({ success:true, projectHash: hash, requestCount: globalThis.__COMPILE_REQS, ...result });
   } catch(e){
     return json({ success:false, error:e.message }, { status:500 });
   }
