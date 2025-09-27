@@ -1,13 +1,15 @@
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 import { createRequire } from 'module';
+import path from 'path';
 
 // Endpoint minimal pour rendre un fichier Svelte (ou simple markup) côté serveur en HTML statique.
 // Body: { code: string }
 // Réponse: { success, html, css }
 export async function POST({ request }) {
   try {
-    const { code } = await request.json();
+  const body = await request.json();
+  const { code, dependencies = {} } = body || {};
     if(!code || !code.trim()) return json({ success:false, error:'Code requis' }, { status:400 });
     if(typeof globalThis.__COMP_COMPONENT_COUNT === 'undefined') globalThis.__COMP_COMPONENT_COUNT = 0;
     globalThis.__COMP_COMPONENT_COUNT++;
@@ -16,7 +18,7 @@ export async function POST({ request }) {
     })();
 
     // Injecter placeholders pour composants non importés (ex: <ButtonRed />) afin d'éviter SSR vide/bloquant.
-    function injectUnknownComponentPlaceholders(src, meta){
+  function injectUnknownComponentPlaceholders(src, meta){
       // Match balises capitalisées sans import correspondant. Heuristique simple.
       const tagRegex = /<([A-Z][A-Za-z0-9_]*)\b[^>]*>/g; const found = new Set(); let m;
       while((m=tagRegex.exec(src))){ found.add(m[1]); }
@@ -48,6 +50,45 @@ export async function POST({ request }) {
       }
     }
 
+    // Réécriture des imports $lib/* en stubs si dépendance non fournie.
+    function rewriteLibImports(src, meta, provided){
+      const libRegex = /import\s+([^;]+?)\s+from\s+['"]\$lib\/(.+?)['"];?/g;
+      let m; let out = src; const stubs=[]; const providedSet = new Set(Object.keys(provided));
+      while((m = libRegex.exec(src))){
+        const importClause = m[1].trim();
+        let targetRel = m[2].trim();
+        if(!/\.svelte$/i.test(targetRel)) targetRel += '.svelte';
+        const fullPath = 'src/lib/' + targetRel;
+        if(providedSet.has(fullPath)) continue; // réelle dépendance fournie
+        // On supprime cette ligne d'import et on génère des stubs
+        out = out.replace(m[0], '');
+        const localNames = [];
+        // Cas: default + named: defaultExport, { A, B as C }
+        // Heuristique simple
+        const defaultMatch = importClause.match(/^([A-Za-z0-9_]+)/);
+        if(defaultMatch) localNames.push(defaultMatch[1]);
+        const braceMatch = importClause.match(/\{([^}]+)\}/);
+        if(braceMatch){
+          braceMatch[1].split(',').forEach(p=>{
+            const name = p.split(/\s+as\s+/i)[1] || p.split(/\s+as\s+/i)[0] || p; // garder alias (droite) si présent
+            const trimmed = name.trim(); if(trimmed) localNames.push(trimmed);
+          });
+        }
+        for(const n of localNames){
+          stubs.push(`const ${n} = ({children})=>({ $$render:()=> '<div data-missing-lib="${fullPath}" class="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded border border-dashed border-amber-300 bg-amber-50 text-amber-600">${n}</div>' });`);
+        }
+      }
+      if(stubs.length){
+        meta.libStubs = stubs.map(s=> s.match(/const\s+([A-Za-z0-9_]+)/)[1]);
+        if(/<script[>\s]/.test(out)){
+          out = out.replace(/<script[>\s][^>]*>/, mm=> mm + '\n' + stubs.join('\n'));
+        } else {
+          out = `<script>\n${stubs.join('\n')}\n</script>\n` + out;
+        }
+      }
+      return out;
+    }
+
     // Si c'est juste du markup sans balises <script>/<template>, on l'encapsule dans un composant.
     let source = code;
     const hasSvelteSyntax = /<script[\s>]|{#if|{#each|on:click=/.test(code);
@@ -60,8 +101,28 @@ export async function POST({ request }) {
       source = `<script>export let props = {};</script>\n${code}`;
     }
 
-  const meta = { missingComponents: [] };
+  const meta = { missingComponents: [], libStubs: [], depProvided: Object.keys(dependencies||{}).length };
+  // Réécriture des imports $lib avant injection tags inconnus
+  source = rewriteLibImports(source, meta, dependencies);
   source = injectUnknownComponentPlaceholders(source, meta);
+
+  // Compilation des dépendances Svelte fournies (multi-fichier)
+  const depRegistry = new Map(); // path -> module exports
+  const depErrors = [];
+  const depSources = Object.entries(dependencies).filter(([p])=> p.endsWith('.svelte'));
+  for(const [depPath, depCode] of depSources){
+    try {
+      const c = compile(depCode, { generate:'ssr', hydratable:true, format:'cjs', filename: depPath });
+      const modFunc = new Function('module','exports','require', c.js.code);
+      const module = { exports:{} };
+      // local require placeholder (sera patched plus tard si nécessaire)
+      modFunc(module, module.exports, (spec)=>{
+        if(spec === 'svelte/internal') return (typeof require !== 'undefined'? require: createRequire(import.meta.url))('svelte/internal');
+        return {}; // pas de résolution imbriquée pour l'instant
+      });
+      depRegistry.set(depPath, module.exports);
+    } catch(e){ depErrors.push({ dep: depPath, error: e.message }); }
+  }
   let compiled;
     try {
   compiled = compile(source, { generate: 'ssr', hydratable: true, format:'cjs' });
@@ -80,7 +141,7 @@ export async function POST({ request }) {
     let localRequire = null; let canRequire = false;
     try { localRequire = typeof require !== 'undefined' ? require : createRequire(import.meta.url); canRequire = !!localRequire; } catch(_e){ canRequire=false; }
     let htmlBody = '';
-    if(!canRequire){
+  if(!canRequire){
       // Edge/runtime sans require: renvoyer placeholder + code source échappé minimal
       const escaped = source.replace(/[&<>]/g, ch=> ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
       htmlBody = `<div class=\"p-4 text-xs text-gray-700\"><div class=\"mb-2 font-semibold text-red-600\">SSR non disponible (runtime sans require)</div><pre class=\"text-[10px] bg-gray-100 p-2 rounded overflow-auto\">${escaped}</pre></div>`;
@@ -94,9 +155,26 @@ export async function POST({ request }) {
         }
         const moduleFunc = new Function('module','exports','require', js.code);
         const module = { exports: {} };
+        function resolveDep(spec){
+          // Alias $lib
+          if(spec.startsWith('$lib/')){
+            const mapped = 'src/lib/' + spec.slice(5) + (spec.endsWith('.svelte')?'': (spec.endsWith('.js')?'':'.svelte'));
+            if(depRegistry.has(mapped)) return depRegistry.get(mapped);
+          }
+          // Direct key
+            if(depRegistry.has(spec)) return depRegistry.get(spec);
+          // Relative (approx: join with virtual root 'src')
+          if(spec.startsWith('./') || spec.startsWith('../')){
+            // Suppose main file is 'Main.svelte' at root; essayer avec src/lib/ etc impossible -> fallback stub
+            for(const k of depRegistry.keys()){
+              if(k.endsWith(spec.replace(/^\.\//,''))) return depRegistry.get(k);
+            }
+          }
+          try { return localRequire(spec); } catch(_e){ return createStub(spec); }
+        }
         moduleFunc(module, module.exports, (name)=>{
           if(name === 'svelte/internal') return localRequire('svelte/internal');
-          try { return localRequire(name); } catch(_e){ return createStub(name); }
+          return resolveDep(name);
         });
         Component = module.exports.default || module.exports;
         if(!Component || typeof Component.render !== 'function') throw new Error('render() absent');
@@ -135,10 +213,14 @@ export async function POST({ request }) {
       `ts=${Date.now()}`,
       `mode=${canRequire?'ssr':'edge-fallback'}`
     ];
-    if(meta.missingComponents?.length){
-      metaParts.push('missing='+meta.missingComponents.join('|'));
-    }
-    const metaComment = `<!--component-compile ${metaParts.join(' ')}-->` + (meta.missingComponents?.length ? `\n<!--missing-components:${meta.missingComponents.join(',')}-->` : '');
+    if(meta.missingComponents?.length) metaParts.push('missing='+meta.missingComponents.join('|'));
+    if(meta.libStubs?.length) metaParts.push('libstubs='+meta.libStubs.join('|'));
+    if(depRegistry.size) metaParts.push('deps='+depRegistry.size);
+    if(depErrors.length) metaParts.push('deperrors='+depErrors.length);
+    const metaComment = `<!--component-compile ${metaParts.join(' ')}-->`+
+      (meta.missingComponents?.length ? `\n<!--missing-components:${meta.missingComponents.join(',')}-->` : '')+
+      (meta.libStubs?.length ? `\n<!--missing-lib-components:${meta.libStubs.join(',')}-->`:'')+
+      (depErrors.length ? `\n<!--dependency-errors:${depErrors.map(d=> d.dep+':'+d.error).join('|')}-->`:'');
     // Script d'hydratation si SSR OK et domJsCode dispo
     let hydrationScript = '';
     if(canRequire && domJsCode){
