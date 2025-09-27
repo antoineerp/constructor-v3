@@ -193,6 +193,7 @@ Retourne uniquement le contenu brut du fichier .svelte.`;
 
     // Préparer bloc analyses fichiers (images/pdf/texte) si fourni
     let analysesBlock = '';
+    let analysesHash = 'none';
     if(fileAnalyses && Array.isArray(fileAnalyses) && fileAnalyses.length){
       try {
         const trimmed = fileAnalyses.slice(0,5).map(a=>{
@@ -207,7 +208,11 @@ Retourne uniquement le contenu brut du fichier .svelte.`;
             components: comps.slice(0,8)
           };
         });
-        analysesBlock = '\n/* ANALYSES_FICHIERS\n' + JSON.stringify(trimmed, null, 2).slice(0,1900) + '\n*/\n';
+        const serialized = JSON.stringify(trimmed);
+        // Hash simple djb2 pour inclure dans la clé de cache (stable tant que trimmed constant)
+        let h=5381; for(let i=0;i<serialized.length;i++){ h=((h*33) ^ serialized.charCodeAt(i)) >>> 0; }
+        analysesHash = h.toString(36);
+        analysesBlock = '\n/* ANALYSES_FICHIERS hash:'+analysesHash+'\n' + serialized.slice(0,1900) + '\n*/\n';
       } catch(_e){ /* ignore */ }
     }
 
@@ -234,7 +239,7 @@ ${retrievalContext}
     const enveloped = withJsonEnvelope(`Génère une application basée sur: ${prompt}${analysesBlock? '\nInspiration: analyses fichiers fournies (ne pas les répéter textuellement).':''}`);
     const attempt = async (retryIndex=0, lastError=null, lastRaw='') => {
       const body = { model, messages:[{role:'system',content:system},{role:'user',content:enveloped}], temperature:0.2, max_tokens:1800 };
-      const cacheKey = simpleCache.key('generateApplication', { prompt, model, retryIndex });
+      const cacheKey = simpleCache.key('generateApplication', { prompt, model, retryIndex, aHash: analysesHash });
       const cached = simpleCache.get(cacheKey);
       if(cached) return cached;
       const response = await fetch('https://api.openai.com/v1/chat/completions', { method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${this.apiKey}`}, body: JSON.stringify(body) });
