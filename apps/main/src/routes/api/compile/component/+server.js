@@ -260,27 +260,69 @@ export async function POST({ request }) {
         const rootFactory = new Function('module','exports','require','__import', rootTransformed + '\n;');
         execFactory(rootFactory);
         Component = module.exports.default || module.exports;
+        // Gestion export imbriqué (default.default)
+        if(Component && Component.default && (Component.default.render || Component.default.$$render)){
+          Component = Component.default;
+        }
         if(!Component){
           throw new Error('export default manquant');
         }
+        let fallbackUsed = false;
+        function wrapFromBase(base){
+          fallbackUsed = true;
+          return {
+            render: (props)=>{
+              try {
+                const html = base.$$render({}, props||{}, {}, {});
+                return { html };
+              } catch(e){
+                return { html: `<pre data-render-error>$$render error: ${e.message.replace(/</g,'&lt;')}</pre>` };
+              }
+            }
+          };
+        }
         if(typeof Component.render !== 'function'){
-          // Fallback Svelte: présence possible de $$render (pattern interne)
           if(typeof Component.$$render === 'function'){
-            const base = Component;
+            Component = wrapFromBase(Component);
+          } else if(Component.prototype && typeof Component.prototype.$$render === 'function') {
+            // Prototype pattern (classe générée)
+            const proto = Component.prototype;
+            fallbackUsed = true;
             Component = {
               render: (props)=>{
                 try {
-                  const html = base.$$render({}, props||{}, {}, {});
+                  const html = proto.$$render({}, props||{}, {}, {});
                   return { html };
                 } catch(e){
-                  return { html: `<pre data-render-error>$$render error: ${e.message.replace(/</g,'&lt;')}</pre>` };
+                  return { html: `<pre data-render-error>proto $$render error: ${e.message.replace(/</g,'&lt;')}</pre>` };
                 }
               }
             };
-          } else {
-            throw new Error('render() absent');
+          } else if(typeof Component === 'function') {
+            // Heuristique fonction: tenter exécution pour voir si renvoie structure exploitable
+            try {
+              const result = Component({});
+              if(result){
+                if(typeof result === 'string'){
+                  fallbackUsed = true;
+                  Component = { render: ()=> ({ html: result }) };
+                } else if(result.html){
+                  fallbackUsed = true;
+                  Component = { render: ()=> ({ html: result.html }) };
+                } else if(typeof result.$$render === 'function'){
+                  Component = wrapFromBase(result);
+                }
+              }
+            } catch(_ef){ /* ignore and continue */ }
+            if(typeof Component.render !== 'function' && typeof Component.$$render === 'function'){
+              Component = wrapFromBase(Component);
+            }
+          }
+          if(typeof Component.render !== 'function'){
+            throw new Error('render() absent (shape='+ (typeof Component) +')');
           }
         }
+        if(fallbackUsed){ globalThis.__LAST_SSR_FALLBACK__ = true; } else { globalThis.__LAST_SSR_FALLBACK__ = false; }
         // Stocker transformation pour debug
         globalThis.__LAST_SSR_TRANSFORM__ = rootTransformed;
       } catch(e){
@@ -318,6 +360,7 @@ export async function POST({ request }) {
       `ts=${Date.now()}`,
       `mode=${canRequire?'ssr':'edge-fallback'}`
     ];
+    if(globalThis.__LAST_SSR_FALLBACK__) metaParts.push('fallback=1');
     if(meta.missingComponents?.length) metaParts.push('missing='+meta.missingComponents.join('|'));
     if(meta.libStubs?.length) metaParts.push('libstubs='+meta.libStubs.join('|'));
     if(depRegistry.size) metaParts.push('deps='+depRegistry.size);
@@ -352,7 +395,8 @@ export async function POST({ request }) {
           depCount: depRegistry.size,
           depErrors,
           depCssBlocks: depCssBlocks.length,
-          mode: canRequire?'ssr':'edge-fallback'
+          mode: canRequire?'ssr':'edge-fallback',
+          fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__
         },
         ssrJs: js?.code || null,
         ssrTransformed: globalThis.__LAST_SSR_TRANSFORM__ || null,
