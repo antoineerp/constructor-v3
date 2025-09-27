@@ -319,6 +319,23 @@ export async function POST({ request }) {
                 }
               }
             } catch(_ef){ /* ignore and continue */ }
+            // Deuxième tentative: fonction SSR style (arity >=3) attend ($$result, $$props, $$bindings, slots)
+            if(typeof Component.render !== 'function' && Component.length >= 3){
+              const fn = Component;
+              fallbackUsed = true;
+              Component = { render: (props)=>{
+                try {
+                  const fakeResult = { head:'', css:new Set(), title:'', html:'' };
+                  const out = fn(fakeResult, props||{}, {}, {});
+                  if(typeof out === 'string') return { html: out };
+                  if(out && typeof out.html === 'string') return { html: out.html };
+                  if(fakeResult.html) return { html: fakeResult.html };
+                  return { html: '<!-- empty SSR function output -->' };
+                } catch(e){
+                  return { html: `<pre data-render-error>arity-fn error: ${e.message.replace(/</g,'&lt;')}</pre>` };
+                }
+              }};
+            }
             if(typeof Component.render !== 'function' && typeof Component.$$render === 'function'){
               Component = wrapFromBase(Component);
             }
