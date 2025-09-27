@@ -28,6 +28,7 @@
   let interactiveLoading = false;
   let stubbedComponents = []; // liste des composants stub détectés (SSR preview)
   let generatingStub = null; // nom du composant en cours de génération
+  let generatingAll = false; // flag génération groupée
 
   async function generateStubComponent(name){
     if(!name || generatingStub) return;
@@ -52,6 +53,18 @@
       activeView='code';
     } catch(e){ appError = 'Génération composant '+name+': '+e.message; }
     finally { generatingStub = null; }
+  }
+
+  async function generateAllStubComponents(){
+    if(!stubbedComponents.length || generatingAll) return;
+    generatingAll = true; appError='';
+    try {
+      for(const name of stubbedComponents){
+        generatingStub = name; // réutilise spinner individuel
+        await generateStubComponent(name);
+      }
+    } catch(e){ appError = 'Génération groupée: '+e.message; }
+    finally { generatingStub=null; generatingAll=false; }
   }
   let showDiagnostics = true;
   let repairing = false;
@@ -802,7 +815,12 @@
                       <iframe title="Rendu SSR" src={compileUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
                       {#if stubbedComponents.length}
                         <div class="absolute top-2 right-2 max-w-xs text-[10px] bg-amber-50 border border-amber-300 text-amber-800 rounded shadow p-2 space-y-1">
-                          <div class="font-semibold flex items-center gap-1"><i class="fas fa-puzzle-piece"></i> Composants stubés</div>
+                          <div class="font-semibold flex items-center justify-between gap-2">
+                            <span class="flex items-center gap-1"><i class="fas fa-puzzle-piece"></i> Composants stubés</span>
+                            <button class="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-500 text-white text-[9px] disabled:opacity-50" disabled={generatingAll} on:click={generateAllStubComponents}>
+                              {#if generatingAll}<i class="fas fa-spinner fa-spin"></i>{:else}Tous{/if}
+                            </button>
+                          </div>
                           <ul class="space-y-0.5">
                             {#each stubbedComponents as sc}
                               <li class="flex items-center justify-between gap-2 bg-white/60 rounded px-1 py-0.5 border border-amber-200" title={sc}>

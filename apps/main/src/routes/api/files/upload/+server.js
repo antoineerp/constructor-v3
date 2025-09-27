@@ -19,6 +19,10 @@ async function ensureBucket(){
 
 export async function POST({ request }){
   try {
+    // Vérifier configuration supabase minimale
+    if(!process.env.PUBLIC_SUPABASE_URL || !process.env.PUBLIC_SUPABASE_ANON_KEY){
+      return json({ success:false, error:'Configuration Supabase manquante (PUBLIC_SUPABASE_URL / PUBLIC_SUPABASE_ANON_KEY).', hint:'Définis les variables d\'env publiques pour activer l\'upload.' }, { status:500 });
+    }
     const contentType = request.headers.get('content-type') || '';
     if(!contentType.startsWith('multipart/form-data')){
       return json({ success:false, error:'Utiliser multipart/form-data' }, { status:400 });
@@ -50,7 +54,7 @@ export async function POST({ request }){
     if(!already){
       const { error: upErr } = await supabase.storage.from(BUCKET).upload(objectPath, buffer, { contentType: file.type, upsert:false });
       if(upErr && !upErr.message.includes('exists')){
-        return json({ success:false, error:'Upload échoué', detail: upErr.message }, { status:500 });
+        return json({ success:false, error:'Upload Supabase échoué', detail: upErr.message }, { status:500 });
       }
     }
     // URL signée (optionnelle)
@@ -61,6 +65,6 @@ export async function POST({ request }){
     } catch(_e){ /* ignore */ }
     return json({ success:true, hash: sha1, name: file.name, size: file.size, mime: file.type, objectPath, signedUrl, dedup: already });
   } catch(e){
-    return json({ success:false, error:e.message }, { status:500 });
+    return json({ success:false, error:'Échec upload: '+ e.message }, { status:500 });
   }
 }
