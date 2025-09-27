@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
+import { createRequire } from 'module';
 
 // Endpoint minimal pour rendre un fichier Svelte (ou simple markup) côté serveur en HTML statique.
 // Body: { code: string }
@@ -63,19 +64,21 @@ export async function POST({ request }) {
   source = injectUnknownComponentPlaceholders(source, meta);
   let compiled;
     try {
-      compiled = compile(source, { generate: 'ssr', hydratable: true });
+  compiled = compile(source, { generate: 'ssr', hydratable: true, format:'cjs' });
     } catch (e) {
       return json({ success:false, error:'Erreur compilation: '+e.message }, { status:400 });
     }
 
-    const { js, css } = compiled || {};
-    // Préparer une version DOM pour hydratation (peut échouer indépendamment)
-    let domJsCode = null; let domCompileError = null;
+  const { js, css } = compiled || {};
+    // Préparer une version DOM pour hydratation (format ESM pour import dynamique)
+    let domJsCode = null; let domCompileError = null; let domCssCode='';
     try {
-      const domCompiled = compile(source, { generate:'dom', hydratable:true });
-      domJsCode = domCompiled.js.code;
+      const domCompiled = compile(source, { generate:'dom', hydratable:true, format:'esm' });
+      domJsCode = domCompiled.js.code; domCssCode = domCompiled.css?.code || '';
     } catch(e){ domCompileError = e.message; }
-    const canRequire = typeof require !== 'undefined';
+    // Création d'un require compatible dans un contexte ESM
+    let localRequire = null; let canRequire = false;
+    try { localRequire = typeof require !== 'undefined' ? require : createRequire(import.meta.url); canRequire = !!localRequire; } catch(_e){ canRequire=false; }
     let htmlBody = '';
     if(!canRequire){
       // Edge/runtime sans require: renvoyer placeholder + code source échappé minimal
@@ -89,20 +92,38 @@ export async function POST({ request }) {
         function createStub(spec){
           return { default: { render: () => ({ html: `<span data-missing-module=\"${spec.replace(/"/g,'&quot;')}\"></span>` }) } };
         }
-        const moduleFunc = new Function('require','module','exports', js.code);
+        const moduleFunc = new Function('module','exports','require', js.code);
         const module = { exports: {} };
-        moduleFunc((name)=>{
-          if(name === 'svelte/internal') return require('svelte/internal');
-          try { return require(name); } catch(_e){ return createStub(name); }
-        }, module, module.exports);
+        moduleFunc(module, module.exports, (name)=>{
+          if(name === 'svelte/internal') return localRequire('svelte/internal');
+          try { return localRequire(name); } catch(_e){ return createStub(name); }
+        });
         Component = module.exports.default || module.exports;
         if(!Component || typeof Component.render !== 'function') throw new Error('render() absent');
       } catch(e){
         return json({ success:false, error:'Évaluation impossible: '+e.message }, { status:500 });
       }
       try {
-        const rendered = Component.render ? Component.render({}) : { html: '' };
+        // Extraction naïve des props exportées (export let foo = 123;)
+        const propRegex = /export\s+let\s+([A-Za-z0-9_]+)(\s*=\s*([^;]+))?;/g; let pm; const initialProps={};
+        while((pm = propRegex.exec(source))){
+          const name = pm[1]; const raw = pm[3];
+          if(raw){
+            try {
+              // Sécuriser évaluation de littéraux simples
+              if(/^['"`].*['"`]$/.test(raw.trim())) initialProps[name] = raw.trim().slice(1,-1);
+              else if(/^(true|false)$/i.test(raw.trim())) initialProps[name] = raw.trim().toLowerCase()==='true';
+              else if(/^[0-9]+(\.[0-9]+)?$/.test(raw.trim())) initialProps[name] = Number(raw.trim());
+              else if(/^[\[{].*[\]}]$/.test(raw.trim())) { try { initialProps[name] = JSON.parse(raw.trim()); } catch(_e){ /* ignore */ } }
+            } catch(_e){ /* ignore parse prop */ }
+          } else {
+            initialProps[name] = null;
+          }
+        }
+        const rendered = Component.render ? Component.render(initialProps) : { html: '' };
         htmlBody = rendered.html;
+        // Stocker initialProps pour hydratation
+        globalThis.__LAST_COMPONENT_PROPS__ = initialProps;
       } catch(e){
         return json({ success:false, error:'Rendu serveur échoué: '+e.message }, { status:500 });
       }
@@ -123,12 +144,13 @@ export async function POST({ request }) {
     if(canRequire && domJsCode){
       // Encodage base64 pour import dynamique inline
       const b64 = Buffer.from(domJsCode, 'utf-8').toString('base64');
-      hydrationScript = `<script>(function(){try{const js=atob('${b64}');const blob=new Blob([js],{type:'text/javascript'});const u=URL.createObjectURL(blob);import(u).then(m=>{const C=m.default||m;const root=document.getElementById('__component_root');if(root){new C({target:root, hydrate:true});}}).catch(e=>console.warn('Hydration fail',e));}catch(e){console.warn('Hydration bootstrap error',e);}})();</script>`;
+      const propsB64 = Buffer.from(JSON.stringify(globalThis.__LAST_COMPONENT_PROPS__||{}),'utf-8').toString('base64');
+      hydrationScript = `<script>(function(){try{const js=atob('${b64}');const blob=new Blob([js],{type:'text/javascript'});const u=URL.createObjectURL(blob);const props=JSON.parse(atob('${propsB64}'));import(u).then(m=>{const C=m.default||m;const root=document.getElementById('__component_root');if(root){new C({target:root, hydrate:true, props});}}).catch(e=>console.warn('Hydration fail',e));}catch(e){console.warn('Hydration bootstrap error',e);}})();</script>`;
     } else if(!canRequire && domCompileError){
       hydrationScript = `<!-- dom compile error: ${domCompileError} -->`;
     }
     const wrapStart = canRequire ? '<div id="__component_root">' : '<div id="__component_root" data-no-ssr="1">';
-    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css\" />\n<script src=\"https://cdn.tailwindcss.com\"></script>${ css?.code ? `\n<style>${css.code}</style>` : '' }</head><body class=\"p-4\">${metaComment}\n${wrapStart}${htmlBody}</div>${hydrationScript}</body></html>`;
+    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css\" />\n<script src=\"https://cdn.tailwindcss.com\"></script>${ css?.code ? `\n<style>${css.code}</style>` : '' }${ domCssCode && !css?.code ? `\n<style>${domCssCode}</style>`:''}</head><body class=\"p-4\">${metaComment}\n${wrapStart}${htmlBody}</div>${hydrationScript}</body></html>`;
     return new Response(html, { headers: { 'Content-Type':'text/html; charset=utf-8' } });
   } catch (e) {
     console.error('compile/component error', e);
