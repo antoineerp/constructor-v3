@@ -8,8 +8,8 @@ import path from 'path';
 // Réponse: { success, html, css }
 export async function POST({ request }) {
   try {
-  const body = await request.json();
-  const { code, dependencies = {}, debug = false } = body || {};
+    const body = await request.json();
+    const { code, dependencies = {}, debug = false } = body || {};
     if(!code || !code.trim()) return json({ success:false, error:'Code requis' }, { status:400 });
     if(typeof globalThis.__COMP_COMPONENT_COUNT === 'undefined') globalThis.__COMP_COMPONENT_COUNT = 0;
     globalThis.__COMP_COMPONENT_COUNT++;
@@ -90,7 +90,8 @@ export async function POST({ request }) {
     }
 
     // Si c'est juste du markup sans balises <script>/<template>, on l'encapsule dans un composant.
-    let source = code;
+  const originalSource = code; // conserver pour debug
+  let source = code;
     const hasSvelteSyntax = /<script[\s>]|{#if|{#each|on:click=/.test(code);
     if(!/</.test(code.trim().slice(0,40))){
       // probablement juste texte -> wrap div
@@ -101,10 +102,14 @@ export async function POST({ request }) {
       source = `<script>export let props = {};</script>\n${code}`;
     }
 
-  const meta = { missingComponents: [], libStubs: [], depProvided: Object.keys(dependencies||{}).length };
-  // Réécriture des imports $lib avant injection tags inconnus
-  source = rewriteLibImports(source, meta, dependencies);
-  source = injectUnknownComponentPlaceholders(source, meta);
+    const meta = { missingComponents: [], libStubs: [], depProvided: Object.keys(dependencies||{}).length };
+    const debugStages = debug ? { original: originalSource } : null;
+    // Réécriture des imports $lib avant injection tags inconnus
+    const afterLib = rewriteLibImports(source, meta, dependencies);
+    if(debugStages) debugStages.afterLib = afterLib;
+    const afterUnknown = injectUnknownComponentPlaceholders(afterLib, meta);
+    if(debugStages) debugStages.afterUnknown = afterUnknown;
+    source = afterUnknown;
 
     // ---------- Sandbox & transformation ESM -> pseudo-CJS pour SSR ----------
     function transformEsmToCjs(ssrCode){
@@ -167,11 +172,31 @@ export async function POST({ request }) {
         depRegistry.set(depPath, { factory, exports:null });
       } catch(e){ depErrors.push({ dep: depPath, error: e.message }); }
     }
-  let compiled;
+    let compiled;
     try {
-  compiled = compile(source, { generate: 'ssr', hydratable: true });
+      compiled = compile(source, { generate: 'ssr', hydratable: true, filename: 'Component.svelte' });
     } catch (e) {
-      return json({ success:false, error:'Erreur compilation: '+e.message }, { status:400 });
+      // enrichir message avec position si disponible
+      const loc = e.start ? ` (ligne ${e.start.line}, colonne ${e.start.column})` : '';
+      const errPayload = {
+        success: false,
+        error: 'Erreur compilation: ' + e.message + loc,
+        stage: 'ssr-compile',
+        hint: 'Vérifie accolades, blocs {#if}/{#each} et syntaxe script.',
+        position: e.start ? { line: e.start.line, column: e.start.column } : null
+      };
+      if(debug && typeof source === 'string'){
+        errPayload.debugStages = debugStages;
+        // Inclure un extrait autour de la ligne fautive
+        if(e.start){
+          const lines = source.split('\n');
+            const from = Math.max(0, e.start.line - 4);
+            const to = Math.min(lines.length, e.start.line + 3);
+            errPayload.sourceExcerpt = lines.slice(from, to).map((l,i)=>({ line: from + 1 + i, code: l })).filter(r=> r.code.length < 400);
+        }
+        errPayload.finalSourceLength = source.length;
+      }
+      return json(errPayload, { status:400 });
     }
 
   const { js, css } = compiled || {};
@@ -317,23 +342,25 @@ export async function POST({ request }) {
     const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css\" />\n<script src=\"https://cdn.tailwindcss.com\"></script>${ depCssTag }${ css?.code ? `\n<style>${css.code}</style>` : '' }${ domCssCode && !css?.code ? `\n<style>${domCssCode}</style>`:''}</head><body class=\"p-4\">${metaComment}\n${wrapStart}${htmlBody}</div>${hydrationScript}</body></html>`;
 
     if(debug){
+      if(debugStages) debugStages.finalSource = source;
       return json({
         success:true,
         html,
         meta:{
           missing: meta.missingComponents,
-            libStubs: meta.libStubs,
-            depCount: depRegistry.size,
-            depErrors,
-            depCssBlocks: depCssBlocks.length,
-            mode: canRequire?'ssr':'edge-fallback'
+          libStubs: meta.libStubs,
+          depCount: depRegistry.size,
+          depErrors,
+          depCssBlocks: depCssBlocks.length,
+          mode: canRequire?'ssr':'edge-fallback'
         },
         ssrJs: js?.code || null,
         ssrTransformed: globalThis.__LAST_SSR_TRANSFORM__ || null,
         domJs: domJsCode || null,
         css: css?.code || '',
         depCss: depCssBlocks,
-        dependencies: Array.from(depRegistry.keys())
+        dependencies: Array.from(depRegistry.keys()),
+        debugStages
       });
     }
     return new Response(html, { headers: { 'Content-Type':'text/html; charset=utf-8' } });
