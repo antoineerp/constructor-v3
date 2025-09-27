@@ -167,7 +167,7 @@ export function mountPreviewRouter({ modules, target }) {
           layoutBlobs.forEach((b,i)=> imports.push(`import L${i} from '${b}';`));
           const openTags = layoutBlobs.map((_,i)=> `<L${i} {params}>`).join('');
           const closeTags = layoutBlobs.map((_,i)=> `</L${layoutBlobs.length-1 - i}>`).join('');
-          const wrapperSource = `<script>\n${imports.join('\n')}\nexport let params;\n</script>\n${openTags}<Page {params}/> ${closeTags}`;
+          const wrapperSource = `<script>\n${imports.join('\n')}\nexport let params;\nexport let data;\n</script>\n${openTags}<Page {params} {data}/> ${closeTags}`;
           // Compilation dynamique client
           const { compile } = await import('svelte/compiler');
           const { js } = compile(wrapperSource, { generate:'dom', format:'esm', filename:'__preview_wrapper.svelte' });
@@ -184,7 +184,7 @@ export function mountPreviewRouter({ modules, target }) {
         }
         const mod = await import(/* @vite-ignore */ blobWrapperUrl);
         const Wrapper = mod.default;
-        const instance = new Wrapper({ target, props: { ...(Object.keys(params).length? { params } : {}), data: loadData } });
+  const instance = new Wrapper({ target, props: { ...(Object.keys(params).length? { params } : {}), data: loadData } });
         if (!replace) history.pushState({}, '', pathname);
         mounted = { instances: [instance], route: pathname };
         return;
@@ -198,7 +198,7 @@ export function mountPreviewRouter({ modules, target }) {
       const pageUrl = blobFor.get(entry.page);
       const pageMod = await import(/* @vite-ignore */ pageUrl);
       const PageComp = pageMod.default;
-      const pageInstance = new PageComp({ target, props: { ...(Object.keys(params).length? { params } : {}), data: loadData } });
+  const pageInstance = new PageComp({ target, props: { ...(Object.keys(params).length? { params } : {}), data: loadData } });
       if (!replace) history.pushState({}, '', pathname);
       mounted = { instances: [pageInstance], route: pathname };
     } catch (e) {

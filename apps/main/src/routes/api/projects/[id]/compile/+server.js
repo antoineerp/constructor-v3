@@ -149,7 +149,7 @@ export async function POST(event){
       layouts.forEach((l,i)=> imports.push(`import L${i} from '${l}';`));
       const openTags = layouts.map((_,i)=> `<L${i} {params}>`).join('');
       const closeTags = layouts.map((_,i)=> `</L${layouts.length-1 - i}>`).join('');
-      const wrapperSource = `<script>\n${imports.join('\n')}\nexport let params;\n</script>\n${openTags}<Page {params}/> ${closeTags}`;
+  const wrapperSource = `<script>\n${imports.join('\n')}\nexport let params;\nexport let data;\n</script>\n${openTags.replace(/>$/,' {data}>')}<Page {params} {data}/> ${closeTags}`;
       const cWrap = compile(wrapperSource, { generate:'dom', format:'esm', filename:`__wrapper__${pattern}.svelte` });
       const codes = layouts.map(l=> projectFiles[l]||'').concat(projectFiles[pagePath]||'');
       const hash = hashStr(codes.join('\u0000'));
