@@ -378,6 +378,7 @@
 
   async function compileSelected() {
     if(!appSelectedFile || !appSelectedFile.endsWith('.svelte')) { compileUrl=''; return; }
+    if(compiling) return; // garde anti rafale
     compiling = true; compileUrl='';
     try {
       // Utilise endpoint component compile direct sans projet persistant
@@ -396,7 +397,7 @@
 
   // Mise à jour automatique prévisualisation SSR quand onglet actif
   $: if(activeView === 'preview-ssr' && appSelectedFile?.endsWith('.svelte')) {
-    // Charger depuis cache sinon compiler
+    // Charger depuis cache sinon compiler (anti-boucle: compile uniquement si pas déjà en cours)
     if(compileCache.has(appSelectedFile)) {
       compileUrl = compileCache.get(appSelectedFile);
     } else if(!compiling) {

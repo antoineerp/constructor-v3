@@ -29,29 +29,36 @@ export async function POST({ request }) {
     }
 
     const { js, css } = compiled || {};
-    // Évaluer le module compilé en sandbox simple.
-    let Component;
-    try {
-      const moduleFunc = new Function('require','module','exports', js.code);
-      const module = { exports: {} };
-      moduleFunc((name)=>{
-        if(name === 'svelte/internal') return require('svelte/internal');
-        return require(name);
-      }, module, module.exports);
-      Component = module.exports.default || module.exports;
-      if(!Component || typeof Component.render !== 'function') throw new Error('render() absent');
-    } catch(e){
-      return json({ success:false, error:'Évaluation impossible: '+e.message }, { status:500 });
+    const canRequire = typeof require !== 'undefined';
+    let htmlBody = '';
+    if(!canRequire){
+      // Edge/runtime sans require: renvoyer placeholder + code source échappé minimal
+      const escaped = source.replace(/[&<>]/g, ch=> ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
+      htmlBody = `<div class=\"p-4 text-xs text-gray-700\"><div class=\"mb-2 font-semibold text-red-600\">SSR non disponible (runtime sans require)</div><pre class=\"text-[10px] bg-gray-100 p-2 rounded overflow-auto\">${escaped}</pre></div>`;
+    } else {
+      // Évaluation SSR classique
+      let Component;
+      try {
+        const moduleFunc = new Function('require','module','exports', js.code);
+        const module = { exports: {} };
+        moduleFunc((name)=>{
+          if(name === 'svelte/internal') return require('svelte/internal');
+          return require(name);
+        }, module, module.exports);
+        Component = module.exports.default || module.exports;
+        if(!Component || typeof Component.render !== 'function') throw new Error('render() absent');
+      } catch(e){
+        return json({ success:false, error:'Évaluation impossible: '+e.message }, { status:500 });
+      }
+      try {
+        const rendered = Component.render ? Component.render({}) : { html: '' };
+        htmlBody = rendered.html;
+      } catch(e){
+        return json({ success:false, error:'Rendu serveur échoué: '+e.message }, { status:500 });
+      }
     }
 
-    let rendered;
-    try {
-      rendered = Component.render ? Component.render({}) : { html: '' };
-    } catch(e){
-      return json({ success:false, error:'Rendu serveur échoué: '+e.message }, { status:500 });
-    }
-
-    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />\n<script src="https://cdn.tailwindcss.com"></script>${ css?.code ? `\n<style>${css.code}</style>` : '' }</head><body class="p-4">${rendered.html}</body></html>`;
+    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css\" />\n<script src=\"https://cdn.tailwindcss.com\"></script>${ css?.code ? `\n<style>${css.code}</style>` : '' }</head><body class="p-4">${htmlBody}</body></html>`;
     return new Response(html, { headers: { 'Content-Type':'text/html; charset=utf-8' } });
   } catch (e) {
     console.error('compile/component error', e);
