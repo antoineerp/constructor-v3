@@ -28,12 +28,18 @@ export async function POST({ request }) {
 
     let compiled;
     try {
-      compiled = compile(source, { generate: 'ssr', hydratable: false });
+      compiled = compile(source, { generate: 'ssr', hydratable: true });
     } catch (e) {
       return json({ success:false, error:'Erreur compilation: '+e.message }, { status:400 });
     }
 
     const { js, css } = compiled || {};
+    // Préparer une version DOM pour hydratation (peut échouer indépendamment)
+    let domJsCode = null; let domCompileError = null;
+    try {
+      const domCompiled = compile(source, { generate:'dom', hydratable:true });
+      domJsCode = domCompiled.js.code;
+    } catch(e){ domCompileError = e.message; }
     const canRequire = typeof require !== 'undefined';
     let htmlBody = '';
     if(!canRequire){
@@ -44,11 +50,15 @@ export async function POST({ request }) {
       // Évaluation SSR classique
       let Component;
       try {
+        // custom require qui stub les modules manquants (ex: alias Svelte non résolus)
+        function createStub(spec){
+          return { default: { render: () => ({ html: `<span data-missing-module=\"${spec.replace(/"/g,'&quot;')}\"></span>` }) } };
+        }
         const moduleFunc = new Function('require','module','exports', js.code);
         const module = { exports: {} };
         moduleFunc((name)=>{
           if(name === 'svelte/internal') return require('svelte/internal');
-          return require(name);
+          try { return require(name); } catch(_e){ return createStub(name); }
         }, module, module.exports);
         Component = module.exports.default || module.exports;
         if(!Component || typeof Component.render !== 'function') throw new Error('render() absent');
@@ -64,7 +74,17 @@ export async function POST({ request }) {
     }
 
     const metaComment = `<!--component-compile req=${globalThis.__COMP_COMPONENT_COUNT} hash=${codeHash} ts=${Date.now()} mode=${canRequire?'ssr':'edge-fallback'}-->`;
-    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css\" />\n<script src=\"https://cdn.tailwindcss.com\"></script>${ css?.code ? `\n<style>${css.code}</style>` : '' }</head><body class=\"p-4\">${metaComment}\n${htmlBody}</body></html>`;
+    // Script d'hydratation si SSR OK et domJsCode dispo
+    let hydrationScript = '';
+    if(canRequire && domJsCode){
+      // Encodage base64 pour import dynamique inline
+      const b64 = Buffer.from(domJsCode, 'utf-8').toString('base64');
+      hydrationScript = `<script>(function(){try{const js=atob('${b64}');const blob=new Blob([js],{type:'text/javascript'});const u=URL.createObjectURL(blob);import(u).then(m=>{const C=m.default||m;const root=document.getElementById('__component_root');if(root){new C({target:root, hydrate:true});}}).catch(e=>console.warn('Hydration fail',e));}catch(e){console.warn('Hydration bootstrap error',e);}})();</script>`;
+    } else if(!canRequire && domCompileError){
+      hydrationScript = `<!-- dom compile error: ${domCompileError} -->`;
+    }
+    const wrapStart = canRequire ? '<div id="__component_root">' : '<div id="__component_root" data-no-ssr="1">';
+    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css\" />\n<script src=\"https://cdn.tailwindcss.com\"></script>${ css?.code ? `\n<style>${css.code}</style>` : '' }</head><body class=\"p-4\">${metaComment}\n${wrapStart}${htmlBody}</div>${hydrationScript}</body></html>`;
     return new Response(html, { headers: { 'Content-Type':'text/html; charset=utf-8' } });
   } catch (e) {
     console.error('compile/component error', e);
