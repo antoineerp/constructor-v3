@@ -8,6 +8,11 @@ export async function POST({ request }) {
   try {
     const { code } = await request.json();
     if(!code || !code.trim()) return json({ success:false, error:'Code requis' }, { status:400 });
+    if(typeof globalThis.__COMP_COMPONENT_COUNT === 'undefined') globalThis.__COMP_COMPONENT_COUNT = 0;
+    globalThis.__COMP_COMPONENT_COUNT++;
+    const codeHash = await (async ()=>{
+      try { const { createHash } = await import('crypto'); return createHash('sha1').update(code).digest('hex').slice(0,12); } catch(_e){ return 'na'; }
+    })();
 
     // Si c'est juste du markup sans balises <script>/<template>, on l'encapsule dans un composant.
     let source = code;
@@ -58,7 +63,8 @@ export async function POST({ request }) {
       }
     }
 
-    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css\" />\n<script src=\"https://cdn.tailwindcss.com\"></script>${ css?.code ? `\n<style>${css.code}</style>` : '' }</head><body class="p-4">${htmlBody}</body></html>`;
+    const metaComment = `<!--component-compile req=${globalThis.__COMP_COMPONENT_COUNT} hash=${codeHash} ts=${Date.now()} mode=${canRequire?'ssr':'edge-fallback'}-->`;
+    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css\" />\n<script src=\"https://cdn.tailwindcss.com\"></script>${ css?.code ? `\n<style>${css.code}</style>` : '' }</head><body class=\"p-4\">${metaComment}\n${htmlBody}</body></html>`;
     return new Response(html, { headers: { 'Content-Type':'text/html; charset=utf-8' } });
   } catch (e) {
     console.error('compile/component error', e);

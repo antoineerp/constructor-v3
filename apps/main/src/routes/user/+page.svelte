@@ -22,6 +22,7 @@
   let compiling = false;
   let activeView = 'code'; // 'files' | 'code' | 'preview-ssr' | 'preview-interactive'
   const compileCache = new Map(); // filename -> objectURL
+  const compileErrorCache = new Map(); // filename -> { firstTs, lastTs, count, lastError }
   const interactiveCache = new Map(); // filename -> { url, ts }
   let interactiveUrl = '';
   let interactiveLoading = false;
@@ -379,11 +380,23 @@
   async function compileSelected() {
     if(!appSelectedFile || !appSelectedFile.endsWith('.svelte')) { compileUrl=''; return; }
     if(compiling) return; // garde anti rafale
+    // Si on a une erreur récente (<5s) pour ce fichier, ne pas relancer immédiatement
+    const errInfo = compileErrorCache.get(appSelectedFile);
+    if(errInfo && Date.now() - errInfo.lastTs < 5000) {
+      console.warn('[compileSelected] skip retry (recent error)', errInfo);
+      return;
+    }
     compiling = true; compileUrl='';
     try {
       // Utilise endpoint component compile direct sans projet persistant
       const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: appFiles[appSelectedFile] }) });
-      if(!res.ok){ compileUrl='error:'+ (await res.text()); }
+      if(!res.ok){
+        const text = await res.text();
+        compileUrl='error:'+ text;
+        const now = Date.now();
+        if(!errInfo) compileErrorCache.set(appSelectedFile, { firstTs: now, lastTs: now, count:1, lastError: text.slice(0,180) });
+        else { errInfo.lastTs = now; errInfo.count++; errInfo.lastError = text.slice(0,180); compileErrorCache.set(appSelectedFile, errInfo); }
+      }
       else {
         // On ne peut pas directement iframer la réponse POST; on fabrique un blob local.
         const html = await res.text();
@@ -397,7 +410,7 @@
 
   // Mise à jour automatique prévisualisation SSR quand onglet actif
   $: if(activeView === 'preview-ssr' && appSelectedFile?.endsWith('.svelte')) {
-    // Charger depuis cache sinon compiler (anti-boucle: compile uniquement si pas déjà en cours)
+    // Charger depuis cache sinon compiler (anti-boucle: compile uniquement si pas déjà en cours et pas erreur fraîche)
     if(compileCache.has(appSelectedFile)) {
       compileUrl = compileCache.get(appSelectedFile);
     } else if(!compiling) {
