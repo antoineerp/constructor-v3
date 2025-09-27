@@ -165,7 +165,7 @@ export function mountPreviewRouter({ modules, target }) {
           // Générer code Svelte wrapper
           const imports = [`import Page from '${pageBlob}';`];
           layoutBlobs.forEach((b,i)=> imports.push(`import L${i} from '${b}';`));
-          const openTags = layoutBlobs.map((_,i)=> `<L${i} {params}>`).join('');
+          const openTags = layoutBlobs.map((_,i)=> `<L${i} {params} {data}>`).join('');
           const closeTags = layoutBlobs.map((_,i)=> `</L${layoutBlobs.length-1 - i}>`).join('');
           const wrapperSource = `<script>\n${imports.join('\n')}\nexport let params;\nexport let data;\n</script>\n${openTags}<Page {params} {data}/> ${closeTags}`;
           // Compilation dynamique client

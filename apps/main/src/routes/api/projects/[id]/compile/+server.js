@@ -147,9 +147,9 @@ export async function POST(event){
       // Générer code wrapper Svelte (imports vers chemins originaux, réécrits côté client en blob URLs)
       const imports = [`import Page from '${pagePath}';`];
       layouts.forEach((l,i)=> imports.push(`import L${i} from '${l}';`));
-      const openTags = layouts.map((_,i)=> `<L${i} {params}>`).join('');
-      const closeTags = layouts.map((_,i)=> `</L${layouts.length-1 - i}>`).join('');
-  const wrapperSource = `<script>\n${imports.join('\n')}\nexport let params;\nexport let data;\n</script>\n${openTags.replace(/>$/,' {data}>')}<Page {params} {data}/> ${closeTags}`;
+  const openTags = layouts.map((_,i)=> `<L${i} {params} {data}>`).join('');
+  const closeTags = layouts.map((_,i)=> `</L${layouts.length-1 - i}>`).join('');
+  const wrapperSource = `<script>\n${imports.join('\n')}\nexport let params;\nexport let data;\n</script>\n${openTags}<Page {params} {data}/> ${closeTags}`;
       const cWrap = compile(wrapperSource, { generate:'dom', format:'esm', filename:`__wrapper__${pattern}.svelte` });
       const codes = layouts.map(l=> projectFiles[l]||'').concat(projectFiles[pagePath]||'');
       const hash = hashStr(codes.join('\u0000'));

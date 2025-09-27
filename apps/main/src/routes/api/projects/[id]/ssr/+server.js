@@ -103,10 +103,118 @@ export async function GET(event){
     if(!Wrapper || typeof Wrapper.render !== 'function'){
       return json({ success:false, error:'Wrapper SSR ne fournit pas render()' }, { status:500 });
     }
-    // (Pas de load server ici encore) Data simple
-    const { html, head, css } = Wrapper.render({ params: paramsObj, data: {} });
+    /**
+     * Exécution minimaliste des load() :
+     * - Supporte +layout.server.js / +layout.js / +page.server.js / +page.js
+     * - Chaîne: root layout -> ... -> page
+     * - Pour chaque niveau: server puis universal
+     * - Fusionne props (profondeur écrase profondeur précédente)
+     * Limitations: pas de stuff, status, cookies, setHeaders / redirect natif SvelteKit.
+     */
+
+    function deriveLoadJsFiles(layoutSveltePath){
+      // layoutSveltePath ex: src/routes/blog/+layout.svelte
+      const baseDir = layoutSveltePath.replace(/\/+layout\.svelte$/, '');
+      const filesLocal = [];
+      const serverPath = baseDir + '/+layout.server.js';
+      const uniPath = baseDir + '/+layout.js';
+      if(files[serverPath]) filesLocal.push({ type:'layout-server', file: serverPath });
+      if(files[uniPath]) filesLocal.push({ type:'layout-universal', file: uniPath });
+      return filesLocal;
+    }
+    function derivePageJsFiles(pageSveltePath){
+      const baseDir = pageSveltePath.replace(/\/+page\.svelte$/, '');
+      const out = [];
+      const serverPath = baseDir + '/+page.server.js';
+      const uniPath = baseDir + '/+page.js';
+      if(files[serverPath]) out.push({ type:'page-server', file: serverPath });
+      if(files[uniPath]) out.push({ type:'page-universal', file: uniPath });
+      return out;
+    }
+
+    // Construction de la chaîne ordonnée
+    const loadLayers = [];
+    for(const l of layouts){
+      loadLayers.push({ kind:'layout', svelte:l, js: deriveLoadJsFiles(l) });
+    }
+    loadLayers.push({ kind:'page', svelte: match, js: derivePageJsFiles(match) });
+
+    function buildLoadModule(code){
+      // Transformations basiques ESM -> fonction isolée
+      let transformed = code
+        .replace(/export\s+async\s+function\s+load/,'async function load')
+        .replace(/export\s+function\s+load/,'function load')
+        .replace(/export\s+const\s+load\s*=\s*/,'const load = ')
+        .replace(/export\s*{\s*load\s*};?/,'');
+      // Expose load via module.exports
+      transformed += '\nif (typeof load!=="undefined") module.exports.load = load;';
+      const module = { exports:{} };
+      try {
+        const fn = new Function('module','exports', transformed);
+        fn(module, module.exports);
+        return module.exports.load || null;
+      } catch(e){
+        return { __error: e.message };
+      }
+    }
+
+    async function runWithTimeout(fn, arg, ms=2000){
+      return await Promise.race([
+        Promise.resolve().then(()=> fn(arg)),
+        new Promise((_,rej)=> setTimeout(()=> rej(new Error('load timeout '+ ms+'ms')), ms))
+      ]);
+    }
+
+    const mergedData = {};
+    const debugLoads = [];
+    for(const layer of loadLayers){
+      for(const entry of layer.js){
+        const source = files[entry.file];
+        const loadFn = buildLoadModule(source);
+        if(!loadFn){
+          debugLoads.push({ file: entry.file, skipped:'no load' });
+          continue;
+        }
+        if(loadFn.__error){
+          debugLoads.push({ file: entry.file, error: loadFn.__error });
+          continue;
+        }
+        const phase = entry.type.includes('server') ? 'server' : 'universal';
+        const previousSnapshot = { ...mergedData };
+        const loadEvent = {
+          params: paramsObj,
+          routeId: targetPath,
+          url: new URL(targetPath, url.origin),
+          fetch: fetch,
+            parent: async ()=> previousSnapshot,
+          // Placeholders
+          depends(){},
+          setHeaders(){},
+          cookies: { get(){}, set(){}, delete(){} }
+        };
+        try {
+          const r = await runWithTimeout(loadFn, loadEvent, 3000);
+          if(r && typeof r === 'object'){
+            if(r.redirect){
+              return json({ success:false, redirect:r.redirect, location:r.location || r.redirect, from: entry.file });
+            }
+            if(r.error){
+              return json({ success:false, error:'load error', detail:r.error, from: entry.file, status:r.status||500 }, { status: r.status||500 });
+            }
+            if(r.props && typeof r.props === 'object'){
+              Object.assign(mergedData, r.props);
+            }
+          }
+          debugLoads.push({ file: entry.file, phase, ok:true });
+        } catch(e){
+          debugLoads.push({ file: entry.file, phase, error:e.message });
+        }
+      }
+    }
+
+    const { html, head, css } = Wrapper.render({ params: paramsObj, data: mergedData });
     const total = Date.now()-started;
-    return json({ success:true, html, head, css: css?.code || '', styles: wrapperCss, route: targetPath, dynamic: isDynamic, params: paramsObj, timings:{ total } });
+    return json({ success:true, html, head, css: css?.code || '', styles: wrapperCss, route: targetPath, dynamic: isDynamic, params: paramsObj, data: mergedData, loads: debugLoads, timings:{ total } });
   } catch(e){
     return json({ success:false, error:e.message }, { status:500 });
   }
