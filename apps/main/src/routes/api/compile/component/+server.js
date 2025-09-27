@@ -261,7 +261,15 @@ export async function POST({ request }) {
       (meta.libStubs.length ? `\n<!--missing-lib-components:${meta.libStubs.join(',')}-->`:'')+
       (depErrors.length ? `\n<!--dependency-errors:${depErrors.map(d=> d.dep+':'+d.error).join('|')}-->`:'');
 
-    const importMap = domJsCode && /svelte\/internal/.test(domJsCode) ? `\n<script type="importmap">{"imports":{"svelte/internal":"https://cdn.jsdelivr.net/npm/svelte@4.2.0/internal/index.js"}}</script>` : '';
+    // Import map étendu: couvrir sous-chemins svelte/internal/* requis par hydratation (ex: disclose-version)
+    const importMap = domJsCode && /svelte\/internal/.test(domJsCode)
+      ? `\n<script type="importmap">${JSON.stringify({
+          imports: {
+            'svelte/internal': 'https://cdn.jsdelivr.net/npm/svelte@4.2.0/internal/index.js',
+            'svelte/internal/': 'https://cdn.jsdelivr.net/npm/svelte@4.2.0/internal/'
+          }
+        })}</script>`
+      : '';
     const wrapStart = canRequire ? '<div id="__component_root">' : '<div id="__component_root" data-no-ssr="1">';
     const depCssTag = depCssBlocks.length ? `\n<style data-deps-css="1">${depCssBlocks.join('\n/* --- */\n')}</style>` : '';
     let hydrationScript='';
@@ -272,7 +280,9 @@ export async function POST({ request }) {
     } else if(!canRequire && domCompileError){
       hydrationScript = `<!-- dom compile error: ${domCompileError} -->`;
     }
-    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />\n<script src="https://cdn.tailwindcss.com"></script>${importMap}${depCssTag}${ css?.code ? `\n<style>${css.code}</style>`:'' }${ !css?.code && domCssCode ? `\n<style>${domCssCode}</style>`:''}</head><body class="p-4">${metaComment}\n${wrapStart}${htmlBody}</div>${hydrationScript}</body></html>`;
+  // Pour production: on pourrait retirer le CDN Tailwind; on garde un flag simple (pas d'env server ici, heuristique: ajouter data-cdn-warning pour debug)
+  const tailwindCdn = '<script src="https://cdn.tailwindcss.com" data-cdn="1"></script>';
+  const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />\n${tailwindCdn}${importMap}${depCssTag}${ css?.code ? `\n<style>${css.code}</style>`:'' }${ !css?.code && domCssCode ? `\n<style>${domCssCode}</style>`:''}</head><body class="p-4">${metaComment}\n${wrapStart}${htmlBody}</div>${hydrationScript}</body></html>`;
 
     if(debug){ if(debugStages) debugStages.finalSource = source; return json({ success:true, html, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages }); }
 
