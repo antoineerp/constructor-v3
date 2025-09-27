@@ -106,26 +106,56 @@ export async function POST({ request }) {
   source = rewriteLibImports(source, meta, dependencies);
   source = injectUnknownComponentPlaceholders(source, meta);
 
-  // Compilation des dépendances Svelte fournies (multi-fichier)
-  const depRegistry = new Map(); // path -> module exports
-  const depErrors = [];
-  const depSources = Object.entries(dependencies).filter(([p])=> p.endsWith('.svelte'));
-  for(const [depPath, depCode] of depSources){
-    try {
-      const c = compile(depCode, { generate:'ssr', hydratable:true, format:'cjs', filename: depPath });
-      const modFunc = new Function('module','exports','require', c.js.code);
-      const module = { exports:{} };
-      // local require placeholder (sera patched plus tard si nécessaire)
-      modFunc(module, module.exports, (spec)=>{
-        if(spec === 'svelte/internal') return (typeof require !== 'undefined'? require: createRequire(import.meta.url))('svelte/internal');
-        return {}; // pas de résolution imbriquée pour l'instant
-      });
-      depRegistry.set(depPath, module.exports);
-    } catch(e){ depErrors.push({ dep: depPath, error: e.message }); }
-  }
+    // ---------- Sandbox & transformation ESM -> pseudo-CJS pour SSR ----------
+    function transformEsmToCjs(ssrCode){
+      // Remplacer imports par require / __import
+      return ssrCode
+        .replace(/import\s+([^;]+?)\s+from\s+["']svelte\/internal["'];?/g, (m, clause)=>{
+          return `const ${clause.trim()} = require("svelte/internal");`;
+        })
+        .replace(/import\s+([^;]+?)\s+from\s+["']([^"']+\.svelte)["'];?/g, (m, clause, spec)=>{
+          // Simpliste: default + named
+          let out = '';
+          if(/\{/.test(clause)){
+            // possible default + named
+            // Extraire default part
+            const defMatch = clause.match(/^([A-Za-z0-9_]+)\s*,/);
+            const namedMatch = clause.match(/\{([^}]+)\}/);
+            if(defMatch){
+              out += `const ${defMatch[1]} = __import("${spec}").default;`;
+            }
+            if(namedMatch){
+              out += `const { ${namedMatch[1]} } = __import("${spec}");`;
+            }
+            return out;
+          }
+          if(/^\{/.test(clause.trim())){
+            return `const ${clause.trim()} = __import("${spec}");`;
+          }
+            // default only
+          return `const ${clause.trim()} = __import("${spec}").default;`;
+        })
+        .replace(/export\s+default\s+/g, 'module.exports.default = ')
+        .replace(/export\s+\{([^}]+)\};?/g, (m, names)=>{
+          return names.split(',').map(n=> n.trim()).filter(Boolean).map(n=> `module.exports.${n.replace(/\sas\s.+$/,'')} = ${n.split(/\sas\s/)[0].trim()};`).join('\n');
+        });
+    }
+
+    // Compile & store dependency transformed code (lazy executed)
+    const depRegistry = new Map(); // path -> { factory, exports }
+    const depErrors = [];
+    const depSources = Object.entries(dependencies).filter(([p])=> p.endsWith('.svelte'));
+    for(const [depPath, depCode] of depSources){
+      try {
+        const c = compile(depCode, { generate:'ssr', hydratable:true, filename: depPath });
+        const transformed = transformEsmToCjs(c.js.code);
+        const factory = new Function('module','exports','require','__import', transformed + '\n;');
+        depRegistry.set(depPath, { factory, exports:null });
+      } catch(e){ depErrors.push({ dep: depPath, error: e.message }); }
+    }
   let compiled;
     try {
-  compiled = compile(source, { generate: 'ssr', hydratable: true, format:'cjs' });
+  compiled = compile(source, { generate: 'ssr', hydratable: true });
     } catch (e) {
       return json({ success:false, error:'Erreur compilation: '+e.message }, { status:400 });
     }
@@ -134,7 +164,7 @@ export async function POST({ request }) {
     // Préparer une version DOM pour hydratation (format ESM pour import dynamique)
     let domJsCode = null; let domCompileError = null; let domCssCode='';
     try {
-      const domCompiled = compile(source, { generate:'dom', hydratable:true, format:'esm' });
+      const domCompiled = compile(source, { generate:'dom', hydratable:true });
       domJsCode = domCompiled.js.code; domCssCode = domCompiled.css?.code || '';
     } catch(e){ domCompileError = e.message; }
     // Création d'un require compatible dans un contexte ESM
@@ -153,29 +183,43 @@ export async function POST({ request }) {
         function createStub(spec){
           return { default: { render: () => ({ html: `<span data-missing-module=\"${spec.replace(/"/g,'&quot;')}\"></span>` }) } };
         }
-        const moduleFunc = new Function('module','exports','require', js.code);
-        const module = { exports: {} };
-        function resolveDep(spec){
-          // Alias $lib
-          if(spec.startsWith('$lib/')){
-            const mapped = 'src/lib/' + spec.slice(5) + (spec.endsWith('.svelte')?'': (spec.endsWith('.js')?'':'.svelte'));
-            if(depRegistry.has(mapped)) return depRegistry.get(mapped);
-          }
-          // Direct key
-            if(depRegistry.has(spec)) return depRegistry.get(spec);
-          // Relative (approx: join with virtual root 'src')
-          if(spec.startsWith('./') || spec.startsWith('../')){
-            // Suppose main file is 'Main.svelte' at root; essayer avec src/lib/ etc impossible -> fallback stub
-            for(const k of depRegistry.keys()){
-              if(k.endsWith(spec.replace(/^\.\//,''))) return depRegistry.get(k);
+        const transformed = transformEsmToCjs(js.code);
+        const module = { exports:{} };
+        function execFactory(factory){
+          factory(module, module.exports, (spec)=>{
+            if(spec === 'svelte/internal') return localRequire('svelte/internal');
+            if(spec.startsWith('$lib/')){
+              const mapped = 'src/lib/' + spec.slice(5) + (spec.endsWith('.svelte')?'': (spec.endsWith('.js')?'':'.svelte'));
+              if(depRegistry.has(mapped)){
+                const entry = depRegistry.get(mapped);
+                if(!entry.exports){ entry.exports = {}; execFactory(entry.factory); }
+                return entry.exports;
+              }
+              return createStub(spec);
             }
-          }
-          try { return localRequire(spec); } catch(_e){ return createStub(spec); }
+            if(depRegistry.has(spec)){
+              const entry = depRegistry.get(spec); if(!entry.exports){ entry.exports = {}; execFactory(entry.factory); } return entry.exports;
+            }
+            // relative speculative resolution
+            if(spec.startsWith('./') || spec.startsWith('../')){
+              for(const k of depRegistry.keys()) if(k.endsWith(spec.replace(/^\.\//,''))){ const entry = depRegistry.get(k); if(!entry.exports){ entry.exports = {}; execFactory(entry.factory); } return entry.exports; }
+            }
+            try { return localRequire(spec); } catch(_e){ return createStub(spec); }
+          }, (spec)=>{ // __import pour .svelte transformées
+            if(depRegistry.has(spec)){
+              const entry = depRegistry.get(spec); if(!entry.exports){ entry.exports = {}; execFactory(entry.factory); } return entry.exports;
+            }
+            if(spec.startsWith('$lib/')){
+              const mapped = 'src/lib/' + spec.slice(5) + (spec.endsWith('.svelte')?'':'.svelte');
+              if(depRegistry.has(mapped)){
+                const entry = depRegistry.get(mapped); if(!entry.exports){ entry.exports = {}; execFactory(entry.factory); } return entry.exports;
+              }
+            }
+            return createStub(spec);
+          });
         }
-        moduleFunc(module, module.exports, (name)=>{
-          if(name === 'svelte/internal') return localRequire('svelte/internal');
-          return resolveDep(name);
-        });
+        const rootFactory = new Function('module','exports','require','__import', transformed + '\n;');
+        execFactory(rootFactory);
         Component = module.exports.default || module.exports;
         if(!Component || typeof Component.render !== 'function') throw new Error('render() absent');
       } catch(e){
