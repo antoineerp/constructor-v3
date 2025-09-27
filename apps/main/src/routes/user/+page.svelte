@@ -244,6 +244,14 @@
       } else {
         repairMessage = 'Réparation appliquée (validation indisponible).';
       }
+      // Forcer rafraîchissement preview si l'onglet est actif
+      if(activeView === 'preview-ssr') {
+        compileCache.delete(appSelectedFile);
+        compileSelected();
+      } else if(activeView === 'preview-interactive') {
+        interactiveCache.delete(appSelectedFile);
+        buildInteractive();
+      }
     } catch(e){ repairMessage = e.message; }
     finally { repairing = false; }
   }
@@ -274,6 +282,13 @@
       } else {
         autoRepairMessage = `Auto-réparation réussie en ${data.passes} passe(s)`;
       }
+      if(activeView === 'preview-ssr') {
+        compileCache.delete(appSelectedFile);
+        compileSelected();
+      } else if(activeView === 'preview-interactive') {
+        interactiveCache.delete(appSelectedFile);
+        buildInteractive();
+      }
     } catch(e){
       autoRepairMessage = e.message;
     } finally { autoRepairing = false; }
@@ -300,6 +315,10 @@
             const vData = await vRes.json();
             if(vData.success && vData.validation) appValidation[f] = vData.validation;
           } catch(e){ /* ignore */ }
+          if(f === appSelectedFile){
+            if(activeView === 'preview-ssr') { compileCache.delete(f); compileSelected(); }
+            else if(activeView === 'preview-interactive') { interactiveCache.delete(f); buildInteractive(); }
+          }
         } else {
           bulkMessage += `\n${f}: échec (${data.error})`;
         }
@@ -329,7 +348,8 @@
     finally { compiling = false; }
   }
 
-  $: if(activeView === 'render' && appSelectedFile?.endsWith('.svelte')) {
+  // Mise à jour automatique prévisualisation SSR quand onglet actif
+  $: if(activeView === 'preview-ssr' && appSelectedFile?.endsWith('.svelte')) {
     // Charger depuis cache sinon compiler
     if(compileCache.has(appSelectedFile)) {
       compileUrl = compileCache.get(appSelectedFile);
@@ -382,7 +402,8 @@
     finally { interactiveLoading = false; }
   }
 
-  $: if(activeView === 'interactive' && appSelectedFile?.endsWith('.svelte')) {
+  // Mise à jour automatique prévisualisation interactive quand onglet actif
+  $: if(activeView === 'preview-interactive' && appSelectedFile?.endsWith('.svelte')) {
     if(interactiveCache.has(appSelectedFile)) interactiveUrl = interactiveCache.get(appSelectedFile).url; else if(!interactiveLoading) buildInteractive();
   }
 </script>

@@ -35,8 +35,6 @@ declare module '$env/static/private' {
 	export const npm_node_execpath: string;
 	export const HOME: string;
 	export const VSCODE_IPC_HOOK_CLI: string;
-	export const npm_package_devDependencies_eslint_config_prettier: string;
-	export const npm_package_devDependencies_eslint_plugin_svelte: string;
 	export const VSCODE_GIT_ASKPASS_MAIN: string;
 	export const npm_package_devDependencies_svelte_check: string;
 	export const VSCODE_GIT_ASKPASS_NODE: string;
@@ -46,7 +44,6 @@ declare module '$env/static/private' {
 	export const npm_package_devDependencies_typescript: string;
 	export const npm_package_devDependencies_tailwindcss: string;
 	export const npm_package_scripts_dev: string;
-	export const npm_package_devDependencies_prettier: string;
 	export const npm_package_type: string;
 	export const npm_package_private: string;
 	export const npm_package_scripts_check_watch: string;
@@ -73,7 +70,6 @@ declare module '$env/static/private' {
 	export const NODE_PATH: string;
 	export const npm_package_scripts_build: string;
 	export const npm_package_devDependencies_svelte: string;
-	export const npm_package_devDependencies_globals: string;
 	export const VSCODE_GIT_ASKPASS_EXTRA_ARGS: string;
 	export const npm_package_scripts_format: string;
 	export const PWD: string;
@@ -83,8 +79,6 @@ declare module '$env/static/private' {
 	export const npm_command: string;
 	export const PNPM_SCRIPT_SRC_DIR: string;
 	export const npm_package_scripts_preview: string;
-	export const npm_package_devDependencies_prettier_plugin_svelte: string;
-	export const npm_package_devDependencies__types_eslint: string;
 	export const INIT_CWD: string;
 	export const NODE_ENV: string;
 }
@@ -125,8 +119,6 @@ declare module '$env/dynamic/private' {
 		npm_node_execpath: string;
 		HOME: string;
 		VSCODE_IPC_HOOK_CLI: string;
-		npm_package_devDependencies_eslint_config_prettier: string;
-		npm_package_devDependencies_eslint_plugin_svelte: string;
 		VSCODE_GIT_ASKPASS_MAIN: string;
 		npm_package_devDependencies_svelte_check: string;
 		VSCODE_GIT_ASKPASS_NODE: string;
@@ -136,7 +128,6 @@ declare module '$env/dynamic/private' {
 		npm_package_devDependencies_typescript: string;
 		npm_package_devDependencies_tailwindcss: string;
 		npm_package_scripts_dev: string;
-		npm_package_devDependencies_prettier: string;
 		npm_package_type: string;
 		npm_package_private: string;
 		npm_package_scripts_check_watch: string;
@@ -163,7 +154,6 @@ declare module '$env/dynamic/private' {
 		NODE_PATH: string;
 		npm_package_scripts_build: string;
 		npm_package_devDependencies_svelte: string;
-		npm_package_devDependencies_globals: string;
 		VSCODE_GIT_ASKPASS_EXTRA_ARGS: string;
 		npm_package_scripts_format: string;
 		PWD: string;
@@ -173,8 +163,6 @@ declare module '$env/dynamic/private' {
 		npm_command: string;
 		PNPM_SCRIPT_SRC_DIR: string;
 		npm_package_scripts_preview: string;
-		npm_package_devDependencies_prettier_plugin_svelte: string;
-		npm_package_devDependencies__types_eslint: string;
 		INIT_CWD: string;
 		NODE_ENV: string;
 		[key: `PUBLIC_${string}`]: undefined;

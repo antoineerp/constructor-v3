@@ -73,14 +73,19 @@ function mapSeverity(num) {
 }
 
 export async function validateFiles(files) {
+  // Filtrer strictement les fichiers Svelte pour compilation/validation
+  const svelteFiles = Object.entries(files).filter(([filename]) => filename.endsWith('.svelte'))
+    .reduce((acc, [filename, val]) => { acc[filename] = val; return acc; }, {});
   // Pré-formatage global (rapide, parallélisé) avant lint/compile
   if (formatFilesFn) {
     try {
-      const { files: formattedAll } = await formatFilesFn(files);
+      const { files: formattedAll } = await formatFilesFn(svelteFiles);
       files = formattedAll;
     } catch(e) {
       console.warn('[validator] formatFiles.mjs a échoué (continuation sans pré-format):', e.message);
     }
+  } else {
+    files = svelteFiles;
   }
   const result = {};
   const eslint = await getEslint();

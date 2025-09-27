@@ -58,10 +58,27 @@ export function extractJson(raw, { allowArrays = true } = {}) {
 
 function tryParse(str, allowArrays){
   try {
-    const data = JSON.parse(str);
-    if (!allowArrays && Array.isArray(data)) return { ok:false, error:'Un objet JSON était attendu (pas un tableau).' };
-    if (typeof data !== 'object' || data === null) return { ok:false, error:'Structure JSON inattendue.' };
-    return { ok:true, data };
+    // Première tentative brute
+    try {
+      const data = JSON.parse(str);
+      if (!allowArrays && Array.isArray(data)) return { ok:false, error:'Un objet JSON était attendu (pas un tableau).' };
+      if (typeof data !== 'object' || data === null) return { ok:false, error:'Structure JSON inattendue.' };
+      return { ok:true, data };
+    } catch(inner){
+      // Réparation ciblée des séquences d'échappement invalides (ex: \_, \ , \X inattendu)
+      const repaired = repairEscapes(str);
+      if (repaired !== str){
+        try {
+          const data2 = JSON.parse(repaired);
+          if (!allowArrays && Array.isArray(data2)) return { ok:false, error:'Un objet JSON était attendu (pas un tableau).' };
+          if (typeof data2 !== 'object' || data2 === null) return { ok:false, error:'Structure JSON inattendue.' };
+          return { ok:true, data: data2 };
+        } catch(inner2){
+          return { ok:false, error: inner2.message };
+        }
+      }
+      return { ok:false, error: inner.message };
+    }
   } catch(e){
     return { ok:false, error: e.message };
   }
@@ -81,4 +98,30 @@ function extractBalancedBraces(text){
 // Helper pour marquer un prompt d'enveloppe JSON
 export function withJsonEnvelope(instructions){
   return `${instructions}\nRespecte STRICTEMENT le format:\n<<<JSON_START>>>\n{ ... }\n<<<JSON_END>>>`;
+}
+
+// Tente de corriger des séquences d'échappement invalides fréquentes produites par le modèle.
+// Stratégies:
+// 1. Remplacer les backslashes isolés avant caractères non reconnus par double échappement (\\) ou retrait.
+// 2. Corriger \_ -> _ (souvent un artefact Markdown) ou \- -> -.
+// 3. Échapper les guillemets non échappés à l'intérieur de chaînes détectées heuristiquement si cela casse la parité.
+function repairEscapes(input){
+  let out = input;
+  // Remplacements simples d'artefacts Markdown
+  out = out.replace(/\\([_-])/g, '$1');
+  // Backslash suivi d'espace ou fin de ligne -> retirer backslash
+  out = out.replace(/\\(\s)/g, '$1');
+  // Backslash devant un caractère alphanumérique qui n'est pas une séquence JSON valide -> supprimer backslash
+  out = out.replace(/\\([A-Za-z0-9])(?![\\"\/bfnrtu0-9A-Fa-f])/g, '$1');
+  // Séquences \" correctes on ne touche pas. Mais détecter \” typographiques et les normaliser
+  out = out.replace(/\\[“”]/g, '"');
+  // Corriger guillemets courbes non échappés
+  out = out.replace(/[“”]/g, '"');
+  // Vérifier équilibre global des quotes: si impair, tenter d'échapper les quotes internes non précédées d'un backslash dans des segments suspects
+  const quoteCount = (out.match(/"/g) || []).length;
+  if (quoteCount % 2 === 1){
+    // Heuristique: remplacer "? dans : "value"value" -> insérer backslash avant deuxième
+    out = out.replace(/:(\s*)"([^"\\]*?)"([^,}\n"])/g, (_m, ws, val, tail) => `:${ws}"${val}\\"${tail}`);
+  }
+  return out;
 }

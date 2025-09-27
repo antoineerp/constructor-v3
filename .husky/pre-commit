@@ -1,0 +1,5 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Lint & format uniquement sur ce qui est stagé via lint-staged
+npx lint-staged
