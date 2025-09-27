@@ -109,36 +109,45 @@ export async function POST({ request }) {
     // ---------- Sandbox & transformation ESM -> pseudo-CJS pour SSR ----------
     function transformEsmToCjs(ssrCode){
       // Remplacer imports par require / __import
-      return ssrCode
-        .replace(/import\s+([^;]+?)\s+from\s+["']svelte\/internal["'];?/g, (m, clause)=>{
-          return `const ${clause.trim()} = require("svelte/internal");`;
-        })
+      let out = ssrCode
+        .replace(/import\s+([^;]+?)\s+from\s+["']svelte\/internal["'];?/g, (m, clause)=> `const ${clause.trim()} = require("svelte/internal");`)
         .replace(/import\s+([^;]+?)\s+from\s+["']([^"']+\.svelte)["'];?/g, (m, clause, spec)=>{
-          // Simpliste: default + named
-          let out = '';
+          let seg='';
           if(/\{/.test(clause)){
-            // possible default + named
-            // Extraire default part
             const defMatch = clause.match(/^([A-Za-z0-9_]+)\s*,/);
             const namedMatch = clause.match(/\{([^}]+)\}/);
-            if(defMatch){
-              out += `const ${defMatch[1]} = __import("${spec}").default;`;
-            }
-            if(namedMatch){
-              out += `const { ${namedMatch[1]} } = __import("${spec}");`;
-            }
-            return out;
+            if(defMatch) seg += `const ${defMatch[1]} = __import("${spec}").default;`;
+            if(namedMatch) seg += `const { ${namedMatch[1]} } = __import("${spec}");`;
+            return seg;
           }
-          if(/^\{/.test(clause.trim())){
-            return `const ${clause.trim()} = __import("${spec}");`;
-          }
-            // default only
+          if(/^\{/.test(clause.trim())) return `const ${clause.trim()} = __import("${spec}");`;
           return `const ${clause.trim()} = __import("${spec}").default;`;
         })
+        // Imports JS/TS classiques -> require
+        .replace(/import\s+([^;]+?)\s+from\s+["']([^"']+\.(?:js|ts))["'];?/g, (m, clause, spec)=>{
+          // default + named
+            if(/\{/.test(clause)){
+              const defMatch = clause.match(/^([A-Za-z0-9_]+)\s*,/);
+              const namedMatch = clause.match(/\{([^}]+)\}/);
+              let seg='';
+              if(defMatch) seg += `const ${defMatch[1]} = require("${spec}").default || require("${spec}");`;
+              if(namedMatch) seg += `const { ${namedMatch[1]} } = require("${spec}");`;
+              return seg;
+            }
+            if(/^\{/.test(clause.trim())) return `const ${clause.trim()} = require("${spec}");`;
+            return `const ${clause.trim()} = require("${spec}").default || require("${spec}");`;
+        })
+        // Import espace de noms: import * as X from '...'
+        .replace(/import\s+\*\s+as\s+([A-Za-z0-9_]+)\s+from\s+["']([^"']+)["'];?/g, (m, ns, spec)=> `const ${ns} = require("${spec}");`)
+        // Imports side-effect: import '...';
+        .replace(/import\s+["']([^"']+)["'];?/g, (m, spec)=> `require("${spec}");`)
         .replace(/export\s+default\s+/g, 'module.exports.default = ')
-        .replace(/export\s+\{([^}]+)\};?/g, (m, names)=>{
-          return names.split(',').map(n=> n.trim()).filter(Boolean).map(n=> `module.exports.${n.replace(/\sas\s.+$/,'')} = ${n.split(/\sas\s/)[0].trim()};`).join('\n');
-        });
+        .replace(/export\s+\{([^}]+)\};?/g, (m, names)=> names.split(',').map(n=> n.trim()).filter(Boolean).map(n=> `module.exports.${n.replace(/\sas\s.+$/,'')} = ${n.split(/\sas\s/)[0].trim()};`).join('\n'));
+      // Dernière passe: si reste un "import " (non géré), commenter pour éviter crash
+      if(/\bimport\s+/.test(out)){
+        out = out.replace(/^\s*import\s+.*$/gm, '// __REMOVED_IMPORT__');
+      }
+      return out;
     }
 
     // Compile & store dependency transformed code (lazy executed)
