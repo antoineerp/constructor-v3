@@ -341,7 +341,42 @@ export async function POST({ request }) {
             }
           }
           if(typeof Component.render !== 'function'){
-            throw new Error('render() absent (shape='+ (typeof Component) +')');
+            // Dernier filet de sécurité: on enveloppe toute fonction/classe inconnue
+            const originalShape = typeof Component;
+            const fnRef = Component;
+            fallbackUsed = true;
+            Component = {
+              render: (props)=>{
+                try {
+                  // 1. Essai direct (fonction simple qui retourne string / { html } )
+                  if(typeof fnRef === 'function'){
+                    let out;
+                    try { out = fnRef(props||{}); } catch(_e1) { /* ignore première tentative */ }
+                    // 2. Essai instanciation (class component)
+                    if(!out){
+                      try { const inst = new fnRef(props||{}); if(inst){
+                        if(typeof inst.$$render === 'function') {
+                          try { return { html: inst.$$render({}, props||{}, {}, {}) }; } catch(e){ return { html: `<pre data-render-error>inst $$render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; }
+                        }
+                        if(typeof inst.render === 'function'){
+                          try { const r = inst.render(); if(typeof r === 'string') return { html: r }; if(r && typeof r.html === 'string') return { html: r.html }; } catch(e){ return { html: `<pre data-render-error>inst render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; }
+                        }
+                      } } catch(_e2){ /* ignore instanciation */ }
+                    }
+                    if(out){
+                      if(typeof out === 'string') return { html: out };
+                      if(out && typeof out.html === 'string') return { html: out.html };
+                      if(out && typeof out.$$render === 'function'){
+                        try { return { html: out.$$render({}, props||{}, {}, {}) }; } catch(e){ return { html: `<pre data-render-error>out $$render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; }
+                      }
+                    }
+                  }
+                  return { html: `<div data-fallback-wrapper class=\"text-xs text-amber-600 font-mono p-2 border border-dashed border-amber-400 rounded bg-amber-50\">SSR fallback wrapper (shape=${originalShape}) sans méthode render/$$render détectable.</div>` };
+                } catch(e){
+                  return { html: `<pre data-render-error>ultimate fallback error: ${e.message.replace(/</g,'&lt;')}</pre>` };
+                }
+              }
+            };
           }
         }
         if(fallbackUsed){ globalThis.__LAST_SSR_FALLBACK__ = true; } else { globalThis.__LAST_SSR_FALLBACK__ = false; }
