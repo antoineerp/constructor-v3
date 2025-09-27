@@ -26,6 +26,33 @@
   const interactiveCache = new Map(); // filename -> { url, ts }
   let interactiveUrl = '';
   let interactiveLoading = false;
+  let stubbedComponents = []; // liste des composants stub détectés (SSR preview)
+  let generatingStub = null; // nom du composant en cours de génération
+
+  async function generateStubComponent(name){
+    if(!name || generatingStub) return;
+    generatingStub = name;
+    try {
+      const prompt = `Crée un composant Svelte réutilisable simple nommé ${name} avec un léger style Tailwind. Expose des props pertinentes si nécessaire.`;
+      const res = await fetch('/api/generate/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, prompt }) });
+      let data; try { data = await res.json(); } catch(_e){ data=null; }
+      if(!data || !data.success || !data.code){ throw new Error(data?.error||'Generation API échouée'); }
+      // Injecter le nouveau fichier dans appFiles (s'il y a une arborescence lib/components)
+      const filename = `src/lib/components/${name}.svelte`;
+      appFiles = { ...appFiles, [filename]: data.code };
+      // Déclencher revalidation basique via endpoint repair
+      try {
+        const vRes = await fetch('/api/repair', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename, code: data.code, diagnostics: [] }) });
+        const vData = await vRes.json();
+        if(vData.success && vData.validation){
+          appValidation = { ...(appValidation||{}), [filename]: vData.validation };
+        }
+      } catch(_e){ /* ignore */ }
+      selectFile(filename);
+      activeView='code';
+    } catch(e){ appError = 'Génération composant '+name+': '+e.message; }
+    finally { generatingStub = null; }
+  }
   let showDiagnostics = true;
   let repairing = false;
   let repairMessage = '';
@@ -418,6 +445,24 @@
     }
   }
 
+  // Surveiller les changements d'URL de compilation pour extraire meta comment des composants manquants
+  $: if(compileUrl && compileUrl.startsWith('blob:')) {
+    // Fetch léger du blob pour inspecter meta comment (limite 10kb)
+    (async () => {
+      try {
+        const res = await fetch(compileUrl);
+        const text = await res.text();
+        const m = text.match(/<!--missing-components:([^>]+)-->/);
+        if(m){
+          const list = m[1].split(',').map(s=> s.trim()).filter(Boolean);
+          stubbedComponents = list;
+        } else {
+          stubbedComponents = [];
+        }
+      } catch(_e){ /* ignore */ }
+    })();
+  }
+
   async function buildInteractive() {
     if(!appSelectedFile || !appSelectedFile.endsWith('.svelte')) { interactiveUrl=''; return; }
     if(interactiveCache.has(appSelectedFile)) { interactiveUrl = interactiveCache.get(appSelectedFile).url; return; }
@@ -753,7 +798,25 @@
                 {:else if compileUrl && compileUrl.startsWith('error:')}
                   <div class="p-4 text-xs text-red-600 bg-red-50 h-full overflow-auto">{compileUrl.slice(6)}</div>
                 {:else if compileUrl}
-                  <iframe title="Rendu SSR" src={compileUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
+                    <div class="w-full h-full">
+                      <iframe title="Rendu SSR" src={compileUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
+                      {#if stubbedComponents.length}
+                        <div class="absolute top-2 right-2 max-w-xs text-[10px] bg-amber-50 border border-amber-300 text-amber-800 rounded shadow p-2 space-y-1">
+                          <div class="font-semibold flex items-center gap-1"><i class="fas fa-puzzle-piece"></i> Composants stubés</div>
+                          <ul class="space-y-0.5">
+                            {#each stubbedComponents as sc}
+                              <li class="flex items-center justify-between gap-2 bg-white/60 rounded px-1 py-0.5 border border-amber-200" title={sc}>
+                                <span class="truncate">{sc}</span>
+                                <button class="px-1.5 py-0.5 rounded bg-amber-600 hover:bg-amber-500 text-white text-[9px] disabled:opacity-50" disabled={generatingStub && generatingStub!==sc} on:click={()=> generateStubComponent(sc)}>
+                                  {#if generatingStub===sc}<i class="fas fa-spinner fa-spin"></i>{:else}<i class="fas fa-wand-magic-sparkles"></i>{/if}
+                                </button>
+                              </li>
+                            {/each}
+                          </ul>
+                          <div class="text-[9px] text-amber-600">Clique pour générer automatiquement.</div>
+                        </div>
+                      {/if}
+                    </div>
                 {/if}
               {/if}
             </div>

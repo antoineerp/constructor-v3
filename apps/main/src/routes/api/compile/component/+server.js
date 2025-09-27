@@ -15,7 +15,7 @@ export async function POST({ request }) {
     })();
 
     // Injecter placeholders pour composants non importés (ex: <ButtonRed />) afin d'éviter SSR vide/bloquant.
-    function injectUnknownComponentPlaceholders(src){
+    function injectUnknownComponentPlaceholders(src, meta){
       // Match balises capitalisées sans import correspondant. Heuristique simple.
       const tagRegex = /<([A-Z][A-Za-z0-9_]*)\b[^>]*>/g; const found = new Set(); let m;
       while((m=tagRegex.exec(src))){ found.add(m[1]); }
@@ -29,7 +29,16 @@ export async function POST({ request }) {
       }
       const toStub = [...found].filter(n=> !imported.has(n));
       if(!toStub.length) return src;
-      const stubLines = toStub.map(n=> `const ${n} = ({children})=>({ $$render:()=> '<span data-missing-component="${n}"></span>' });`);
+      meta.missingComponents = toStub;
+      // Skeleton placeholder markup (accessible + identifiable)
+      const skeletonFor = (name)=> {
+        const label = name.replace(/([a-z])([A-Z])/g,'$1 $2');
+        return `<div class=\"missing-component skeleton border border-dashed border-gray-300 rounded bg-gradient-to-r from-gray-100 via-gray-50 to-gray-100 dark:from-gray-800 dark:via-gray-700 dark:to-gray-800 text-gray-400 text-[10px] inline-flex items-center justify-center px-3 py-1 gap-1 animate-pulse\" data-missing-component=\"${name}\" title=\"Stub auto-généré pour ${label}\">`+
+          `<span class=\"w-2 h-2 rounded-full bg-gray-300/60 dark:bg-gray-600 animate-ping\"></span>`+
+          `<span class=\"font-medium tracking-wide\">${label}</span>`+
+          `</div>`;
+      };
+      const stubLines = toStub.map(n=> `const ${n} = ({children})=>({ $$render:()=> ${JSON.stringify(skeletonFor(n))} });`);
       // Préprend un <script> ou en crée un
       if(/<script[>\s]/.test(src)){
         return src.replace(/<script[>\s][^>]*>/, m=> m + '\n' + stubLines.join('\n'));
@@ -50,7 +59,8 @@ export async function POST({ request }) {
       source = `<script>export let props = {};</script>\n${code}`;
     }
 
-  source = injectUnknownComponentPlaceholders(source);
+  const meta = { missingComponents: [] };
+  source = injectUnknownComponentPlaceholders(source, meta);
   let compiled;
     try {
       compiled = compile(source, { generate: 'ssr', hydratable: true });
@@ -98,7 +108,16 @@ export async function POST({ request }) {
       }
     }
 
-    const metaComment = `<!--component-compile req=${globalThis.__COMP_COMPONENT_COUNT} hash=${codeHash} ts=${Date.now()} mode=${canRequire?'ssr':'edge-fallback'}-->`;
+    const metaParts = [
+      `req=${globalThis.__COMP_COMPONENT_COUNT}`,
+      `hash=${codeHash}`,
+      `ts=${Date.now()}`,
+      `mode=${canRequire?'ssr':'edge-fallback'}`
+    ];
+    if(meta.missingComponents?.length){
+      metaParts.push('missing='+meta.missingComponents.join('|'));
+    }
+    const metaComment = `<!--component-compile ${metaParts.join(' ')}-->` + (meta.missingComponents?.length ? `\n<!--missing-components:${meta.missingComponents.join(',')}-->` : '');
     // Script d'hydratation si SSR OK et domJsCode dispo
     let hydrationScript = '';
     if(canRequire && domJsCode){

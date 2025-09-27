@@ -53,6 +53,10 @@ export function extractJson(raw, { allowArrays = true } = {}) {
     if (parsed.ok) return { ...parsed, rawFragment: braceResult.fragment };
   }
 
+  // Tentative de récupération incrémentale: on essaie d'avancer caractère par caractère jusqu'à obtenir un JSON valide en fermant artificiellement les accolades ouvertes.
+  const incremental = incrementalRecover(text, allowArrays);
+  if(incremental.ok) return { ...incremental, rawFragment: incremental.rawFragment };
+
   return { ok: false, error: direct.error || 'Impossible d\'extraire JSON', rawFragment: original.slice(0,4000) };
 }
 
@@ -107,21 +111,43 @@ export function withJsonEnvelope(instructions){
 // 3. Échapper les guillemets non échappés à l'intérieur de chaînes détectées heuristiquement si cela casse la parité.
 function repairEscapes(input){
   let out = input;
-  // Remplacements simples d'artefacts Markdown
-  out = out.replace(/\\([_-])/g, '$1');
-  // Backslash suivi d'espace ou fin de ligne -> retirer backslash
-  out = out.replace(/\\(\s)/g, '$1');
-  // Backslash devant un caractère alphanumérique qui n'est pas une séquence JSON valide -> supprimer backslash
-  out = out.replace(/\\([A-Za-z0-9])(?![\\"\/bfnrtu0-9A-Fa-f])/g, '$1');
-  // Séquences \" correctes on ne touche pas. Mais détecter \” typographiques et les normaliser
-  out = out.replace(/\\[“”]/g, '"');
-  // Corriger guillemets courbes non échappés
-  out = out.replace(/[“”]/g, '"');
-  // Vérifier équilibre global des quotes: si impair, tenter d'échapper les quotes internes non précédées d'un backslash dans des segments suspects
-  const quoteCount = (out.match(/"/g) || []).length;
-  if (quoteCount % 2 === 1){
-    // Heuristique: remplacer "? dans : "value"value" -> insérer backslash avant deuxième
-    out = out.replace(/:(\s*)"([^"\\]*?)"([^,}\n"])/g, (_m, ws, val, tail) => `:${ws}"${val}\\"${tail}`);
-  }
+  // Normalisation des quotes typographiques + artefacts markdown
+  out = out.replace(/[“”]/g,'"').replace(/\\[“”]/g,'"').replace(/\\([_-])/g,'$1');
+  // Supprimer les backslashes isolés avant espace / fin de ligne
+  out = out.replace(/\\(\s)/g,'$1');
+  // Corriger séquences unicode tronquées (ex: \u12 ) -> retirer backslash pour éviter parse error
+  out = out.replace(/\\u([0-9A-Fa-f]{0,3})([^0-9A-Fa-f])/g, (_m, hex, tail)=> hex.length===4? _m : hex+tail);
+  // Backslash avant caractère non reconnu -> supprimer
+  out = out.replace(/\\(?!["\\\/bfnrtu]|u[0-9A-Fa-f]{4})/g,'');
+  // Fermer potentiellement une chaîne ouverte à la fin si nombre de quotes impair
+  const dq = (out.match(/"/g)||[]).length;
+  if(dq % 2 === 1){ out += '"'; }
+  // Si accolades ouvertes non fermées -> ajouter autant de } que nécessaire (limite sécurité 10)
+  const open = (out.match(/\{/g)||[]).length; const close=(out.match(/\}/g)||[]).length;
+  if(open>close && open-close < 10){ out += '}'.repeat(open-close); }
   return out;
+}
+
+// Récupération incrémentale: on tente de parser des sous-tronçons croissants et on répare dynamiquement.
+function incrementalRecover(text, allowArrays){
+  const start = text.indexOf('{');
+  if(start === -1) return { ok:false, error:'Aucune accolade ouvrante' };
+  let buffer=''; let depth=0; let started=false; const collected=[];
+  for(let i=start;i<text.length;i++){
+    const ch = text[i]; buffer += ch;
+    if(ch === '{'){ depth++; started=true; }
+    else if(ch === '}'){ depth--; }
+    if(started && depth===0){ collected.push(buffer); buffer=''; started=false; }
+  }
+  // Tester chaque fragment, puis version réparée.
+  for(const frag of collected.sort((a,b)=> b.length-a.length)){ // plus longs d'abord
+    const attempt = tryParse(frag, allowArrays);
+    if(attempt.ok) return { ...attempt, rawFragment: frag };
+    const repaired = repairEscapes(frag);
+    if(repaired!==frag){
+      const attempt2 = tryParse(repaired, allowArrays);
+      if(attempt2.ok) return { ...attempt2, rawFragment: repaired };
+    }
+  }
+  return { ok:false, error:'Récupération incrémentale échouée' };
 }
