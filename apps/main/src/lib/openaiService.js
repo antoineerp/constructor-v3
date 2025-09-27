@@ -148,7 +148,7 @@ Retourne uniquement le contenu brut du fichier .svelte.`;
     }
   }
 
-  async generateApplication(prompt, { model = 'gpt-4o-mini', maxFiles = 20, provider='openai', blueprint=null } = {}) {
+  async generateApplication(prompt, { model = 'gpt-4o-mini', maxFiles = 20, provider='openai', blueprint=null, fileAnalyses=null } = {}) {
     if(provider==='claude'){
       if(!this.claudeKey) throw new Error('Clé API Claude manquante');
       const system = `Tu génères une application SvelteKit. Retourne UNIQUEMENT JSON objet { "filename":"CONTENU" }. Max ${maxFiles} fichiers.`;
@@ -191,7 +191,32 @@ Retourne uniquement le contenu brut du fichier .svelte.`;
       } catch(e){ /* ignore retrieval errors */ }
     }
 
+    // Préparer bloc analyses fichiers (images/pdf/texte) si fourni
+    let analysesBlock = '';
+    if(fileAnalyses && Array.isArray(fileAnalyses) && fileAnalyses.length){
+      try {
+        const trimmed = fileAnalyses.slice(0,5).map(a=>{
+          const colors = a.analysis?.colors?.slice?.(0,6) || [];
+          const comps = a.analysis?.components || a.analysis?.objects || [];
+          const summary = a.analysis?.summary || a.analysis?.note || a.analysis?.raw || a.excerpt || '';
+          return {
+            hash: a.hash,
+            kind: a.kind,
+            summary: typeof summary === 'string' ? summary.slice(0,180) : JSON.stringify(summary).slice(0,180),
+            colors,
+            components: comps.slice(0,8)
+          };
+        });
+        analysesBlock = '\n/* ANALYSES_FICHIERS\n' + JSON.stringify(trimmed, null, 2).slice(0,1900) + '\n*/\n';
+      } catch(_e){ /* ignore */ }
+    }
+
     const system = `Tu es un assistant qui génère une application SvelteKit modulaire.
+Si un bloc ANALYSES_FICHIERS est présent (commentaire JS), utilise ses indices pour:
+- orienter la palette (colors) ou compléter blueprint
+- créer 0 à 5 composants réutilisables pertinents (src/lib/components/*)
+- ajuster routes / sections.
+Ne recopie PAS intégralement les résumés ou listes, réutilise l'information de manière synthétique.` + analysesBlock + `
 Chaque fichier .svelte doit être un composant/route Svelte VALIDE avec une balise <script> (sauf cas purement statique évident) exportant éventuellement des props ou définissant un petit état (ex: let items = [...] ; let loading = false). Pas de dépendances externes non demandées. Préfère la réactivité Svelte plutôt que du simple HTML statique.
 Retourne STRICTEMENT un objet JSON (aucun texte hors JSON) où chaque clé est un nom de fichier (chemins relatifs) et chaque valeur son contenu COMPLET.
 Contraintes:
@@ -206,7 +231,7 @@ Contraintes:
 ${componentContext}
 ${retrievalContext}
 `;
-    const enveloped = withJsonEnvelope(`Génère une application basée sur: ${prompt}`);
+    const enveloped = withJsonEnvelope(`Génère une application basée sur: ${prompt}${analysesBlock? '\nInspiration: analyses fichiers fournies (ne pas les répéter textuellement).':''}`);
     const attempt = async (retryIndex=0, lastError=null, lastRaw='') => {
       const body = { model, messages:[{role:'system',content:system},{role:'user',content:enveloped}], temperature:0.2, max_tokens:1800 };
       const cacheKey = simpleCache.key('generateApplication', { prompt, model, retryIndex });
