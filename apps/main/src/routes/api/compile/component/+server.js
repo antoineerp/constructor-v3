@@ -14,6 +14,30 @@ export async function POST({ request }) {
       try { const { createHash } = await import('crypto'); return createHash('sha1').update(code).digest('hex').slice(0,12); } catch(_e){ return 'na'; }
     })();
 
+    // Injecter placeholders pour composants non importés (ex: <ButtonRed />) afin d'éviter SSR vide/bloquant.
+    function injectUnknownComponentPlaceholders(src){
+      // Match balises capitalisées sans import correspondant. Heuristique simple.
+      const tagRegex = /<([A-Z][A-Za-z0-9_]*)\b[^>]*>/g; const found = new Set(); let m;
+      while((m=tagRegex.exec(src))){ found.add(m[1]); }
+      if(!found.size) return src;
+      // Si un composant est déjà importé, on le laisse. On cherche lignes import ... from '...'
+      const imported = new Set();
+      const importRegex = /import\s+([^;]+)from\s+['"][^'"]+['"]/g; let im;
+      while((im = importRegex.exec(src))){
+        const names = im[1].split(/[,{}\s]/).map(s=> s.trim()).filter(Boolean);
+        names.forEach(n=> imported.add(n.replace(/as.*/,'')));
+      }
+      const toStub = [...found].filter(n=> !imported.has(n));
+      if(!toStub.length) return src;
+      const stubLines = toStub.map(n=> `const ${n} = ({children})=>({ $$render:()=> '<span data-missing-component="${n}"></span>' });`);
+      // Préprend un <script> ou en crée un
+      if(/<script[>\s]/.test(src)){
+        return src.replace(/<script[>\s][^>]*>/, m=> m + '\n' + stubLines.join('\n'));
+      } else {
+        return `<script>\n${stubLines.join('\n')}\n</script>\n` + src;
+      }
+    }
+
     // Si c'est juste du markup sans balises <script>/<template>, on l'encapsule dans un composant.
     let source = code;
     const hasSvelteSyntax = /<script[\s>]|{#if|{#each|on:click=/.test(code);
@@ -26,7 +50,8 @@ export async function POST({ request }) {
       source = `<script>export let props = {};</script>\n${code}`;
     }
 
-    let compiled;
+  source = injectUnknownComponentPlaceholders(source);
+  let compiled;
     try {
       compiled = compile(source, { generate: 'ssr', hydratable: true });
     } catch (e) {
