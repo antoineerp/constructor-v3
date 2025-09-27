@@ -152,7 +152,23 @@ export async function POST({ request }) {
         // Imports side-effect: import '...';
         .replace(/import\s+["']([^"']+)["'];?/g, (m, spec)=> `require("${spec}");`)
         .replace(/export\s+default\s+/g, 'module.exports.default = ')
-        .replace(/export\s+\{([^}]+)\};?/g, (m, names)=> names.split(',').map(n=> n.trim()).filter(Boolean).map(n=> `module.exports.${n.replace(/\sas\s.+$/,'')} = ${n.split(/\sas\s/)[0].trim()};`).join('\n'));
+        .replace(/export\s+\{([^}]+)\};?/g, (m, names)=> {
+          return names.split(',')
+            .map(n=> n.trim())
+            .filter(Boolean)
+            .map(spec=>{
+              if(/\sas\s/i.test(spec)){
+                const [orig, alias] = spec.split(/\sas\s/i).map(s=> s.trim());
+                const target = alias === 'default' ? 'default' : alias.replace(/[^A-Za-z0-9_$]/g,'');
+                return `module.exports.${target} = ${orig};` + (alias==='default' ? '' : '');
+              } else {
+                const name = spec.replace(/[^A-Za-z0-9_$]/g,'');
+                if(name === 'default') return '';
+                return `module.exports.${name} = ${name};`;
+              }
+            })
+            .join('\n');
+        });
       // Dernière passe: si reste un "import " (non géré), commenter pour éviter crash
       if(/\bimport\s+/.test(out)){
         out = out.replace(/^\s*import\s+.*$/gm, '// __REMOVED_IMPORT__');
@@ -265,6 +281,16 @@ export async function POST({ request }) {
         const rootFactory = new Function('module','exports','require','__import', rootTransformed + '\n;');
         execFactory(rootFactory);
         Component = module.exports.default || module.exports;
+        // Si pas de default mais un seul export nommé ayant un render/$$render, l'utiliser
+        if(!module.exports.default){
+          const keys = Object.keys(module.exports||{});
+          if(keys.length === 1){
+            const only = module.exports[keys[0]];
+            if(only && (typeof only.render === 'function' || typeof only.$$render === 'function')){
+              Component = only; globalThis.__LAST_SSR_FALLBACK_NOTE__ = 'single-export-promoted';
+            }
+          }
+        }
         // Gestion export imbriqué (default.default)
         if(Component && Component.default && (Component.default.render || Component.default.$$render)){
           Component = Component.default;
