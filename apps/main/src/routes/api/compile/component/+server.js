@@ -20,8 +20,9 @@ export async function POST({ request }) {
     let source = code;
 
     // Heuristique: ajouter un <script> minimal si contenu simple sans script pour permettre export de props.
-    const hasSvelteSyntax = /<script[\s>]|{#if|{#each|on:[a-zA-Z]+=/u.test(source);
-    if(!hasSvelteSyntax && !/<script[\s>]/.test(source)) {
+  // Détection heuristique très simple de syntaxe Svelte; on évite les accolades brutes non échappées dans la RegExp.
+  const hasSvelteSyntax = /<script[\s>]|\{#if|\{#each|on:[a-zA-Z]+=/u.test(source);
+  if(!hasSvelteSyntax && !/<script[\s>]/.test(source)) {
       source = `<script>export let props = {};</script>\n${source}`;
     }
 
