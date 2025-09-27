@@ -212,9 +212,25 @@ export async function GET(event){
       }
     }
 
+    // Hydratation: compiler version DOM du wrapper pour montée client
+    let domWrapperJs=null; let domCompileErr=null;
+    try {
+      const wDom = compile(wrapperSource, { generate:'dom', format:'esm', filename:'__wrapper_dom.svelte', hydratable:true });
+      domWrapperJs = wDom.js.code;
+    } catch(e){ domCompileErr = e.message; }
+
     const { html, head, css } = Wrapper.render({ params: paramsObj, data: mergedData });
+    let hydrationScript='';
+    if(domWrapperJs){
+      const b64 = Buffer.from(domWrapperJs, 'utf-8').toString('base64');
+      const dataB64 = Buffer.from(JSON.stringify({ params: paramsObj, data: mergedData }), 'utf-8').toString('base64');
+      hydrationScript = `<script>(function(){try{const js=atob('${b64}');const blob=new Blob([js],{type:'text/javascript'});const u=URL.createObjectURL(blob);const init=JSON.parse(atob('${dataB64}'));import(u).then(m=>{const C=m.default||m;const r=document.getElementById('__app');if(r){new C({target:r, hydrate:true, props:init});}}).catch(e=>console.warn('Hydration failed',e));}catch(e){console.warn('Hydration bootstrap error',e);}})();</script>`;
+    } else if(domCompileErr){
+      hydrationScript = `<!-- dom compile error: ${domCompileErr} -->`;
+    }
+    const htmlHydratable = `<!DOCTYPE html><html><head>${head||''}${css?.code?`<style>${css.code}</style>`:''}${wrapperCss?`<style>${wrapperCss}</style>`:''}</head><body><div id="__app">${html}</div>${hydrationScript}</body></html>`;
     const total = Date.now()-started;
-    return json({ success:true, html, head, css: css?.code || '', styles: wrapperCss, route: targetPath, dynamic: isDynamic, params: paramsObj, data: mergedData, loads: debugLoads, timings:{ total } });
+    return json({ success:true, html, head, css: css?.code || '', styles: wrapperCss, route: targetPath, dynamic: isDynamic, params: paramsObj, data: mergedData, loads: debugLoads, hydratable: !!domWrapperJs, htmlHydratable, timings:{ total } });
   } catch(e){
     return json({ success:false, error:e.message }, { status:500 });
   }
