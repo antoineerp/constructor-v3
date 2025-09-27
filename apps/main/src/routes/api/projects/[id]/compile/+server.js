@@ -29,7 +29,8 @@ export async function POST(event){
       projectFiles = project.code_generated;
     }
     // Filtrer uniquement fichiers Svelte + JS potentiels
-    const svelteEntries = Object.entries(projectFiles).filter(([k])=> k.endsWith('.svelte'));
+  const svelteEntries = Object.entries(projectFiles).filter(([k])=> k.endsWith('.svelte'));
+  const loadScriptEntries = Object.entries(projectFiles).filter(([k])=> /\+(page|layout)\.(js|ts)$/.test(k));
     if(!svelteEntries.length) return json({ success:false, error:'Aucun fichier Svelte' }, { status:404 });
   let entry = (file && projectFiles[file]) ? file : entries.find(e=> projectFiles[e]) || 'src/routes/+page.svelte';
   if(!projectFiles[entry]) entry = svelteEntries[0][0];
@@ -38,7 +39,8 @@ export async function POST(event){
     if(cached){
       return json({ success:true, cached:true, ...cached });
     }
-    const modules = [];
+  const modules = [];
+  const pageFiles = []; // conserver liste pages pour wrappers
     // Caching CSS (hash sur app.css + tailwind.config.cjs)
     let globalCss = '';
     let cssHash = null;
@@ -97,11 +99,65 @@ export async function POST(event){
             if(resolved) importMap.push({ spec, target: resolved });
         }
         modules.push({ path: pathName, jsCode, imports: importMap });
+        if(/\/\+page\.svelte$/.test(pathName)) pageFiles.push(pathName);
       } catch(e){
         modules.push({ path: pathName, error: e.message });
       }
     }
+    // Ajouter scripts load comme modules bruts (pas de compilation Svelte)
+    for(const [scriptPath, code] of loadScriptEntries){
+      modules.push({ path: scriptPath, jsCode: code, loadScript: true });
+    }
   const routeCandidates = Object.keys(projectFiles).filter(f=> f.startsWith('src/routes/') && f.endsWith('.svelte'));
+
+  // ---------- Précompilation wrappers (layouts + page) ----------
+  function collectLayouts(pagePath){
+    const rel = pagePath.replace(/^src\/routes\//,'');
+    const segments = rel.split('/');
+    segments.pop(); // remove +page.svelte
+    const candidates = ['src/routes/+layout.svelte'];
+    let accum = 'src/routes';
+    for(const seg of segments){ accum += '/' + seg; candidates.push(accum + '/+layout.svelte'); }
+    const found = [];
+    for(const c of candidates){ if(projectFiles[c]) found.push(c); }
+    return [...new Set(found)];
+  }
+  function hashStr(str){ let h=5381,i=str.length; while(i) h=(h*33)^str.charCodeAt(--i); return (h>>>0).toString(36); }
+
+  const wrappers = [];
+  for(const pagePath of pageFiles){
+    try {
+      const layouts = collectLayouts(pagePath);
+      const rel = pagePath.replace(/^src\/routes\//,'').replace(/\/\+page\.svelte$/, '');
+      const segments = rel === '' ? [] : rel.split('/');
+      const hasDynamic = segments.some(s=> /\[[^/]+\]/.test(s));
+      const paramNames = [];
+      let pattern;
+      if(!hasDynamic){
+        pattern = segments.length ? '/' + segments.join('/') : '/';
+      } else {
+        const regexParts = segments.map(seg => {
+          const catchAll = seg.match(/^\[\.\.\.([^\]]+)\]$/);
+          if(catchAll){ paramNames.push(catchAll[1]); return '(.*)'; }
+          const m = seg.match(/^\[([^\]]+)\]$/); if(m){ paramNames.push(m[1]); return '([^/]+)'; }
+          return seg.replace(/[-/\\^$*+?.()|[\]{}]/g, ch=> `\\${ch}`);
+        });
+        pattern = '/' + regexParts.join('/');
+      }
+      // Générer code wrapper Svelte (imports vers chemins originaux, réécrits côté client en blob URLs)
+      const imports = [`import Page from '${pagePath}';`];
+      layouts.forEach((l,i)=> imports.push(`import L${i} from '${l}';`));
+      const openTags = layouts.map((_,i)=> `<L${i} {params}>`).join('');
+      const closeTags = layouts.map((_,i)=> `</L${layouts.length-1 - i}>`).join('');
+      const wrapperSource = `<script>\n${imports.join('\n')}\nexport let params;\n</script>\n${openTags}<Page {params}/> ${closeTags}`;
+      const cWrap = compile(wrapperSource, { generate:'dom', format:'esm', filename:`__wrapper__${pattern}.svelte` });
+      const codes = layouts.map(l=> projectFiles[l]||'').concat(projectFiles[pagePath]||'');
+      const hash = hashStr(codes.join('\u0000'));
+      wrappers.push({ pattern, dynamic: hasDynamic, paramNames, hash, jsCode: cWrap.js.code });
+    } catch(e){
+      wrappers.push({ pattern: pagePath, error: e.message });
+    }
+  }
     // Récupération qualité la plus récente
     let quality = null; let validation_summary = null;
     try {
@@ -117,7 +173,16 @@ export async function POST(event){
     } catch(_e){ /* ignore quality fetch */ }
   const guardMeta = projectFiles.__guard_meta || null;
   const variantMeta = projectFiles.__variant_meta || null;
-  const result = { modules, entry, cached:false, timings:{ total_ms: Date.now()-t0 }, routes: routeCandidates, quality, validation_summary, css: globalCss, cssHash, guardMeta, variantMeta };
+  // Exposer aussi les wrappers sous forme de pseudo-modules pour intégration directe côté client
+  const wrapperModules = wrappers.filter(w=> !w.error).map(w=> ({
+    wrapper: true,
+    pattern: w.pattern,
+    dynamic: w.dynamic,
+    hash: w.hash,
+    paramNames: w.paramNames,
+    jsCode: w.jsCode
+  }));
+  const result = { modules: [...modules, ...wrapperModules], entry, cached:false, timings:{ total_ms: Date.now()-t0 }, routes: routeCandidates, wrappers, quality, validation_summary, css: globalCss, cssHash, guardMeta, variantMeta };
     setCached(hash, result, 2*60*1000); // 2 min
     return json({ success:true, ...result });
   } catch(e){
