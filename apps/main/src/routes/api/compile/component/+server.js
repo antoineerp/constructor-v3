@@ -206,6 +206,21 @@ export async function POST({ request }) {
             if(typeof Component.render !== 'function' && Component.length >=3){
               const fn = Component; fallbackUsed=true; Component = { render:(p)=>{ try { const fake={head:'', css:new Set(), html:'', title:''}; const out = fn(fake, p||{}, {}, {}); if(typeof out==='string') return { html:out }; if(out && out.html) return { html: out.html }; if(fake.html) return { html: fake.html }; return { html:'<!-- empty SSR function output -->' }; } catch(e){ return { html:`<pre data-render-error>arity-fn error: ${e.message.replace(/</g,'&lt;')}</pre>` }; } } };
             }
+            // Heuristique supplémentaire: essayer de l'envelopper via create_ssr_component si disponible
+            if(typeof Component.render !== 'function'){
+              try {
+                const { create_ssr_component } = localRequire('svelte/internal');
+                if(typeof create_ssr_component === 'function'){
+                  const created = create_ssr_component(($$result, $$props, $$bindings, slots)=>{
+                    try { return Component($$props||{}); } catch(e){ return `<pre data-render-error>create_ssr_component inner error: ${e.message.replace(/</g,'&lt;')}</pre>`; }
+                  });
+                  if(created && created.$$render){
+                    Component = wrapFromBase(created);
+                    fallbackNote = (fallbackNote? fallbackNote+';':'') + 'wrapped-via-create_ssr_component';
+                  }
+                }
+              } catch(_e){ /* ignore */ }
+            }
           }
           if(typeof Component.render !== 'function'){
             const shape = typeof Component; fallbackUsed=true;
