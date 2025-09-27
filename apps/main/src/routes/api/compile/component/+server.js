@@ -57,6 +57,11 @@ export async function POST({ request }) {
       while((m = libRegex.exec(src))){
         const importClause = m[1].trim();
         let targetRel = m[2].trim();
+        // Si l'import cible un module JS/TS explicite, on NE réécrit PAS (ex: supabase.js)
+        if(/\.(?:js|ts|mjs|cjs)$/i.test(targetRel)) {
+          // On laisse tel quel: continuer boucle
+          continue;
+        }
         if(!/\.svelte$/i.test(targetRel)) targetRel += '.svelte';
         const fullPath = 'src/lib/' + targetRel;
         if(providedSet.has(fullPath)) continue; // réelle dépendance fournie
