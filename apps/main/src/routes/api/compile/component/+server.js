@@ -1,11 +1,9 @@
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 import { createRequire } from 'module';
-import path from 'path';
 
-// Endpoint minimal pour rendre un fichier Svelte (ou simple markup) côté serveur en HTML statique.
-// Body: { code: string }
-// Réponse: { success, html, css }
+// Endpoint: compile & SSR un snippet Svelte (avec dépendances .svelte fournies) + hydratation.
+// Body attendu: { code: string, dependencies?: { [path:string]: string }, debug?: boolean }
 export async function POST({ request }) {
   try {
     const body = await request.json();
@@ -13,486 +11,258 @@ export async function POST({ request }) {
     if(!code || !code.trim()) return json({ success:false, error:'Code requis' }, { status:400 });
     if(typeof globalThis.__COMP_COMPONENT_COUNT === 'undefined') globalThis.__COMP_COMPONENT_COUNT = 0;
     globalThis.__COMP_COMPONENT_COUNT++;
-    const codeHash = await (async ()=>{
-      try { const { createHash } = await import('crypto'); return createHash('sha1').update(code).digest('hex').slice(0,12); } catch(_e){ return 'na'; }
+
+    const codeHash = await (async () => {
+      try { const { createHash } = await import('crypto'); return createHash('sha1').update(code).digest('hex').slice(0,12); } catch { return 'na'; }
     })();
 
-    // Injecter placeholders pour composants non importés (ex: <ButtonRed />) afin d'éviter SSR vide/bloquant.
-  function injectUnknownComponentPlaceholders(src, meta){
-      // Match balises capitalisées sans import correspondant. Heuristique simple.
-      const tagRegex = /<([A-Z][A-Za-z0-9_]*)\b[^>]*>/g; const found = new Set(); let m;
-      while((m=tagRegex.exec(src))){ found.add(m[1]); }
+    const originalSource = code;
+    let source = code;
+
+    // Heuristique: ajouter un <script> minimal si contenu simple sans script pour permettre export de props.
+    const hasSvelteSyntax = /<script[\s>]|{#if|{#each|on:[a-zA-Z]+=/u.test(source);
+    if(!hasSvelteSyntax && !/<script[\s>]/.test(source)) {
+      source = `<script>export let props = {};</script>\n${source}`;
+    }
+
+    const meta = { missingComponents: [], libStubs: [], depProvided: Object.keys(dependencies).length };
+    const debugStages = debug ? { original: originalSource } : null;
+
+    // --- Helpers ---
+    function injectUnknownComponentPlaceholders(src, metaObj){
+      const tagRegex = /<([A-Z][A-Za-z0-9_]*)\b/g; const found = new Set(); let m;
+      while((m = tagRegex.exec(src))) found.add(m[1]);
       if(!found.size) return src;
-      // Si un composant est déjà importé, on le laisse. On cherche lignes import ... from '...'
+      // Collecter déjà importés
       const imported = new Set();
-      const importRegex = /import\s+([^;]+)from\s+['"][^'"]+['"]/g; let im;
-      while((im = importRegex.exec(src))){
-        const names = im[1].split(/[,{}\s]/).map(s=> s.trim()).filter(Boolean);
-        names.forEach(n=> imported.add(n.replace(/as.*/,'')));
+      const importDecl = /import\s+([^;]+)from\s+['"][^'"]+['"]/g; let im;
+      while((im = importDecl.exec(src))){
+        im[1].split(/[,{}\s]/).map(s=> s.trim()).filter(Boolean).forEach(n=> imported.add(n.replace(/as.*/i,'')));
       }
       const toStub = [...found].filter(n=> !imported.has(n));
       if(!toStub.length) return src;
-      meta.missingComponents = toStub;
-      // Skeleton placeholder markup (accessible + identifiable)
-      const skeletonFor = (name)=> {
-        const label = name.replace(/([a-z])([A-Z])/g,'$1 $2');
-        return `<div class=\"missing-component skeleton border border-dashed border-gray-300 rounded bg-gradient-to-r from-gray-100 via-gray-50 to-gray-100 dark:from-gray-800 dark:via-gray-700 dark:to-gray-800 text-gray-400 text-[10px] inline-flex items-center justify-center px-3 py-1 gap-1 animate-pulse\" data-missing-component=\"${name}\" title=\"Stub auto-généré pour ${label}\">`+
-          `<span class=\"w-2 h-2 rounded-full bg-gray-300/60 dark:bg-gray-600 animate-ping\"></span>`+
-          `<span class=\"font-medium tracking-wide\">${label}</span>`+
-          `</div>`;
-      };
-      const stubLines = toStub.map(n=> `const ${n} = ({children})=>({ $$render:()=> ${JSON.stringify(skeletonFor(n))} });`);
-      // Préprend un <script> ou en crée un
-      if(/<script[>\s]/.test(src)){
-        return src.replace(/<script[>\s][^>]*>/, m=> m + '\n' + stubLines.join('\n'));
-      } else {
-        return `<script>\n${stubLines.join('\n')}\n</script>\n` + src;
-      }
+      metaObj.missingComponents = toStub;
+      const stubLines = toStub.map(n=> `const ${n} = ({children})=>({ $$render:()=> '<div class="missing-component text-[10px] border border-dashed border-gray-300 rounded px-2 py-1 text-gray-500" data-missing-component="${n}">${n}</div>' });`);
+      if(/<script[\s>]/.test(src)) return src.replace(/<script[\s>][^>]*>/, m=> m + '\n' + stubLines.join('\n'));
+      return `<script>\n${stubLines.join('\n')}\n</script>\n${src}`;
     }
 
-    // Réécriture des imports $lib/* en stubs si dépendance non fournie.
-    function rewriteLibImports(src, meta, provided){
-      const libRegex = /import\s+([^;]+?)\s+from\s+['"]\$lib\/(.+?)['"];?/g;
-      let m; let out = src; const stubs=[]; const providedSet = new Set(Object.keys(provided));
+    function rewriteLibImports(src, metaObj, provided){
+      const libRegex = /import\s+([^;]+?)\s+from\s+['"]\$lib\/(.+?)['"];?/g; let m; let out = src; const providedSet = new Set(Object.keys(provided)); const stubs=[];
       while((m = libRegex.exec(src))){
-        const importClause = m[1].trim();
-        let targetRel = m[2].trim();
-        // Si l'import cible un module JS/TS explicite, on NE réécrit PAS (ex: supabase.js)
-        if(/\.(?:js|ts|mjs|cjs)$/i.test(targetRel)) {
-          // On laisse tel quel: continuer boucle
-          continue;
-        }
-        if(!/\.svelte$/i.test(targetRel)) targetRel += '.svelte';
-        const fullPath = 'src/lib/' + targetRel;
-        if(providedSet.has(fullPath)) continue; // réelle dépendance fournie
-        // On supprime cette ligne d'import et on génère des stubs
+        const clause = m[1].trim(); let rel = m[2].trim();
+        if(/\.(?:js|ts|mjs|cjs)$/i.test(rel)) continue; // ne pas stubber supabase.js & co.
+        if(!/\.svelte$/i.test(rel)) rel += '.svelte';
+        const full = 'src/lib/' + rel;
+        if(providedSet.has(full)) continue;
         out = out.replace(m[0], '');
-        const localNames = [];
-        // Cas: default + named: defaultExport, { A, B as C }
-        // Heuristique simple
-        const defaultMatch = importClause.match(/^([A-Za-z0-9_]+)/);
-        if(defaultMatch) localNames.push(defaultMatch[1]);
-        const braceMatch = importClause.match(/\{([^}]+)\}/);
-        if(braceMatch){
-          braceMatch[1].split(',').forEach(p=>{
-            const name = p.split(/\s+as\s+/i)[1] || p.split(/\s+as\s+/i)[0] || p; // garder alias (droite) si présent
-            const trimmed = name.trim(); if(trimmed) localNames.push(trimmed);
-          });
-        }
-        for(const n of localNames){
-          stubs.push(`const ${n} = ({children})=>({ $$render:()=> '<div data-missing-lib="${fullPath}" class="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded border border-dashed border-amber-300 bg-amber-50 text-amber-600">${n}</div>' });`);
-        }
+        const names=[]; const defaultMatch = clause.match(/^([A-Za-z0-9_]+)/); if(defaultMatch) names.push(defaultMatch[1]);
+        const brace = clause.match(/\{([^}]+)\}/); if(brace){ brace[1].split(',').forEach(p=> { const nm = p.split(/\s+as\s+/i).pop().trim(); if(nm) names.push(nm); }); }
+        for(const n of names){ stubs.push(`const ${n} = ({children})=>({ $$render:()=> '<div data-missing-lib="${full}" class="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded border border-dashed border-amber-300 bg-amber-50 text-amber-600">${n}</div>' });`); }
       }
-      if(stubs.length){
-        meta.libStubs = stubs.map(s=> s.match(/const\s+([A-Za-z0-9_]+)/)[1]);
-        if(/<script[>\s]/.test(out)){
-          out = out.replace(/<script[>\s][^>]*>/, mm=> mm + '\n' + stubs.join('\n'));
-        } else {
-          out = `<script>\n${stubs.join('\n')}\n</script>\n` + out;
-        }
-      }
+      if(stubs.length){ metaObj.libStubs = stubs.map(s=> s.match(/const\s+([A-Za-z0-9_]+)/)[1]);
+        if(/<script[\s>]/.test(out)) out = out.replace(/<script[\s>][^>]*>/, mm=> mm + '\n' + stubs.join('\n')); else out = `<script>\n${stubs.join('\n')}\n</script>\n`+out; }
       return out;
     }
 
-    // Si c'est juste du markup sans balises <script>/<template>, on l'encapsule dans un composant.
-  const originalSource = code; // conserver pour debug
-  let source = code;
-    const hasSvelteSyntax = /<script[\s>]|{#if|{#each|on:click=/.test(code);
-    if(!/</.test(code.trim().slice(0,40))){
-      // probablement juste texte -> wrap div
-      source = `<div>${code}</div>`;
-    }
-    // Ajouter un wrapper si le code ne contient pas de <script> et ne commence pas par <>
-    if(!hasSvelteSyntax && !/<script[\s>]/.test(code)){
-      source = `<script>export let props = {};</script>\n${code}`;
-    }
-
-    const meta = { missingComponents: [], libStubs: [], depProvided: Object.keys(dependencies||{}).length };
-    const debugStages = debug ? { original: originalSource } : null;
-    // Réécriture des imports $lib avant injection tags inconnus
-    const afterLib = rewriteLibImports(source, meta, dependencies);
-    if(debugStages) debugStages.afterLib = afterLib;
-    const afterUnknown = injectUnknownComponentPlaceholders(afterLib, meta);
-    if(debugStages) debugStages.afterUnknown = afterUnknown;
-    source = afterUnknown;
-
-    // ---------- Sandbox & transformation ESM -> pseudo-CJS pour SSR ----------
     function transformEsmToCjs(ssrCode){
-      // Remplacer imports par require / __import
       let out = ssrCode
-        .replace(/import\s+([^;]+?)\s+from\s+["']svelte\/internal["'];?/g, (m, clause)=> `const ${clause.trim()} = require("svelte/internal");`)
-        .replace(/import\s+([^;]+?)\s+from\s+["']([^"']+\.svelte)["'];?/g, (m, clause, spec)=>{
+        .replace(/import\s+([^;]+?)\s+from\s+["']svelte\/internal["'];?/g, (m,cl)=> `const ${cl.trim()} = require('svelte/internal');`)
+        .replace(/import\s+([^;]+?)\s+from\s+["']([^"']+\.svelte)["'];?/g, (m,cl,spec)=> {
           let seg='';
-          if(/\{/.test(clause)){
-            const defMatch = clause.match(/^([A-Za-z0-9_]+)\s*,/);
-            const namedMatch = clause.match(/\{([^}]+)\}/);
-            if(defMatch) seg += `const ${defMatch[1]} = __import("${spec}").default;`;
-            if(namedMatch) seg += `const { ${namedMatch[1]} } = __import("${spec}");`;
-            return seg;
-          }
-          if(/^\{/.test(clause.trim())) return `const ${clause.trim()} = __import("${spec}");`;
-          return `const ${clause.trim()} = __import("${spec}").default;`;
-        })
-        // Imports JS/TS classiques -> require
-        .replace(/import\s+([^;]+?)\s+from\s+["']([^"']+\.(?:js|ts))["'];?/g, (m, clause, spec)=>{
-          // default + named
-            if(/\{/.test(clause)){
-              const defMatch = clause.match(/^([A-Za-z0-9_]+)\s*,/);
-              const namedMatch = clause.match(/\{([^}]+)\}/);
-              let seg='';
-              if(defMatch) seg += `const ${defMatch[1]} = require("${spec}").default || require("${spec}");`;
-              if(namedMatch) seg += `const { ${namedMatch[1]} } = require("${spec}");`;
+            if(/\{/.test(cl)){
+              const def = cl.match(/^([A-Za-z0-9_]+)/); const named = cl.match(/\{([^}]+)\}/);
+              if(def) seg += `const ${def[1]} = __import('${spec}').default;`;
+              if(named) seg += `const { ${named[1]} } = __import('${spec}');`;
               return seg;
             }
-            if(/^\{/.test(clause.trim())) return `const ${clause.trim()} = require("${spec}");`;
-            return `const ${clause.trim()} = require("${spec}").default || require("${spec}");`;
+            if(/^\{/.test(cl.trim())) return `const ${cl.trim()} = __import('${spec}');`;
+            return `const ${cl.trim()} = __import('${spec}').default;`;
         })
-        // Import espace de noms: import * as X from '...'
-        .replace(/import\s+\*\s+as\s+([A-Za-z0-9_]+)\s+from\s+["']([^"']+)["'];?/g, (m, ns, spec)=> `const ${ns} = require("${spec}");`)
-        // Imports side-effect: import '...';
-        .replace(/import\s+["']([^"']+)["'];?/g, (m, spec)=> `require("${spec}");`)
+        .replace(/import\s+([^;]+?)\s+from\s+["']([^"']+\.(?:js|ts))["'];?/g, (m,cl,spec)=>{
+          if(/\{/.test(cl)){
+            const def = cl.match(/^([A-Za-z0-9_]+)/); const named = cl.match(/\{([^}]+)\}/); let seg='';
+            if(def) seg += `const ${def[1]} = require('${spec}').default || require('${spec}');`;
+            if(named) seg += `const { ${named[1]} } = require('${spec}');`;
+            return seg;
+          }
+          if(/^\{/.test(cl.trim())) return `const ${cl.trim()} = require('${spec}');`;
+          return `const ${cl.trim()} = require('${spec}').default || require('${spec}');`;
+        })
+        .replace(/import\s+\*\s+as\s+([A-Za-z0-9_]+)\s+from\s+["']([^"']+)["'];?/g, (m,ns,spec)=> `const ${ns} = require('${spec}');`)
+        .replace(/import\s+["']([^"']+)["'];?/g, (m,spec)=> `require('${spec}');`)
         .replace(/export\s+default\s+/g, 'module.exports.default = ')
-        .replace(/export\s+\{([^}]+)\};?/g, (m, names)=> {
-          return names.split(',')
-            .map(n=> n.trim())
-            .filter(Boolean)
-            .map(spec=>{
-              if(/\sas\s/i.test(spec)){
-                const [orig, alias] = spec.split(/\sas\s/i).map(s=> s.trim());
-                const target = alias === 'default' ? 'default' : alias.replace(/[^A-Za-z0-9_$]/g,'');
-                return `module.exports.${target} = ${orig};` + (alias==='default' ? '' : '');
-              } else {
-                const name = spec.replace(/[^A-Za-z0-9_$]/g,'');
-                if(name === 'default') return '';
-                return `module.exports.${name} = ${name};`;
-              }
-            })
-            .join('\n');
-        });
-      // Dernière passe: si reste un "import " (non géré), commenter pour éviter crash
-      if(/\bimport\s+/.test(out)){
-        out = out.replace(/^\s*import\s+.*$/gm, '// __REMOVED_IMPORT__');
-      }
+        .replace(/export\s+\{([^}]+)\};?/g, (m,names)=> names.split(',').map(n=> n.trim()).filter(Boolean).map(spec=>{
+          if(/\sas\s/i.test(spec)){
+            const [orig, alias] = spec.split(/\sas\s/i).map(s=> s.trim());
+            const target = alias === 'default' ? 'default' : alias.replace(/[^A-Za-z0-9_$]/g,'');
+            return `module.exports.${target} = ${orig};`;
+          }
+          const nm = spec.replace(/[^A-Za-z0-9_$]/g,'');
+          if(nm === 'default') return '';
+          return `module.exports.${nm} = ${nm};`;
+        }).join('\n'));
+      if(/\bimport\s+/.test(out)) out = out.replace(/^\s*import\s+.*$/gm, '// __REMOVED_IMPORT__');
       return out;
     }
 
-    // Compile & store dependency transformed code (lazy executed)
-    const depRegistry = new Map(); // path -> { factory, exports }
-    const depErrors = [];
-    const depSources = Object.entries(dependencies).filter(([p])=> p.endsWith('.svelte'));
-    const depCssBlocks = []; // collecte CSS dépendances
-    for(const [depPath, depCode] of depSources){
+    // Appliquer réécritures pré-compilation (placeholders & lib)
+    const afterLib = rewriteLibImports(source, meta, dependencies); if(debugStages) debugStages.afterLib = afterLib;
+    const afterUnknown = injectUnknownComponentPlaceholders(afterLib, meta); if(debugStages) debugStages.afterUnknown = afterUnknown;
+    source = afterUnknown;
+
+    // Compiler composant principal (SSR)
+    let compiled;
+    try { compiled = compile(source, { generate:'ssr', hydratable:true, filename:'Component.svelte' }); }
+    catch(e){
+      const loc = e.start ? { line:e.start.line, column:e.start.column } : null;
+      return json({ success:false, error:'Erreur compilation: '+e.message, position:loc, stage:'ssr-compile', debugStages }, { status:400 });
+    }
+    const { js, css } = compiled;
+
+    // Compiler dépendances .svelte fournies
+    const depRegistry = new Map(); const depErrors=[]; const depCssBlocks=[];
+    for(const [depPath, depCode] of Object.entries(dependencies)){
+      if(!depPath.endsWith('.svelte')) continue;
       try {
         const c = compile(depCode, { generate:'ssr', hydratable:true, filename: depPath });
-        if(c.css?.code){
-          const sig = c.css.code.trim();
-          if(!depCssBlocks.includes(sig)) depCssBlocks.push(sig);
-        }
+        if(c.css?.code){ const sig = c.css.code.trim(); if(!depCssBlocks.includes(sig)) depCssBlocks.push(sig); }
         const transformed = transformEsmToCjs(c.js.code);
         const factory = new Function('module','exports','require','__import', transformed + '\n;');
         depRegistry.set(depPath, { factory, exports:null });
-      } catch(e){ depErrors.push({ dep: depPath, error: e.message }); }
-    }
-    let compiled;
-    try {
-      compiled = compile(source, { generate: 'ssr', hydratable: true, filename: 'Component.svelte' });
-    } catch (e) {
-      // enrichir message avec position si disponible
-      const loc = e.start ? ` (ligne ${e.start.line}, colonne ${e.start.column})` : '';
-      const errPayload = {
-        success: false,
-        error: 'Erreur compilation: ' + e.message + loc,
-        stage: 'ssr-compile',
-        hint: 'Vérifie accolades, blocs {#if}/{#each} et syntaxe script.',
-        position: e.start ? { line: e.start.line, column: e.start.column } : null
-      };
-      if(debug && typeof source === 'string'){
-        errPayload.debugStages = debugStages;
-        // Inclure un extrait autour de la ligne fautive
-        if(e.start){
-          const lines = source.split('\n');
-            const from = Math.max(0, e.start.line - 4);
-            const to = Math.min(lines.length, e.start.line + 3);
-            errPayload.sourceExcerpt = lines.slice(from, to).map((l,i)=>({ line: from + 1 + i, code: l })).filter(r=> r.code.length < 400);
-        }
-        errPayload.finalSourceLength = source.length;
-      }
-      return json(errPayload, { status:400 });
+      } catch(e){ depErrors.push({ dep: depPath, error:e.message }); }
     }
 
-  const { js, css } = compiled || {};
-    // Préparer une version DOM pour hydratation (format ESM pour import dynamique)
-    let domJsCode = null; let domCompileError = null; let domCssCode='';
-    try {
-      const domCompiled = compile(source, { generate:'dom', hydratable:true });
-      domJsCode = domCompiled.js.code; domCssCode = domCompiled.css?.code || '';
-    } catch(e){ domCompileError = e.message; }
-    // Création d'un require compatible dans un contexte ESM
-    let localRequire = null; let canRequire = false;
-    try { localRequire = typeof require !== 'undefined' ? require : createRequire(import.meta.url); canRequire = !!localRequire; } catch(_e){ canRequire=false; }
-    let htmlBody = '';
-  if(!canRequire){
-      // Edge/runtime sans require: renvoyer placeholder + code source échappé minimal
-      const escaped = source.replace(/[&<>]/g, ch=> ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
-      htmlBody = `<div class=\"p-4 text-xs text-gray-700\"><div class=\"mb-2 font-semibold text-red-600\">SSR non disponible (runtime sans require)</div><pre class=\"text-[10px] bg-gray-100 p-2 rounded overflow-auto\">${escaped}</pre></div>`;
+    // Build DOM version pour hydratation
+    let domJsCode=null, domCssCode='', domCompileError=null;
+    try { const domCompiled = compile(source, { generate:'dom', hydratable:true, filename:'Component.svelte' }); domJsCode = domCompiled.js.code; domCssCode = domCompiled.css?.code || ''; }
+    catch(e){ domCompileError = e.message; }
+
+    // Require environment
+    let localRequire=null; let canRequire=false; try { localRequire = typeof require !== 'undefined' ? require : createRequire(import.meta.url); canRequire = !!localRequire; } catch{}
+
+    let htmlBody=''; let fallbackUsed=false; let exportPick=null; let fallbackNote=null; let transformCaptured='';
+    if(!canRequire){
+      const esc = source.replace(/[&<>]/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+      htmlBody = `<div class=\"p-3 text-xs text-gray-700\"><div class=\"font-semibold text-red-600 mb-2\">SSR indisponible (runtime)</div><pre class=\"bg-gray-100 p-2 rounded overflow-auto text-[10px]\">${esc}</pre></div>`;
     } else {
-      // Évaluation SSR classique
-      let Component;
-      try {
-        // custom require qui stub les modules manquants (ex: alias Svelte non résolus)
-        function createStub(spec){
-          return { default: { render: () => ({ html: `<span data-missing-module=\"${spec.replace(/"/g,'&quot;')}\"></span>` }) } };
-        }
-        const rootTransformed = transformEsmToCjs(js.code);
-        const module = { exports:{} };
-        function execFactory(factory){
-          factory(module, module.exports, (spec)=>{
-            if(spec === 'svelte/internal') return localRequire('svelte/internal');
-            if(spec.startsWith('$lib/')){
-              const mapped = 'src/lib/' + spec.slice(5) + (spec.endsWith('.svelte')?'': (spec.endsWith('.js')?'':'.svelte'));
-              if(depRegistry.has(mapped)){
-                const entry = depRegistry.get(mapped);
-                if(!entry.exports){ entry.exports = {}; execFactory(entry.factory); }
-                return entry.exports;
-              }
-              return createStub(spec);
-            }
-            if(depRegistry.has(spec)){
-              const entry = depRegistry.get(spec); if(!entry.exports){ entry.exports = {}; execFactory(entry.factory); } return entry.exports;
-            }
-            // relative speculative resolution
-            if(spec.startsWith('./') || spec.startsWith('../')){
-              for(const k of depRegistry.keys()) if(k.endsWith(spec.replace(/^\.\//,''))){ const entry = depRegistry.get(k); if(!entry.exports){ entry.exports = {}; execFactory(entry.factory); } return entry.exports; }
-            }
-            try { return localRequire(spec); } catch(_e){ return createStub(spec); }
-          }, (spec)=>{ // __import pour .svelte transformées
-            if(depRegistry.has(spec)){
-              const entry = depRegistry.get(spec); if(!entry.exports){ entry.exports = {}; execFactory(entry.factory); } return entry.exports;
-            }
-            if(spec.startsWith('$lib/')){
-              const mapped = 'src/lib/' + spec.slice(5) + (spec.endsWith('.svelte')?'':'.svelte');
-              if(depRegistry.has(mapped)){
-                const entry = depRegistry.get(mapped); if(!entry.exports){ entry.exports = {}; execFactory(entry.factory); } return entry.exports;
-              }
-            }
+      // Évaluer SSR
+      function createStub(spec){ return { default:{ render:()=> ({ html:`<span data-missing-module=\"${spec.replace(/"/g,'&quot;')}\"></span>` }) } }; }
+      const transformed = transformEsmToCjs(js.code); transformCaptured = transformed;
+      const rootModule = { exports:{} };
+      function execFactory(factory){
+        factory(rootModule, rootModule.exports, (spec)=>{ // require
+          if(spec === 'svelte/internal') return localRequire('svelte/internal');
+          if(depRegistry.has(spec)){ const entry = depRegistry.get(spec); if(!entry.exports){ entry.exports={}; execFactory(entry.factory); } return entry.exports; }
+          if(spec.startsWith('$lib/')){
+            const mapped = 'src/lib/' + spec.slice(5) + (spec.endsWith('.svelte')?'':(spec.endsWith('.js')?'':'.svelte'));
+            if(depRegistry.has(mapped)){ const e = depRegistry.get(mapped); if(!e.exports){ e.exports={}; execFactory(e.factory); } return e.exports; }
             return createStub(spec);
-          });
-        }
-        const rootFactory = new Function('module','exports','require','__import', rootTransformed + '\n;');
+          }
+          if(spec.startsWith('./') || spec.startsWith('../')){
+            for(const k of depRegistry.keys()) if(k.endsWith(spec.replace(/^\.\//,''))){ const e = depRegistry.get(k); if(!e.exports){ e.exports={}; execFactory(e.factory); } return e.exports; }
+          }
+          try { return localRequire(spec); } catch { return createStub(spec); }
+        }, (spec)=>{ // __import pour .svelte
+          if(depRegistry.has(spec)){ const e = depRegistry.get(spec); if(!e.exports){ e.exports={}; execFactory(e.factory); } return e.exports; }
+          if(spec.startsWith('$lib/')){
+            const mapped = 'src/lib/' + spec.slice(5) + (spec.endsWith('.svelte')?'':'.svelte');
+            if(depRegistry.has(mapped)){ const e = depRegistry.get(mapped); if(!e.exports){ e.exports={}; execFactory(e.factory); } return e.exports; }
+          }
+          return createStub(spec);
+        });
+      }
+      try {
+        const rootFactory = new Function('module','exports','require','__import', transformed + '\n;');
         execFactory(rootFactory);
-        Component = module.exports.default || module.exports;
-        // Si pas de default mais un seul export nommé ayant un render/$$render, l'utiliser
-        if(!module.exports.default){
-          const keys = Object.keys(module.exports||{});
+        let Component = rootModule.exports.default || rootModule.exports;
+        if(!rootModule.exports.default){
+          const keys = Object.keys(rootModule.exports||{});
           if(keys.length === 1){
-            const only = module.exports[keys[0]];
-            if(only && (typeof only.render === 'function' || typeof only.$$render === 'function')){
-              Component = only; globalThis.__LAST_SSR_FALLBACK_NOTE__ = 'single-export-promoted';
+            const only = rootModule.exports[keys[0]];
+            if(only && (only.render||only.$$render)){
+              Component = only; fallbackNote='single-export-promoted'; exportPick=keys[0];
             }
           }
         }
-        // Gestion export imbriqué (default.default)
-        if(Component && Component.default && (Component.default.render || Component.default.$$render)){
-          Component = Component.default;
-        }
-        if(!Component){
-          throw new Error('export default manquant');
-        }
-        let fallbackUsed = false;
-        function wrapFromBase(base){
-          fallbackUsed = true;
-          return {
-            render: (props)=>{
-              try {
-                const html = base.$$render({}, props||{}, {}, {});
-                return { html };
-              } catch(e){
-                return { html: `<pre data-render-error>$$render error: ${e.message.replace(/</g,'&lt;')}</pre>` };
-              }
-            }
-          };
-        }
+        if(Component && Component.default && (Component.default.render || Component.default.$$render)) Component = Component.default;
+        if(!Component) throw new Error('export default manquant');
+
+        function wrapFromBase(base){ fallbackUsed=true; return { render:(p)=>{ try { return { html: base.$$render({}, p||{}, {}, {}) }; } catch(e){ return { html:`<pre data-render-error>$$render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; } } }; }
+
         if(typeof Component.render !== 'function'){
-          if(typeof Component.$$render === 'function'){
-            Component = wrapFromBase(Component);
-          } else if(Component.prototype && typeof Component.prototype.$$render === 'function') {
-            // Prototype pattern (classe générée)
-            const proto = Component.prototype;
-            fallbackUsed = true;
-            Component = {
-              render: (props)=>{
-                try {
-                  const html = proto.$$render({}, props||{}, {}, {});
-                  return { html };
-                } catch(e){
-                  return { html: `<pre data-render-error>proto $$render error: ${e.message.replace(/</g,'&lt;')}</pre>` };
-                }
-              }
-            };
-          } else if(typeof Component === 'function') {
-            // Heuristique fonction: tenter exécution pour voir si renvoie structure exploitable
+          if(Component.$$render){ Component = wrapFromBase(Component); }
+          else if(Component.prototype && Component.prototype.$$render){ const proto = Component.prototype; fallbackUsed=true; Component = { render:(p)=>{ try { return { html: proto.$$render({}, p||{}, {}, {}) }; } catch(e){ return { html:`<pre data-render-error>proto $$render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; } } }; }
+          else if(typeof Component === 'function'){
             try {
-              const result = Component({});
-              if(result){
-                if(typeof result === 'string'){
-                  fallbackUsed = true;
-                  Component = { render: ()=> ({ html: result }) };
-                } else if(result.html){
-                  fallbackUsed = true;
-                  Component = { render: ()=> ({ html: result.html }) };
-                } else if(typeof result.$$render === 'function'){
-                  Component = wrapFromBase(result);
-                }
+              const test = Component({});
+              if(test){
+                if(typeof test === 'string'){ fallbackUsed=true; Component = { render:()=>({ html:test }) }; }
+                else if(test.html){ fallbackUsed=true; Component = { render:()=>({ html:test.html }) }; }
+                else if(test.$$render){ Component = wrapFromBase(test); }
               }
-            } catch(_ef){ /* ignore and continue */ }
-            // Deuxième tentative: fonction SSR style (arity >=3) attend ($$result, $$props, $$bindings, slots)
-            if(typeof Component.render !== 'function' && Component.length >= 3){
-              const fn = Component;
-              fallbackUsed = true;
-              Component = { render: (props)=>{
-                try {
-                  const fakeResult = { head:'', css:new Set(), title:'', html:'' };
-                  const out = fn(fakeResult, props||{}, {}, {});
-                  if(typeof out === 'string') return { html: out };
-                  if(out && typeof out.html === 'string') return { html: out.html };
-                  if(fakeResult.html) return { html: fakeResult.html };
-                  return { html: '<!-- empty SSR function output -->' };
-                } catch(e){
-                  return { html: `<pre data-render-error>arity-fn error: ${e.message.replace(/</g,'&lt;')}</pre>` };
-                }
-              }};
-            }
-            if(typeof Component.render !== 'function' && typeof Component.$$render === 'function'){
-              Component = wrapFromBase(Component);
+            } catch {}
+            if(typeof Component.render !== 'function' && Component.length >=3){
+              const fn = Component; fallbackUsed=true; Component = { render:(p)=>{ try { const fake={head:'', css:new Set(), html:'', title:''}; const out = fn(fake, p||{}, {}, {}); if(typeof out==='string') return { html:out }; if(out && out.html) return { html: out.html }; if(fake.html) return { html: fake.html }; return { html:'<!-- empty SSR function output -->' }; } catch(e){ return { html:`<pre data-render-error>arity-fn error: ${e.message.replace(/</g,'&lt;')}</pre>` }; } } };
             }
           }
           if(typeof Component.render !== 'function'){
-            // Dernier filet de sécurité: on enveloppe toute fonction/classe inconnue
-            const originalShape = typeof Component;
+            const shape = typeof Component; fallbackUsed=true;
             const fnRef = Component;
-            fallbackUsed = true;
-            Component = {
-              render: (props)=>{
-                try {
-                  // 1. Essai direct (fonction simple qui retourne string / { html } )
-                  if(typeof fnRef === 'function'){
-                    let out;
-                    try { out = fnRef(props||{}); } catch(_e1) { /* ignore première tentative */ }
-                    // 2. Essai instanciation (class component)
-                    if(!out){
-                      try { const inst = new fnRef(props||{}); if(inst){
-                        if(typeof inst.$$render === 'function') {
-                          try { return { html: inst.$$render({}, props||{}, {}, {}) }; } catch(e){ return { html: `<pre data-render-error>inst $$render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; }
-                        }
-                        if(typeof inst.render === 'function'){
-                          try { const r = inst.render(); if(typeof r === 'string') return { html: r }; if(r && typeof r.html === 'string') return { html: r.html }; } catch(e){ return { html: `<pre data-render-error>inst render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; }
-                        }
-                      } } catch(_e2){ /* ignore instanciation */ }
-                    }
-                    if(out){
-                      if(typeof out === 'string') return { html: out };
-                      if(out && typeof out.html === 'string') return { html: out.html };
-                      if(out && typeof out.$$render === 'function'){
-                        try { return { html: out.$$render({}, props||{}, {}, {}) }; } catch(e){ return { html: `<pre data-render-error>out $$render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; }
-                      }
-                    }
-                  }
-                  return { html: `<div data-fallback-wrapper class=\"text-xs text-amber-600 font-mono p-2 border border-dashed border-amber-400 rounded bg-amber-50\">SSR fallback wrapper (shape=${originalShape}) sans méthode render/$$render détectable.</div>` };
-                } catch(e){
-                  return { html: `<pre data-render-error>ultimate fallback error: ${e.message.replace(/</g,'&lt;')}</pre>` };
-                }
-              }
-            };
+            Component = { render:(p)=>{ try { if(typeof fnRef==='function'){ let r; try { r = fnRef(p||{}); } catch{} if(r){ if(typeof r==='string') return { html:r }; if(r && r.html) return { html:r.html }; if(r && r.$$render){ try { return { html: r.$$render({}, p||{}, {}, {}) }; } catch(e){ return { html:`<pre data-render-error>inner $$render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; } } } } return { html:`<div data-fallback-wrapper class=\"text-xs text-amber-600 font-mono p-2 border border-dashed border-amber-400 rounded bg-amber-50\">SSR fallback wrapper (shape=${shape})</div>` }; } catch(e){ return { html:`<pre data-render-error>ultimate fallback error: ${e.message.replace(/</g,'&lt;')}</pre>` }; } } };
           }
         }
-        if(fallbackUsed){ globalThis.__LAST_SSR_FALLBACK__ = true; } else { globalThis.__LAST_SSR_FALLBACK__ = false; }
-        // Stocker transformation pour debug
-        globalThis.__LAST_SSR_TRANSFORM__ = rootTransformed;
+
+        // Props init heuristique
+        const propRegex = /export\s+let\s+([A-Za-z0-9_]+)(\s*=\s*([^;]+))?;/g; let pm; const initialProps={};
+        while((pm = propRegex.exec(source))){ const name = pm[1]; const raw = pm[3]; if(raw){ const t=raw.trim(); try { if(/^["'`].*["'`]$/.test(t)) initialProps[name]=t.slice(1,-1); else if(/^(true|false)$/i.test(t)) initialProps[name]=t.toLowerCase()==='true'; else if(/^[0-9]+(\.[0-9]+)?$/.test(t)) initialProps[name]=Number(t); else if(/^[\[{].*[\]}]$/.test(t)) { try { initialProps[name]=JSON.parse(t); } catch{} } else initialProps[name]=null; } catch{ initialProps[name]=null; } } else { initialProps[name]=null; } }
+        const rendered = Component.render ? Component.render(initialProps) : { html:'' };
+        htmlBody = rendered.html;
+        globalThis.__LAST_COMPONENT_PROPS__ = initialProps;
+        globalThis.__LAST_SSR_FALLBACK__ = fallbackUsed || (typeof Component.render !== 'function');
+        globalThis.__LAST_SSR_EXPORT_PICK__ = exportPick;
+        globalThis.__LAST_SSR_FALLBACK_NOTE__ = fallbackNote;
+        globalThis.__LAST_SSR_TRANSFORM__ = transformCaptured;
       } catch(e){
         return json({ success:false, error:'Évaluation impossible: '+e.message }, { status:500 });
       }
-      try {
-        // Extraction naïve des props exportées (export let foo = 123;)
-        const propRegex = /export\s+let\s+([A-Za-z0-9_]+)(\s*=\s*([^;]+))?;/g; let pm; const initialProps={};
-        while((pm = propRegex.exec(source))){
-          const name = pm[1]; const raw = pm[3];
-          if(raw){
-            try {
-              // Sécuriser évaluation de littéraux simples
-              if(/^['"`].*['"`]$/.test(raw.trim())) initialProps[name] = raw.trim().slice(1,-1);
-              else if(/^(true|false)$/i.test(raw.trim())) initialProps[name] = raw.trim().toLowerCase()==='true';
-              else if(/^[0-9]+(\.[0-9]+)?$/.test(raw.trim())) initialProps[name] = Number(raw.trim());
-              else if(/^[\[{].*[\]}]$/.test(raw.trim())) { try { initialProps[name] = JSON.parse(raw.trim()); } catch(_e){ /* ignore */ } }
-            } catch(_e){ /* ignore parse prop */ }
-          } else {
-            initialProps[name] = null;
-          }
-        }
-        const rendered = Component.render ? Component.render(initialProps) : { html: '' };
-        htmlBody = rendered.html;
-        // Stocker initialProps pour hydratation
-        globalThis.__LAST_COMPONENT_PROPS__ = initialProps;
-      } catch(e){
-        return json({ success:false, error:'Rendu serveur échoué: '+e.message }, { status:500 });
-      }
     }
 
+    // Meta & HTML final
     const metaParts = [
       `req=${globalThis.__COMP_COMPONENT_COUNT}`,
       `hash=${codeHash}`,
-      `ts=${Date.now()}`,
-      `mode=${canRequire?'ssr':'edge-fallback'}`
+      `mode=${canRequire?'ssr':'edge'}`,
+      `deps=${depRegistry.size}`
     ];
     if(globalThis.__LAST_SSR_FALLBACK__) metaParts.push('fallback=1');
-    if(meta.missingComponents?.length) metaParts.push('missing='+meta.missingComponents.join('|'));
-    if(meta.libStubs?.length) metaParts.push('libstubs='+meta.libStubs.join('|'));
-    if(depRegistry.size) metaParts.push('deps='+depRegistry.size);
+    if(meta.missingComponents.length) metaParts.push('missing='+meta.missingComponents.length);
+    if(meta.libStubs.length) metaParts.push('libstubs='+meta.libStubs.length);
     if(depErrors.length) metaParts.push('deperrors='+depErrors.length);
     if(depCssBlocks.length) metaParts.push('depCss='+depCssBlocks.length);
     const metaComment = `<!--component-compile ${metaParts.join(' ')}-->`+
-      (meta.missingComponents?.length ? `\n<!--missing-components:${meta.missingComponents.join(',')}-->` : '')+
-      (meta.libStubs?.length ? `\n<!--missing-lib-components:${meta.libStubs.join(',')}-->`:'')+
+      (meta.missingComponents.length ? `\n<!--missing-components:${meta.missingComponents.join(',')}-->`:'')+
+      (meta.libStubs.length ? `\n<!--missing-lib-components:${meta.libStubs.join(',')}-->`:'')+
       (depErrors.length ? `\n<!--dependency-errors:${depErrors.map(d=> d.dep+':'+d.error).join('|')}-->`:'');
-    // Script d'hydratation si SSR OK et domJsCode dispo
-    let hydrationScript = '';
+
+    const importMap = domJsCode && /svelte\/internal/.test(domJsCode) ? `\n<script type="importmap">{"imports":{"svelte/internal":"https://cdn.jsdelivr.net/npm/svelte@4.2.0/internal/index.js"}}</script>` : '';
+    const wrapStart = canRequire ? '<div id="__component_root">' : '<div id="__component_root" data-no-ssr="1">';
+    const depCssTag = depCssBlocks.length ? `\n<style data-deps-css="1">${depCssBlocks.join('\n/* --- */\n')}</style>` : '';
+    let hydrationScript='';
     if(canRequire && domJsCode){
-      // Encodage base64 pour import dynamique inline
-      const b64 = Buffer.from(domJsCode, 'utf-8').toString('base64');
+      const b64 = Buffer.from(domJsCode,'utf-8').toString('base64');
       const propsB64 = Buffer.from(JSON.stringify(globalThis.__LAST_COMPONENT_PROPS__||{}),'utf-8').toString('base64');
       hydrationScript = `<script>(function(){try{const js=atob('${b64}');const blob=new Blob([js],{type:'text/javascript'});const u=URL.createObjectURL(blob);const props=JSON.parse(atob('${propsB64}'));import(u).then(m=>{const C=m.default||m;const root=document.getElementById('__component_root');if(root){new C({target:root, hydrate:true, props});}}).catch(e=>console.warn('Hydration fail',e));}catch(e){console.warn('Hydration bootstrap error',e);}})();</script>`;
     } else if(!canRequire && domCompileError){
       hydrationScript = `<!-- dom compile error: ${domCompileError} -->`;
     }
-    const wrapStart = canRequire ? '<div id="__component_root">' : '<div id="__component_root" data-no-ssr="1">';
-    const depCssTag = depCssBlocks.length ? `\n<style data-deps-css=\"1\">${depCssBlocks.join('\n/* --- */\n')}</style>` : '';
-    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css\" />\n<script src=\"https://cdn.tailwindcss.com\"></script>${ depCssTag }${ css?.code ? `\n<style>${css.code}</style>` : '' }${ domCssCode && !css?.code ? `\n<style>${domCssCode}</style>`:''}</head><body class=\"p-4\">${metaComment}\n${wrapStart}${htmlBody}</div>${hydrationScript}</body></html>`;
+    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />\n<script src="https://cdn.tailwindcss.com"></script>${importMap}${depCssTag}${ css?.code ? `\n<style>${css.code}</style>`:'' }${ !css?.code && domCssCode ? `\n<style>${domCssCode}</style>`:''}</head><body class="p-4">${metaComment}\n${wrapStart}${htmlBody}</div>${hydrationScript}</body></html>`;
 
-    if(debug){
-      if(debugStages) debugStages.finalSource = source;
-      return json({
-        success:true,
-        html,
-        meta:{
-          missing: meta.missingComponents,
-          libStubs: meta.libStubs,
-          depCount: depRegistry.size,
-          depErrors,
-          depCssBlocks: depCssBlocks.length,
-          mode: canRequire?'ssr':'edge-fallback',
-          fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__
-        },
-        ssrJs: js?.code || null,
-        ssrTransformed: globalThis.__LAST_SSR_TRANSFORM__ || null,
-        domJs: domJsCode || null,
-        css: css?.code || '',
-        depCss: depCssBlocks,
-        dependencies: Array.from(depRegistry.keys()),
-        debugStages
-      });
-    }
+    if(debug){ if(debugStages) debugStages.finalSource = source; return json({ success:true, html, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages }); }
+
     return new Response(html, { headers: { 'Content-Type':'text/html; charset=utf-8' } });
-  } catch (e) {
-    console.error('compile/component error', e);
+  } catch(e){
+    console.error('compile/component fatal', e);
     return json({ success:false, error:e.message }, { status:500 });
   }
 }
