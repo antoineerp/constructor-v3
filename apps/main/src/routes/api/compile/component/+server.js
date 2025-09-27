@@ -9,7 +9,7 @@ import path from 'path';
 export async function POST({ request }) {
   try {
   const body = await request.json();
-  const { code, dependencies = {} } = body || {};
+  const { code, dependencies = {}, debug = false } = body || {};
     if(!code || !code.trim()) return json({ success:false, error:'Code requis' }, { status:400 });
     if(typeof globalThis.__COMP_COMPONENT_COUNT === 'undefined') globalThis.__COMP_COMPONENT_COUNT = 0;
     globalThis.__COMP_COMPONENT_COUNT++;
@@ -145,9 +145,14 @@ export async function POST({ request }) {
     const depRegistry = new Map(); // path -> { factory, exports }
     const depErrors = [];
     const depSources = Object.entries(dependencies).filter(([p])=> p.endsWith('.svelte'));
+    const depCssBlocks = []; // collecte CSS dépendances
     for(const [depPath, depCode] of depSources){
       try {
         const c = compile(depCode, { generate:'ssr', hydratable:true, filename: depPath });
+        if(c.css?.code){
+          const sig = c.css.code.trim();
+          if(!depCssBlocks.includes(sig)) depCssBlocks.push(sig);
+        }
         const transformed = transformEsmToCjs(c.js.code);
         const factory = new Function('module','exports','require','__import', transformed + '\n;');
         depRegistry.set(depPath, { factory, exports:null });
@@ -183,7 +188,7 @@ export async function POST({ request }) {
         function createStub(spec){
           return { default: { render: () => ({ html: `<span data-missing-module=\"${spec.replace(/"/g,'&quot;')}\"></span>` }) } };
         }
-        const transformed = transformEsmToCjs(js.code);
+        const rootTransformed = transformEsmToCjs(js.code);
         const module = { exports:{} };
         function execFactory(factory){
           factory(module, module.exports, (spec)=>{
@@ -218,10 +223,12 @@ export async function POST({ request }) {
             return createStub(spec);
           });
         }
-        const rootFactory = new Function('module','exports','require','__import', transformed + '\n;');
+        const rootFactory = new Function('module','exports','require','__import', rootTransformed + '\n;');
         execFactory(rootFactory);
         Component = module.exports.default || module.exports;
         if(!Component || typeof Component.render !== 'function') throw new Error('render() absent');
+        // Stocker transformation pour debug
+        globalThis.__LAST_SSR_TRANSFORM__ = rootTransformed;
       } catch(e){
         return json({ success:false, error:'Évaluation impossible: '+e.message }, { status:500 });
       }
@@ -261,6 +268,7 @@ export async function POST({ request }) {
     if(meta.libStubs?.length) metaParts.push('libstubs='+meta.libStubs.join('|'));
     if(depRegistry.size) metaParts.push('deps='+depRegistry.size);
     if(depErrors.length) metaParts.push('deperrors='+depErrors.length);
+    if(depCssBlocks.length) metaParts.push('depCss='+depCssBlocks.length);
     const metaComment = `<!--component-compile ${metaParts.join(' ')}-->`+
       (meta.missingComponents?.length ? `\n<!--missing-components:${meta.missingComponents.join(',')}-->` : '')+
       (meta.libStubs?.length ? `\n<!--missing-lib-components:${meta.libStubs.join(',')}-->`:'')+
@@ -276,7 +284,29 @@ export async function POST({ request }) {
       hydrationScript = `<!-- dom compile error: ${domCompileError} -->`;
     }
     const wrapStart = canRequire ? '<div id="__component_root">' : '<div id="__component_root" data-no-ssr="1">';
-    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css\" />\n<script src=\"https://cdn.tailwindcss.com\"></script>${ css?.code ? `\n<style>${css.code}</style>` : '' }${ domCssCode && !css?.code ? `\n<style>${domCssCode}</style>`:''}</head><body class=\"p-4\">${metaComment}\n${wrapStart}${htmlBody}</div>${hydrationScript}</body></html>`;
+    const depCssTag = depCssBlocks.length ? `\n<style data-deps-css=\"1\">${depCssBlocks.join('\n/* --- */\n')}</style>` : '';
+    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css\" />\n<script src=\"https://cdn.tailwindcss.com\"></script>${ depCssTag }${ css?.code ? `\n<style>${css.code}</style>` : '' }${ domCssCode && !css?.code ? `\n<style>${domCssCode}</style>`:''}</head><body class=\"p-4\">${metaComment}\n${wrapStart}${htmlBody}</div>${hydrationScript}</body></html>`;
+
+    if(debug){
+      return json({
+        success:true,
+        html,
+        meta:{
+          missing: meta.missingComponents,
+            libStubs: meta.libStubs,
+            depCount: depRegistry.size,
+            depErrors,
+            depCssBlocks: depCssBlocks.length,
+            mode: canRequire?'ssr':'edge-fallback'
+        },
+        ssrJs: js?.code || null,
+        ssrTransformed: globalThis.__LAST_SSR_TRANSFORM__ || null,
+        domJs: domJsCode || null,
+        css: css?.code || '',
+        depCss: depCssBlocks,
+        dependencies: Array.from(depRegistry.keys())
+      });
+    }
     return new Response(html, { headers: { 'Content-Type':'text/html; charset=utf-8' } });
   } catch (e) {
     console.error('compile/component error', e);

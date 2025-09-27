@@ -20,15 +20,63 @@
   let fileHashesForGeneration = []; // sélection utilisateur envoyée à generate/app
   let compileUrl = '';
   let compiling = false;
-  let activeView = 'code'; // 'files' | 'code' | 'preview-ssr' | 'preview-interactive'
+  let activeView = 'code'; // 'files' | 'code' | 'preview-ssr' | 'preview-interactive' | 'app-nav'
   const compileCache = new Map(); // filename -> objectURL
   const compileErrorCache = new Map(); // filename -> { firstTs, lastTs, count, lastError }
   const interactiveCache = new Map(); // filename -> { url, ts }
   let interactiveUrl = '';
   let interactiveLoading = false;
   let stubbedComponents = []; // liste des composants stub détectés (SSR preview)
+  let libStubbedComponents = []; // composants $lib stubés
+  let dependencyErrors = []; // erreurs compilation dépendances
   let generatingStub = null; // nom du composant en cours de génération
   let generatingAll = false; // flag génération groupée
+  let showCompileDebug = false; // toggle debug panel
+  let compileDebugData = null; // stockage réponse debug
+  // --- App navigation preview (étape 4) ---
+  let appNavUrl = '';
+  let appNavPath = '/';
+  let appNavLoading = false;
+  let appNavError = '';
+  let appAvailableRoutes = [];
+
+  function listLocalRoutes(){
+    if(!appFiles) return [];
+    return Object.keys(appFiles).filter(f=> f.startsWith('src/routes/') && f.endsWith('+page.svelte'))
+      .map(f=> f.replace(/^src\/routes\//,'').replace(/\/\+page\.svelte$/,'') || '/')
+      .sort();
+  }
+
+  async function loadAppRoute(path='/'){
+    appNavLoading = true; appNavError='';
+    try {
+      if(projectId){
+        const res = await fetch(`/api/projects/${projectId}/ssr?path=${encodeURIComponent(path)}`);
+        const data = await res.json();
+        if(!data.success){ appNavError = data.error||'Erreur route'; appAvailableRoutes = data.available||appAvailableRoutes; }
+        else {
+          appNavPath = path;
+          appAvailableRoutes = [...new Set([...(appAvailableRoutes||[]), path])];
+          const blob = new Blob([data.htmlHydratable||data.html||''], { type:'text/html' });
+          appNavUrl = URL.createObjectURL(blob);
+        }
+      } else {
+        const routes = listLocalRoutes();
+        appAvailableRoutes = routes;
+        if(!routes.includes(path)) { appNavError='Route non trouvée'; return; }
+        const targetFile = Object.keys(appFiles).find(f=> f.startsWith('src/routes/') && f.endsWith('+page.svelte') && (f.replace(/^src\/routes\//,'').replace(/\/\+page\.svelte$/,'')||'/')===path);
+        if(!targetFile){ appNavError='Fichier route introuvable'; return; }
+  const source = `<script>import Page from '${targetFile}';<\/script><Page />`;
+        const deps = collectDependencies(targetFile, appFiles[targetFile]);
+  const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: source, dependencies: { ...deps, [targetFile]: appFiles[targetFile] } }) });
+        if(!res.ok){ appNavError = await res.text(); }
+        else { const html = await res.text(); const blob = new Blob([html], { type:'text/html' }); appNavUrl = URL.createObjectURL(blob); appNavPath = path; }
+      }
+    } catch(e){ appNavError = e.message; }
+    finally { appNavLoading = false; }
+  }
+
+  $: if(activeView==='app-nav' && appFiles && !appNavUrl && !appNavLoading){ loadAppRoute(appNavPath||'/'); }
 
   async function generateStubComponent(name){
     if(!name || generatingStub) return;
@@ -417,6 +465,72 @@
     finally { bulkAutoRepairing=false; }
   }
 
+  // -------- Détection & résolution des dépendances pour compilation composant --------
+  // Normalisation basique d'un chemin relatif (sans accès à path.posix côté navigateur)
+  function normalizePath(parts){
+    const out=[];
+    for(const p of parts){
+      if(!p || p==='.') continue;
+      if(p==='..') { out.pop(); continue; }
+      out.push(p);
+    }
+    return out.join('/');
+  }
+
+  function resolveImport(spec, fromFile){
+    if(!appFiles) return null;
+    // $lib alias => src/lib/
+    if(spec.startsWith('$lib/')){
+      let rel = 'src/lib/' + spec.slice(5);
+      const candidates = [];
+      if(/\.(svelte|js|ts)$/.test(rel)) candidates.push(rel); else candidates.push(rel + '.svelte', rel + '.js');
+      for(const c of candidates){ if(appFiles[c]) return c; }
+      return null;
+    }
+    // Chemin relatif
+    if(spec.startsWith('./') || spec.startsWith('../')){
+      const baseDir = fromFile.includes('/') ? fromFile.slice(0, fromFile.lastIndexOf('/')) : '';
+      const rawParts = (baseDir ? baseDir.split('/') : []).concat(spec.split('/'));
+      let norm = normalizePath(rawParts);
+      const tries = [];
+      if(/\.(svelte|js|ts)$/.test(norm)) tries.push(norm); else tries.push(norm + '.svelte', norm + '.js');
+      for(const t of tries){ if(appFiles[t]) return t; }
+      return null;
+    }
+    // Import absolu relatif au root généré (ex: src/lib/components/Button)
+    if(spec.startsWith('src/')){
+      const tries = /\.(svelte|js|ts)$/.test(spec) ? [spec] : [spec + '.svelte', spec + '.js'];
+      for(const t of tries){ if(appFiles[t]) return t; }
+      return null;
+    }
+    return null; // on ignore dépendances de node_modules
+  }
+
+  function extractImports(code){
+    const out=[]; if(!code) return out;
+    const importRegex = /import\s+[^;]+?\s+from\s+['\"]([^'\"]+)['\"]/g; let m;
+    while((m = importRegex.exec(code))){ out.push(m[1]); }
+    return out;
+  }
+
+  function collectDependencies(entryFile, entryCode){
+    const deps={}; if(!appFiles) return deps;
+    const visited=new Set();
+    function walk(file, code, depth){
+      if(depth>25) return; // garde sécurité
+      const imports = extractImports(code);
+      for(const spec of imports){
+        const resolved = resolveImport(spec, file);
+        if(!resolved || visited.has(resolved) || resolved===entryFile) continue;
+        visited.add(resolved);
+        const depCode = appFiles[resolved];
+        if(depCode && resolved.endsWith('.svelte')){ deps[resolved] = depCode; walk(resolved, depCode, depth+1); }
+      }
+    }
+    walk(entryFile, entryCode, 0);
+    return deps;
+  }
+
   async function compileSelected() {
     if(!appSelectedFile || !appSelectedFile.endsWith('.svelte')) { compileUrl=''; return; }
     if(compiling) return; // garde anti rafale
@@ -429,7 +543,10 @@
     compiling = true; compileUrl='';
     try {
       // Utilise endpoint component compile direct sans projet persistant
-      const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: appFiles[appSelectedFile] }) });
+      const deps = collectDependencies(appSelectedFile, appFiles[appSelectedFile]);
+      const payload = { code: appFiles[appSelectedFile], dependencies: deps };
+      if(showCompileDebug) payload.debug = true;
+      const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       if(!res.ok){
         const text = await res.text();
         compileUrl='error:'+ text;
@@ -438,11 +555,20 @@
         else { errInfo.lastTs = now; errInfo.count++; errInfo.lastError = text.slice(0,180); compileErrorCache.set(appSelectedFile, errInfo); }
       }
       else {
-        // On ne peut pas directement iframer la réponse POST; on fabrique un blob local.
-        const html = await res.text();
-        const blob = new Blob([html], { type:'text/html' });
-        compileUrl = URL.createObjectURL(blob);
-        compileCache.set(appSelectedFile, compileUrl);
+        if(showCompileDebug){
+          const data = await res.json();
+          compileDebugData = data;
+          if(data.html){
+            const blob = new Blob([data.html], { type:'text/html' });
+            compileUrl = URL.createObjectURL(blob);
+            compileCache.set(appSelectedFile, compileUrl);
+          }
+        } else {
+          const html = await res.text();
+          const blob = new Blob([html], { type:'text/html' });
+            compileUrl = URL.createObjectURL(blob);
+            compileCache.set(appSelectedFile, compileUrl);
+        }
       }
     } catch(e){ compileUrl = 'error:'+e.message; }
     finally { compiling = false; }
@@ -472,6 +598,14 @@
         } else {
           stubbedComponents = [];
         }
+        const ml = text.match(/<!--missing-lib-components:([^>]+)-->/);
+        if(ml){
+          libStubbedComponents = ml[1].split(',').map(s=> s.trim()).filter(Boolean);
+        } else libStubbedComponents = [];
+        const de = text.match(/<!--dependency-errors:([^>]+)-->/);
+        if(de){
+          dependencyErrors = de[1].split('|').map(s=> s.trim()).filter(Boolean);
+        } else dependencyErrors = [];
       } catch(_e){ /* ignore */ }
     })();
   }
@@ -633,6 +767,9 @@
               <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='preview-interactive' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> { if(appSelectedFile?.endsWith('.svelte')) activeView='preview-interactive'; }} disabled={!appSelectedFile || !appSelectedFile.endsWith('.svelte')}>
                 <i class="fas fa-play-circle mr-1"></i>Interactif
               </button>
+              <button class="pb-2 -mb-px border-b-2 border-transparent hover:text-gray-800 {activeView==='app-nav' ? 'text-purple-600 border-purple-600' : 'text-gray-500'}" on:click={()=> { activeView='app-nav'; }} disabled={!appFiles}>
+                <i class="fas fa-compass mr-1"></i>App
+              </button>
             </div>
               <div class="flex items-center justify-between mt-3 mb-2 text-xs">
               <div class="flex items-center gap-2">
@@ -642,6 +779,7 @@
               <div class="flex items-center gap-3">
                 {#if appSelectedFile}
                   <button class="text-purple-600 hover:underline" on:click={copyCurrent}>Copier</button>
+                  <button class="text-gray-600 hover:underline" on:click={()=> { showCompileDebug=!showCompileDebug; compileDebugData=null; compileCache.delete(appSelectedFile); compileSelected(); }}>{showCompileDebug ? 'Debug:ON':'Debug:OFF'}</button>
                     <button class="text-gray-600 hover:underline disabled:opacity-40" disabled={!fileHistory.get(appSelectedFile)?.length} on:click={()=> showDiff=!showDiff}>{showDiff? 'Code':'Diff'}</button>
                     <button class="text-rose-600 hover:underline disabled:opacity-40" disabled={!fileHistory.get(appSelectedFile)?.length || restoring} on:click={restorePrevious}>
                       {#if restoring}<i class="fas fa-spinner fa-spin"></i>{:else}<i class="fas fa-rotate-left"></i>{/if} Restaurer
@@ -813,6 +951,50 @@
                 {:else if compileUrl}
                     <div class="w-full h-full">
                       <iframe title="Rendu SSR" src={compileUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
+                      {#if showCompileDebug && compileDebugData}
+                        <div class="absolute bottom-2 left-2 max-w-md text-[10px] bg-gray-900/90 text-gray-100 rounded shadow-lg p-3 space-y-2 border border-gray-700 overflow-auto max-h-60">
+                          <div class="flex items-center justify-between">
+                            <span class="font-semibold">Debug Compilation</span>
+                            <button class="text-xs underline" on:click={()=> compileDebugData=null}>clear</button>
+                          </div>
+                          <div class="grid grid-cols-2 gap-2">
+                            <div>
+                              <div class="text-gray-400">Meta</div>
+                              <pre class="whitespace-pre-wrap text-[9px] overflow-auto">{JSON.stringify(compileDebugData.meta,null,2)}</pre>
+                            </div>
+                            <div>
+                              <div class="text-gray-400">Dépendances</div>
+                              <pre class="whitespace-pre-wrap text-[9px] overflow-auto">{JSON.stringify(compileDebugData.dependencies,null,2)}</pre>
+                            </div>
+                          </div>
+                          <details>
+                            <summary class="cursor-pointer text-emerald-300">SSR JS (original)</summary>
+                            <pre class="text-[9px] overflow-auto max-h-40">{compileDebugData.ssrJs}</pre>
+                          </details>
+                          <details>
+                            <summary class="cursor-pointer text-amber-300">SSR JS (transformé)</summary>
+                            <pre class="text-[9px] overflow-auto max-h-40">{compileDebugData.ssrTransformed}</pre>
+                          </details>
+                          <details>
+                            <summary class="cursor-pointer text-indigo-300">DOM JS</summary>
+                            <pre class="text-[9px] overflow-auto max-h-40">{compileDebugData.domJs}</pre>
+                          </details>
+                          {#if compileDebugData.css}
+                            <details>
+                              <summary class="cursor-pointer text-pink-300">CSS Principal</summary>
+                              <pre class="text-[9px] overflow-auto max-h-40">{compileDebugData.css}</pre>
+                            </details>
+                          {/if}
+                          {#if compileDebugData.depCss?.length}
+                            <details open>
+                              <summary class="cursor-pointer text-cyan-300">CSS Dépendances ({compileDebugData.depCss.length})</summary>
+                              {#each compileDebugData.depCss as c,i}
+                                <pre class="text-[9px] overflow-auto max-h-28 border border-gray-700 p-1 rounded">/* dep {i+1} */\n{c}</pre>
+                              {/each}
+                            </details>
+                          {/if}
+                        </div>
+                      {/if}
                       {#if stubbedComponents.length}
                         <div class="absolute top-2 right-2 max-w-xs text-[10px] bg-amber-50 border border-amber-300 text-amber-800 rounded shadow p-2 space-y-1">
                           <div class="font-semibold flex items-center justify-between gap-2">
@@ -853,6 +1035,33 @@
                   <div class="p-4 text-xs text-red-600 bg-red-50 h-full overflow-auto">{interactiveUrl.slice(6)}</div>
                 {:else if interactiveUrl}
                   <iframe title="Sandbox Interactif" sandbox="allow-scripts" src={interactiveUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
+                {/if}
+              {/if}
+            </div>
+          {:else if activeView==='app-nav'}
+            <div class="flex-1 bg-white relative flex flex-col">
+              {#if !appFiles}
+                <div class="flex-1 flex items-center justify-center text-gray-500 text-xs">Génère une application pour naviguer.</div>
+              {:else}
+                <div class="border-b bg-gray-50 px-3 py-2 flex items-center gap-2 text-[11px]">
+                  <span class="font-semibold text-gray-600 flex items-center gap-1"><i class="fas fa-compass text-purple-600"></i> Navigation</span>
+                  <input class="px-2 py-1 border rounded text-xs" bind:value={appNavPath} placeholder="/" on:keydown={(e)=> { if(e.key==='Enter') loadAppRoute(appNavPath||'/'); }} />
+                  <button class="px-2 py-1 rounded bg-purple-600 text-white text-xs disabled:opacity-50" on:click={()=> loadAppRoute(appNavPath||'/')} disabled={appNavLoading}>Go</button>
+                  {#if appNavLoading}<i class="fas fa-spinner fa-spin text-purple-600"></i>{/if}
+                  {#if appNavError}<span class="text-red-600 truncate">{appNavError}</span>{/if}
+                  <div class="ml-auto flex items-center gap-2 text-gray-500">
+                    {#if appAvailableRoutes.length}
+                      <select class="border rounded text-xs px-1 py-0.5" on:change={(e)=> loadAppRoute(e.target.value)}>
+                        <option disabled selected>Routes</option>
+                        {#each appAvailableRoutes as r}<option value={r}>{r}</option>{/each}
+                      </select>
+                    {/if}
+                  </div>
+                </div>
+                {#if appNavUrl}
+                  <iframe title="App Preview" src={appNavUrl} class="flex-1 w-full h-full"></iframe>
+                {:else}
+                  <div class="flex-1 flex items-center justify-center text-gray-400 text-xs">Aucune route chargée.</div>
                 {/if}
               {/if}
             </div>
