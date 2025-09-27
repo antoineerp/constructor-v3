@@ -189,6 +189,34 @@ export async function POST({ request }) {
         if(Component && Component.default && (Component.default.render || Component.default.$$render)) Component = Component.default;
         if(!Component) throw new Error('export default manquant');
 
+        // Heuristique Svelte (nouvelle forme) : fonction SSR qui utilise $$renderer.push(...)
+        if(typeof Component === 'function' && !Component.render){
+          const fnSrc = Function.prototype.toString.call(Component);
+          if(/\$\$renderer\.push\(/.test(fnSrc)){
+            // Construire un wrapper non compté comme fallback (pas de modification fallbackUsed)
+            const ssrFn = Component;
+            Component = {
+              render: (props)=>{
+                try {
+                  const chunks = [];
+                  const $$renderer = {
+                    push: (s)=>{ if(s!=null) chunks.push(String(s)); },
+                    replace: (s)=>{ if(s!=null) chunks.push(String(s)); }
+                  };
+                  // Essayer d'appeler avec (renderer, props) si arité >=2 sinon juste renderer
+                  if(ssrFn.length >= 2){ ssrFn($$renderer, props||{}); } else { ssrFn($$renderer); }
+                  const html = chunks.join('');
+                  globalThis.__LAST_SSR_FALLBACK_NOTE__ = (globalThis.__LAST_SSR_FALLBACK_NOTE__? globalThis.__LAST_SSR_FALLBACK_NOTE__+';':'') + 'wrapped-$$renderer.push';
+                  globalThis.__LAST_SSR_EXPORT_PICK__ = globalThis.__LAST_SSR_EXPORT_PICK__ || 'ssr-fn-wrapper';
+                  return { html };
+                } catch(e){
+                  return { html: `<pre data-render-error>ssrFn wrapper error: ${e.message.replace(/</g,'&lt;')}</pre>` };
+                }
+              }
+            };
+          }
+        }
+
         function wrapFromBase(base){ fallbackUsed=true; return { render:(p)=>{ try { return { html: base.$$render({}, p||{}, {}, {}) }; } catch(e){ return { html:`<pre data-render-error>$$render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; } } }; }
 
         if(typeof Component.render !== 'function'){
