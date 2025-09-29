@@ -1,5 +1,6 @@
 <script>
   import '../app.css';
+  import '$lib/design/tokens.css';
   import '@fortawesome/fontawesome-free/css/all.min.css';
   import { supabase } from '$lib/supabase.js';
   import { onMount } from 'svelte';
@@ -40,7 +41,26 @@
     // session existante => aller vers dashboard approprié
     window.location.href = isAdmin ? '/admin' : '/user';
   }
+  export let data;
+  $: seo = data?.seo || {};
+  const fullTitle = seo?.title ? seo.title : 'Constructor V3';
 </script>
+
+<svelte:head>
+  <title>{fullTitle}</title>
+  {#if seo.description}<meta name="description" content={seo.description} />{/if}
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  {#if seo.title}<meta property="og:title" content={seo.title} />{/if}
+  {#if seo.description}<meta property="og:description" content={seo.description} />{/if}
+  {#if seo.image}<meta property="og:image" content={seo.image} />{/if}
+  {#if seo.url}<meta property="og:url" content={seo.url} />{/if}
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  {#if seo.title}<meta name="twitter:title" content={seo.title} />{/if}
+  {#if seo.description}<meta name="twitter:description" content={seo.description} />{/if}
+  {#if seo.image}<meta name="twitter:image" content={seo.image} />{/if}
+</svelte:head>
 
 <main>
   <nav class="bg-gray-900 text-white px-4 py-2 flex items-center gap-8">
@@ -69,7 +89,7 @@
       {/if}
     </div>
   </nav>
-  <main class="bg-gray-50 min-h-screen">
+  <main class="min-h-screen" style="background:var(--color-bg); color:var(--color-text);">
     <slot />
   </main>
 </main>
