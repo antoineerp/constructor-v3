@@ -2,7 +2,8 @@ import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 
 // Forcer runtime Node (Vercel) afin d'autoriser require/new Function sans restrictions edge
-export const config = { runtime: 'nodejs18.x' };
+// Mise à jour vers Node 20 (Node 18 indiqué comme invalide par Vercel sur ce projet)
+export const config = { runtime: 'nodejs20.x' };
 
 // POST /api/compile/dom  { code: string }
 // Retourne { success, js, css } pour exécution côté client (hydration interactive)

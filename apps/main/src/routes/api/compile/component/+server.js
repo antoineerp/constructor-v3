@@ -3,7 +3,8 @@ import { compile } from 'svelte/compiler';
 import { createRequire } from 'module';
 
 // Forcer runtime Node (Vercel) pour ce handler lourd (compilation SSR)
-export const config = { runtime: 'nodejs18.x' };
+// Node 18 rejeté par Vercel (message "invalid runtime"), on passe à Node 20.
+export const config = { runtime: 'nodejs20.x' };
 
 // Endpoint: compile & SSR un snippet Svelte (avec dépendances .svelte fournies) + hydratation.
 // Body attendu: { code: string, dependencies?: { [path:string]: string }, debug?: boolean }
