@@ -11,7 +11,7 @@ export const config = { runtime: 'nodejs20.x' };
 export async function POST({ request }) {
   try {
     const body = await request.json();
-    const { code, dependencies = {}, debug = false } = body || {};
+  const { code, dependencies = {}, debug = false, strict = false } = body || {};
     if(!code || !code.trim()) return json({ success:false, error:'Code requis' }, { status:400 });
     if(typeof globalThis.__COMP_COMPONENT_COUNT === 'undefined') globalThis.__COMP_COMPONENT_COUNT = 0;
     globalThis.__COMP_COMPONENT_COUNT++;
@@ -30,7 +30,8 @@ export async function POST({ request }) {
       source = `<script>export let props = {};</script>\n${source}`;
     }
 
-    const meta = { missingComponents: [], libStubs: [], depProvided: Object.keys(dependencies).length };
+  const meta = { missingComponents: [], libStubs: [], depProvided: Object.keys(dependencies).length };
+  const heuristics = [];
     const debugStages = debug ? { original: originalSource } : null;
 
     // --- Helpers ---
@@ -191,7 +192,8 @@ export async function POST({ request }) {
           }
         }
         if(Component && Component.default && (Component.default.render || Component.default.$$render)) Component = Component.default;
-        if(!Component) throw new Error('export default manquant');
+  if(!Component) throw new Error('export default manquant');
+  heuristics.push('base-export-type=' + (typeof Component));
 
         // Normalisation large spectre des formes SSR possibles avant toute logique fallback
         if(typeof Component === 'function' && !Component.render){
@@ -217,6 +219,7 @@ export async function POST({ request }) {
                 }
               };
               fallbackNote = (fallbackNote?fallbackNote+';':'')+'normalized-arity-ssr-fn';
+              heuristics.push('normalized:arity-ssr-fn');
             } else if(usesRendererPush){
               const ssrFn = Component;
               Component = {
@@ -232,14 +235,28 @@ export async function POST({ request }) {
                 }
               };
               fallbackNote = (fallbackNote?fallbackNote+';':'')+'normalized-renderer-push-fn';
+              heuristics.push('normalized:renderer-push');
             }
           } catch(_e){ /* ignore heuristic error */ }
         }
 
         function wrapFromBase(base){ fallbackUsed=true; return { render:(p)=>{ try { return { html: base.$$render({}, p||{}, {}, {}) }; } catch(e){ return { html:`<pre data-render-error>$$render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; } } }; }
 
-  // Phase fallback stricte seulement si après normalisation aucune méthode render
-  if(typeof Component.render !== 'function'){
+        // Si strict: on refuse tout fallback si pas de Component.render à ce stade
+        if(strict && typeof Component.render !== 'function'){
+          const shapeDesc = Object.keys(Component||{}).slice(0,5).join(',');
+          const reason = 'Aucun render() après normalisation (shape='+(typeof Component)+ (shapeDesc? ' keys='+shapeDesc:'') + ') en mode strict';
+          heuristics.push('strict-abort');
+          if(debug){
+            return json({ success:false, error: reason, meta:{ heuristics, strict:true } }, { status:422, headers:{ 'X-Compile-Mode':'ssr', 'X-Strict':'1', 'X-Compile-Error-Reason':'no-render-strict' } });
+          } else {
+            const html = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Erreur SSR strict</title></head><body><pre style="color:#b91c1c;font:12px/1.4 monospace;white-space:pre-wrap;">${reason}</pre></body></html>`;
+            return new Response(html, { status:422, headers:{ 'Content-Type':'text/html; charset=utf-8','X-Compile-Mode':'ssr','X-Strict':'1','X-Compile-Error-Reason':'no-render-strict' } });
+          }
+        }
+
+        // Phase fallback (non-strict) seulement si après normalisation aucune méthode render
+        if(typeof Component.render !== 'function'){
           if(Component.$$render){ Component = wrapFromBase(Component); }
           else if(Component.prototype && Component.prototype.$$render){ const proto = Component.prototype; fallbackUsed=true; Component = { render:(p)=>{ try { return { html: proto.$$render({}, p||{}, {}, {}) }; } catch(e){ return { html:`<pre data-render-error>proto $$render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; } } }; }
           else if(typeof Component === 'function'){
@@ -287,6 +304,7 @@ export async function POST({ request }) {
         globalThis.__LAST_SSR_EXPORT_PICK__ = exportPick;
         globalThis.__LAST_SSR_FALLBACK_NOTE__ = fallbackNote;
         globalThis.__LAST_SSR_TRANSFORM__ = transformCaptured;
+        globalThis.__LAST_SSR_HEURISTICS__ = heuristics;
       } catch(e){
         return json({ success:false, error:'Évaluation impossible: '+e.message }, { status:500 });
       }
@@ -334,9 +352,10 @@ export async function POST({ request }) {
 
     if(debug){
       if(debugStages) debugStages.finalSource = source;
-      const r = json({ success:true, html, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages });
+      const r = json({ success:true, html, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null, heuristics: globalThis.__LAST_SSR_HEURISTICS__||[], strict }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages });
       r.headers.set('X-Compile-Mode','ssr');
       r.headers.set('X-Fallback-Used', (globalThis.__LAST_SSR_FALLBACK__? '1':'0'));
+      if(strict) r.headers.set('X-Strict','1');
       return r;
     }
 
@@ -349,7 +368,7 @@ export async function POST({ request }) {
       "connect-src 'none'",
       "frame-ancestors 'none'"
     ].join('; ');
-    const res = new Response(html, { headers: { 'Content-Type':'text/html; charset=utf-8', 'X-Compile-Mode':'ssr', 'X-Fallback-Used': (globalThis.__LAST_SSR_FALLBACK__? '1':'0'), 'Cache-Control':'no-store', 'Content-Security-Policy': csp } });
+  const res = new Response(html, { headers: { 'Content-Type':'text/html; charset=utf-8', 'X-Compile-Mode':'ssr', 'X-Fallback-Used': (globalThis.__LAST_SSR_FALLBACK__? '1':'0'), 'Cache-Control':'no-store', 'Content-Security-Policy': csp, ...(strict? { 'X-Strict':'1'} : {}) } });
     return res;
   } catch(e){
     console.error('compile/component fatal', e);
