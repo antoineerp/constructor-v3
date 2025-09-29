@@ -1,7 +1,8 @@
-<script lang="ts">
-  export let label: string = 'Bouton';
-  export let variant: 'primary' | 'secondary' = 'primary';
-  export let disabled: boolean = false;
+<script>
+  // Types retirés pour compat ESLint rapide; réintroduire via lang="ts" une fois parser TS stabilisé
+  export let label = 'Bouton';
+  export let variant = 'primary'; // 'primary' | 'secondary'
+  export let disabled = false;
 </script>
 
 <button

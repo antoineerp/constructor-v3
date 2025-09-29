@@ -23,12 +23,22 @@
   let compilingSSR = false;
   let compilingDOM = false;
   let ssrUrl = '';
+  let lastSSRHtml = '';
   let domUrl = '';
   let errorSSR = '';
   let errorDOM = '';
   let showDebug = true;
   let strictMode = false;
   let debugData = null; // réponse JSON debug du endpoint component
+  let ssrFrame; // référence iframe SSR
+
+  function copyInner(){
+    try {
+      if(!ssrFrame?.contentDocument) return;
+      const inner = ssrFrame.contentDocument.querySelector('#__component_root')?.innerHTML || ssrFrame.contentDocument.body.innerHTML;
+      navigator.clipboard.writeText(inner.trim());
+    } catch(e){ alert('Copie impossible: '+e.message); }
+  }
 
   // Persistence locale simple
   const STORAGE_KEY = 'sandbox-svelte-v1';
@@ -85,12 +95,14 @@
         else {
           debugData = data;
           if(data.html){
+            lastSSRHtml = data.html;
             const blob = new Blob([data.html], { type:'text/html' });
             ssrUrl = URL.createObjectURL(blob);
           } else errorSSR='Pas de HTML retourné';
         }
       } else {
         const html = await res.text();
+        lastSSRHtml = html;
         const blob = new Blob([html], { type:'text/html' });
         ssrUrl = URL.createObjectURL(blob);
       }
@@ -105,22 +117,22 @@
       const data = await res.json();
       if(!data.success){ errorDOM = data.error || 'Erreur DOM'; }
       else {
-    const css = data.css ? `<style>${data.css}</style>` : '';
-    const js = data.js.replace(/<\/script>/g,'<\\/script>').replace(/export default /,'window.__App = ');
-    const htmlParts = [];
-    htmlParts.push('<!DOCTYPE html><html><head><meta charset="utf-8" />');
-    // CSP: quotes internes échappées proprement
-    htmlParts.push('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\' blob: https://cdn.tailwindcss.com; style-src \'unsafe-inline\' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com; img-src data: blob:; font-src https://cdnjs.cloudflare.com; connect-src \'none\';">');
-    htmlParts.push('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />');
-  htmlParts.push('<script src="https://cdn.tailwindcss.com"><\/script>');
-    if(css) htmlParts.push(css);
-    htmlParts.push('</head><body class="p-2"><div id="app"></div>');
-  htmlParts.push('<script>(function(){');
-    htmlParts.push('const blob = new Blob(["'+js.replace(/"/g,'\\"')+'"], { type: "text/javascript" });');
-    htmlParts.push('const u = URL.createObjectURL(blob);');
-    htmlParts.push('import(u).then(m=>{ const App = window.__App || m.default; new App({ target: document.getElementById("app"), props:{ name:"Sandbox" } }); }).catch(e=>{document.body.innerHTML = "<pre style=\"color:red\">"+e.message+"</pre>"});');
-  htmlParts.push('})();<\/script></body></html>');
-        const blob = new Blob([htmlParts.join('\n')], { type:'text/html' });
+        const css = data.css ? `<style>${data.css}</style>` : '';
+        // On encode le JS complet (sans tentative de substitution hasardeuse) en base64 pour préserver la syntaxe
+        let rawJs = data.js.replace(/export default /,'window.__App = ');
+        const b64 = btoa(unescape(encodeURIComponent(rawJs)));
+        const needsInternal = /from\s+['"]svelte\/internal['"]/.test(rawJs);
+        const importMap = needsInternal ? `\n<script type=\"importmap\">${JSON.stringify({ imports:{ 'svelte/internal':'https://cdn.jsdelivr.net/npm/svelte@4.2.0/internal/index.js','svelte/internal/':'https://cdn.jsdelivr.net/npm/svelte@4.2.0/internal/' } })}<\/script>`: '';
+        const missingDepHint = /import\s+.+\.svelte['"]/.test(rawJs) ? '<div class=\"text-[10px] text-amber-600 mb-2\">(Attention: les dépendances .svelte ne sont pas encore chargées côté DOM compile)</div>' : '';
+  const html = String.raw`<!DOCTYPE html><html><head><meta charset='utf-8' />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob: https://cdn.tailwindcss.com; style-src 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com; img-src data: blob:; font-src https://cdnjs.cloudflare.com; connect-src 'none';">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+<script src="https://cdn.tailwindcss.com"><\/script>${importMap}${css}
+</head><body class="p-2">
+${missingDepHint}<div id="app"></div>
+<script>(function(){try{const js=decodeURIComponent(escape(atob('${b64}')));const blob=new Blob([js],{type:'text/javascript'});const u=URL.createObjectURL(blob);import(u).then(m=>{const App=window.__App||m.default;if(!App) throw new Error('App introuvable');new App({target:document.getElementById('app'), props:{ name:'Sandbox' }});}).catch(e=>{document.body.innerHTML='<pre style="color:#b91c1c;font:12px monospace;white-space:pre-wrap">'+e.message+'</pre>';});}catch(e){document.body.innerHTML='<pre style="color:#b91c1c">'+e.message+'</pre>';}})();<\/script>
+</body></html>`;
+        const blob = new Blob([html], { type:'text/html' });
         domUrl = URL.createObjectURL(blob);
       }
     } catch(e){ errorDOM = e.message; }
@@ -217,12 +229,20 @@
       <div class="bg-white border rounded-lg shadow-sm flex flex-col relative">
         <div class="flex items-center justify-between px-3 py-2 border-b bg-gray-50 text-xs">
           <span class="font-semibold text-gray-700 flex items-center gap-2"><i class="fas fa-eye text-purple-600"></i> Rendu SSR</span>
+          {#if lastSSRHtml}
+            <button class="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700" on:click={() => navigator.clipboard.writeText(lastSSRHtml)}>Copier HTML</button>
+          {/if}
           {#if compilingSSR}<i class="fas fa-spinner fa-spin text-purple-600"></i>{/if}
         </div>
         {#if errorSSR}
           <div class="p-3 text-[11px] text-red-600 whitespace-pre-wrap overflow-auto">{errorSSR}</div>
         {:else if ssrUrl}
-          <iframe title="SSR" src={ssrUrl} class="flex-1 w-full h-full"></iframe>
+          <div class="flex-1 flex flex-col">
+            <iframe title="SSR" src={ssrUrl} class="flex-1 w-full h-full" bind:this={ssrFrame}></iframe>
+            <div class="border-t p-1 flex gap-2 justify-end bg-gray-50">
+              <button class="px-2 py-0.5 rounded bg-purple-600 text-white text-[10px]" on:click={copyInner}>Copier inner</button>
+            </div>
+          </div>
         {:else}
           <div class="p-4 text-[11px] text-gray-400">Aucun rendu.</div>
         {/if}

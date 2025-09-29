@@ -127,10 +127,21 @@
 						return `<div class=\\"p-3 rounded border bg-white shadow-sm flex flex-col gap-1\\"><div class=\\"font-semibold text-[12px] text-gray-800\\">${fTitle}</div>${fDesc?`<div class=\\"text-[11px] text-gray-500 leading-snug\\">${fDesc}</div>`:''}</div>`;
 					}).join('')}</div></section>`;
 				}
+				const pricingPlans = Array.isArray(bp.pricing?.plans)? bp.pricing.plans.slice(0,4): [];
+				let pricingBlock='';
+				if(pricingPlans.length){
+					pricingBlock = `<section class=\\"space-y-4\\"><h2 class=\\"text-sm font-semibold text-gray-700\\">Pricing</h2><div class=\\"grid gap-4 md:grid-cols-${Math.min(2,pricingPlans.length)} lg:grid-cols-${Math.min(4,pricingPlans.length)}\\">${pricingPlans.map(pl=> {
+						const name=(pl.name||pl.title||'Plan').replace(/</g,'&lt;');
+						const price=(pl.price||pl.amount||pl.monthly||'').toString().replace(/</g,'&lt;');
+						const desc=(pl.description||pl.subtitle||'').replace(/</g,'&lt;');
+						const feats=Array.isArray(pl.features)? `<ul class=\\"mt-2 space-y-1 text-[11px] text-gray-600\\">${pl.features.slice(0,6).map(f=>`<li class=\\"flex items-start gap-1\\"><span class=\\"text-emerald-600 mt-0.5 fas fa-check text-[10px]\\"></span><span>${String(f).replace(/</g,'&lt;')}</span></li>`).join('')}</ul>`:'';
+						return `<div class=\\"p-4 border rounded-lg bg-white shadow-sm flex flex-col\\"><h3 class=\\"font-semibold text-gray-800 text-sm\\">${name}</h3>${desc?`<p class=\\"text-[11px] text-gray-500 mt-0.5\\">${desc}</p>`:''}<div class=\\"mt-2 text-2xl font-bold text-gray-900\\">${price}</div>${feats}<a href=\\"#\\" class=\\"mt-auto inline-block px-3 py-1.5 rounded text-xs bg-gray-900 text-white hover:bg-gray-700\\">Choisir</a></div>`;
+					}).join('')}</div></section>`;
+				}
 				const palette = bp.color_palette || {};
 				const paletteCss = Object.entries(palette).map(([k,v])=> `--bp-${k}: ${String(v).replace(/`/g,'\\`')};`).join(' ');
 				const safeTitle = title.replace(/`/g,'\\`');
-				code = `<script>\nexport let blueprint = JSON.parse(atob('${encodedBlueprint}'));\n${imports}\n<\/script>\n<div class=\"p-5 font-sans text-sm space-y-8 bg-gradient-to-br from-gray-50 to-gray-100 min-h-full\" style=\"${paletteCss}\">\n${heroBlock}\n<header class=\"space-y-1\"><h1 class=\"text-2xl font-bold\">${safeTitle}</h1><p class=\"text-[12px] text-gray-500\">Prévisualisation avancée (démo)</p></header>\n${featuresBlock}\n<section class=\"grid gap-4 md:grid-cols-2 lg:grid-cols-3\">${compsMarkup}</section>\n${routesBlock}\n</div>`;
+				code = `<script>\nexport let blueprint = JSON.parse(atob('${encodedBlueprint}'));\n${imports}\n<\/script>\n<div class=\"p-5 font-sans text-sm space-y-8 bg-gradient-to-br from-gray-50 to-gray-100 min-h-full\" style=\"${paletteCss}\">\n${heroBlock}\n<header class=\"space-y-1\"><h1 class=\"text-2xl font-bold\">${safeTitle}</h1><p class=\"text-[12px] text-gray-500\">Prévisualisation avancée (démo)</p></header>\n${featuresBlock}\n${pricingBlock}\n<section class=\"grid gap-4 md:grid-cols-2 lg:grid-cols-3\">${compsMarkup}</section>\n${routesBlock}\n</div>`;
 			}
 			const body = { code, debug:false };
 			if(advanced) body.strict = true;

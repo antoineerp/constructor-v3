@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 import { openaiService } from '$lib/openaiService.js';
-import { supabase as clientSupabase } from '$lib/supabase.js';
+import { supabase as clientSupabase, isSupabaseEnabled } from '$lib/supabase.js';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { summarizeCatalog, selectComponentsForBlueprint } from '$lib/catalog/components.js';
@@ -27,6 +27,8 @@ export async function POST(event) {
   try {
     const body = await request.json();
   const { query, projectId, regenerateFile, simpleMode, generationProfile = 'safe', provider='openai', chatContext = [] } = body;
+    // Flags optionnels pour alléger la génération (ex: { auth:false, docs:false, datatable:false })
+    const featureFlags = { auth:true, docs:true, datatable:true, ...(body?.features||{}) };
     // Récupération token Supabase (passé côté client via Authorization: Bearer <access_token>)
     const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
     let userId = null;
@@ -50,7 +52,7 @@ export async function POST(event) {
   let ephemeral = !userId && !projectId;
 
     let project = null;
-    if (projectId) {
+  if (projectId && isSupabaseEnabled) {
       try {
         // Vérifier ownership si userId connu
         const queryBuilder = clientSupabase.from('projects').select('*').eq('id', projectId);
@@ -73,9 +75,9 @@ export async function POST(event) {
     }
 
     // Si régénération d'un fichier spécifique
-    if (regenerateFile && project?.blueprint_json) {
+  if (regenerateFile && project?.blueprint_json && isSupabaseEnabled) {
       // Chercher le fichier existant dans project_files pour confirmer existence (optionnel)
-      const { data:existingFile } = await clientSupabase.from('project_files').select('*').eq('project_id', project.id).eq('filename', regenerateFile).maybeSingle();
+  const { data:existingFile } = await clientSupabase.from('project_files').select('*').eq('project_id', project.id).eq('filename', regenerateFile).maybeSingle();
       const blueprint = project.blueprint_json;
       const per = blueprint?.recommended_prompts?.per_file || [];
       const target = per.find(p => p.filename === regenerateFile);
@@ -89,7 +91,6 @@ export async function POST(event) {
       const { error:pfErr } = await clientSupabase.from('project_files')
         .upsert({ project_id: project.id, filename: regenerateFile, content: newContent, stage: 'final', pass_index: 0 }, { onConflict: 'project_id,filename' });
       if (pfErr) throw pfErr;
-      // Mettre à jour l'agrégat code_generated (option legacy)
       const updatedCode = { ...(project.code_generated||{}), [regenerateFile]: newContent };
       await clientSupabase.from('projects').update({ code_generated: updatedCode }).eq('id', project.id);
       return json({ success:true, regenerated: regenerateFile, fileContent: newContent });
@@ -141,7 +142,14 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
 
     // Construire prompt global à partir du blueprint
     let files = {};
-    const selected = selectComponentsForBlueprint(blueprint, 12);
+    // Filtrer certains composants selon flags
+    let selected = selectComponentsForBlueprint(blueprint, 12);
+    selected = selected.filter(c => {
+      if(!featureFlags.auth && /AuthLoginForm/i.test(c.name)) return false;
+      if(!featureFlags.docs && /MarkdownRenderer|TabsBasic/i.test(c.name)) return false;
+      if(!featureFlags.datatable && /DataTable|TableSortable/i.test(c.name)) return false;
+      return true;
+    });
     const catalogSummary = selected.map(c => `${c.name} -> ${c.filename} : ${c.purpose}`).join('\n');
     const validationIssues = {}; // new: collect issues per file
 
@@ -271,7 +279,7 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
     }
 
   // Mise à jour / création projet
-    if (!project && !ephemeral) {
+  if (!project && !ephemeral && isSupabaseEnabled) {
       try {
         const insertData = {
           name: blueprint.seo_meta?.title?.slice(0,60) || 'Projet sans nom',
@@ -291,7 +299,7 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
           ephemeral = true; project = null;
         } else throw dbInsErr;
       }
-    } else if(project && !ephemeral) {
+  } else if(project && !ephemeral && isSupabaseEnabled) {
       try {
         const { error:updErr } = await clientSupabase.from('projects').update({ blueprint_json: blueprint, code_generated: files }).eq('id', project.id);
         if (updErr) throw updErr;
@@ -304,7 +312,7 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
     }
 
     // Stocker chaque fichier dans project_files (upsert pour idempotence)
-    if(!ephemeral && project){
+  if(!ephemeral && project && isSupabaseEnabled){
       try {
         const fileEntries = Object.entries(files || {});
         for (const [filename, content] of fileEntries) {
@@ -322,7 +330,7 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
     // Heuristique: si >5 fichiers avec issues ou palette incohérente -> passage refine rapide en mémoire puis persistance
     const issueFiles = Object.keys(validationIssues).length;
   timings.preRefine = Date.now();
-  if(!simpleMode && issueFiles > 5 && !ephemeral){
+  if(!simpleMode && issueFiles > 5 && !ephemeral && isSupabaseEnabled){
       let criticalCount = 0; let nonCriticalOver = 0; let accessibilityBonus = 0;
       const blueprintPalette = blueprint.color_palette || [];
       for(const [fname, content] of Object.entries(files)){
@@ -337,13 +345,17 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
         if(accIssues.length){ current = c3; aggregatedIssues.push(...accIssues); accessibilityBonus += accIssues.includes('Added empty alt to img') ? 1 : 0; }
         if(current !== files[fname]){
           files[fname] = current;
-          await clientSupabase.from('project_files').upsert({ project_id: project.id, filename: fname, content: current, stage: 'refined-auto', pass_index: 1 }, { onConflict: 'project_id,filename' });
+          if(isSupabaseEnabled){
+            await clientSupabase.from('project_files').upsert({ project_id: project.id, filename: fname, content: current, stage: 'refined-auto', pass_index: 1 }, { onConflict: 'project_id,filename' });
+          }
         }
       }
       let score = 100 - criticalCount*5 - nonCriticalOver*1 + Math.min(5, accessibilityBonus);
       if(score<0) score=0; if(score>100) score=100;
       try {
-        await clientSupabase.from('projects').update({ code_generated: files, last_auto_refine_score: score }).eq('id', project.id);
+        if(isSupabaseEnabled){
+          await clientSupabase.from('projects').update({ code_generated: files, last_auto_refine_score: score }).eq('id', project.id);
+        }
       } catch(dbRefineErr){ console.warn('[site/generate] update refine ignoré:', dbRefineErr.message); }
 
       // Régénération ciblée (max 2 fichiers) si score < 85
@@ -364,7 +376,9 @@ Ancienne version:
             if(regenRes[fname]){
               const { fixed } = validateAndFix(regenRes[fname], { filename: fname });
               files[fname] = fixed;
-              await clientSupabase.from('project_files').upsert({ project_id: project.id, filename: fname, content: fixed, stage: 'refined-regen', pass_index: 2 }, { onConflict: 'project_id,filename' });
+              if(isSupabaseEnabled){
+                await clientSupabase.from('project_files').upsert({ project_id: project.id, filename: fname, content: fixed, stage: 'refined-regen', pass_index: 2 }, { onConflict: 'project_id,filename' });
+              }
             }
           } catch(err){ console.warn('Targeted regen failed', fname, err.message); }
         }
@@ -426,7 +440,7 @@ Ancienne version:
     console.warn('validateFiles global failed', e.message);
   }
   try {
-    if(!ephemeral){
+    if(!ephemeral && isSupabaseEnabled){
       await clientSupabase.from('generation_logs').insert({
         user_id: project?.owner_id || project?.user_id || userId || null,
         project_id: project?.id || null,
@@ -487,7 +501,7 @@ Ancienne version:
 
   // Persistance finale generation_logs (après critic + quality)
   try {
-    if(!ephemeral){
+    if(!ephemeral && isSupabaseEnabled){
       await clientSupabase.from('generation_logs').insert({
         user_id: project?.owner_id || project?.user_id || userId || null,
         project_id: project?.id || null,
@@ -514,7 +528,7 @@ Ancienne version:
   }
 }
 
-function buildAppPrompt(blueprint, { simpleMode, generationProfile = 'safe' } = {}){
+function buildAppPrompt(blueprint, { simpleMode, generationProfile = 'safe', featureFlags = { auth:true, docs:true, datatable:true } } = {}){
   const { routes = [], core_components = [], color_palette = [], sample_content = {}, seo_meta = {} } = blueprint || {};
   const articles = sample_content.articles || [];
   if(simpleMode){
@@ -534,7 +548,9 @@ Articles disponibles: ${articles.slice(0,4).map(a=>a.title).join(' | ')}
 Retourne JSON: {"src/routes/+page.svelte":"CONTENU"}`.trim();
   }
   // Construction des fichiers attendus à partir des routes + composants
-  const routeFileMappings = routes.map(r => {
+  const routeFileMappings = routes
+    .filter(r => featureFlags.docs ? true : !/^\/docs/.test(r.path||''))
+    .map(r => {
     const p = r.path || '/';
     if(p === '/' || p === '') return 'src/routes/+page.svelte';
     // dynamique : /articles/:slug
@@ -542,7 +558,11 @@ Retourne JSON: {"src/routes/+page.svelte":"CONTENU"}`.trim();
     return 'src/routes/' + segs.join('/') + '/+page.svelte';
   });
   const uniqueRoutes = Array.from(new Set(routeFileMappings));
-  const componentFiles = (core_components || []).map(name => {
+  const componentFiles = (core_components || [])
+    .filter(n => featureFlags.auth ? true : !/AuthLoginForm/i.test(n))
+    .filter(n => featureFlags.docs ? true : !/MarkdownRenderer/i.test(n))
+    .filter(n => featureFlags.datatable ? true : !/DataTable|TableSortable/i.test(n))
+    .map(name => {
     const safe = name.replace(/[^A-Za-z0-9]/g,'');
     return `src/lib/components/${safe}.svelte`;
   });

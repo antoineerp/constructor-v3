@@ -11,6 +11,39 @@ function getAuthSupabase(request){
 
 export async function GET({ url, request }){
   try {
+    // Fallback mock si Supabase non configuré (dev local / tests CI)
+    if(!PUBLIC_SUPABASE_URL || !PUBLIC_SUPABASE_ANON_KEY){
+      const mock = [
+        {
+          id: 'mock-1',
+            name: 'Demo SaaS',
+            description: 'Blueprint démo (mode mock sans Supabase)',
+            created_at: new Date().toISOString(),
+            blueprint_json: {
+              seo_meta: { title: 'SaaS Starter' },
+              hero: { title:'Accélérez votre SaaS', subtitle:'Stack SvelteKit + Tailwind générée', cta:{ label:'Commencer', href:'#' } },
+              features: [
+                { title:'Auth', description:'Flux sécurisé' },
+                { title:'Dashboard', description:'KPI dynamiques' },
+                { title:'Billing', description:'Intégration Stripe (placeholder)' }
+              ],
+              pricing: { plans:[
+                { name:'Free', price:'0€', features:['1 projet','Limité'] },
+                { name:'Pro', price:'29€/mois', features:['Projets illimités','Support'] }
+              ]},
+              routes:[ { path:'/', description:'Accueil' }, { path:'/dashboard', description:'Dashboard' } ],
+              core_components:['HeaderPro','KpiCards','DataTable']
+            }
+        }
+      ];
+      const id = url.searchParams.get('id');
+      if(id){
+        const t = mock.find(m=> m.id===id);
+        if(!t) return json({ success:false, error:'mock introuvable'}, { status:404 });
+        return json({ success:true, template:t, mock:true });
+      }
+      return json({ success:true, templates: mock, mock:true });
+    }
     const { client } = getAuthSupabase(request);
     const id = url.searchParams.get('id');
     if(id){

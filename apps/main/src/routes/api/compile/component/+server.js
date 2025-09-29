@@ -8,10 +8,11 @@ export const config = { runtime: 'nodejs20.x' };
 
 // Endpoint: compile & SSR un snippet Svelte (avec dépendances .svelte fournies) + hydratation.
 // Body attendu: { code: string, dependencies?: { [path:string]: string }, debug?: boolean }
-export async function POST({ request }) {
+export async function POST(event) {
   try {
+    const { request, fetch } = event;
     const body = await request.json();
-  const { code, dependencies = {}, debug = false, strict = false } = body || {};
+  const { code, dependencies = {}, debug = false, strict = false, allowAutoRepair = true, _autoRepairAttempt = false } = body || {};
     if(!code || !code.trim()) return json({ success:false, error:'Code requis' }, { status:400 });
     if(typeof globalThis.__COMP_COMPONENT_COUNT === 'undefined') globalThis.__COMP_COMPONENT_COUNT = 0;
     globalThis.__COMP_COMPONENT_COUNT++;
@@ -20,7 +21,8 @@ export async function POST({ request }) {
       try { const { createHash } = await import('crypto'); return createHash('sha1').update(code).digest('hex').slice(0,12); } catch { return 'na'; }
     })();
 
-    const originalSource = code;
+  const originalSource = code;
+  let autoRepairMeta = null; // stocke résultat éventuel de la tentative AI
     let source = code;
 
     // Heuristique: ajouter un <script> minimal si contenu simple sans script pour permettre export de props.
@@ -242,6 +244,11 @@ export async function POST({ request }) {
 
         function wrapFromBase(base){ fallbackUsed=true; return { render:(p)=>{ try { return { html: base.$$render({}, p||{}, {}, {}) }; } catch(e){ return { html:`<pre data-render-error>$$render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; } } }; }
 
+        // Auto-réparation opportuniste: si erreur typique "X is not a function" sur un composant catalogue référencé
+        function needsAutoRepair(errMsg){
+          return /is not a function/.test(errMsg||'');
+        }
+
         // Si strict: on refuse tout fallback si pas de Component.render à ce stade
         if(strict && typeof Component.render !== 'function'){
           const shapeDesc = Object.keys(Component||{}).slice(0,5).join(',');
@@ -297,7 +304,81 @@ export async function POST({ request }) {
         // Props init heuristique
         const propRegex = /export\s+let\s+([A-Za-z0-9_]+)(\s*=\s*([^;]+))?;/g; let pm; const initialProps={};
         while((pm = propRegex.exec(source))){ const name = pm[1]; const raw = pm[3]; if(raw){ const t=raw.trim(); try { if(/^["'`].*["'`]$/.test(t)) initialProps[name]=t.slice(1,-1); else if(/^(true|false)$/i.test(t)) initialProps[name]=t.toLowerCase()==='true'; else if(/^[0-9]+(\.[0-9]+)?$/.test(t)) initialProps[name]=Number(t); else if(/^[\[{].*[\]}]$/.test(t)) { try { initialProps[name]=JSON.parse(t); } catch{} } else initialProps[name]=null; } catch{ initialProps[name]=null; } } else { initialProps[name]=null; } }
-        const rendered = Component.render ? Component.render(initialProps) : { html:'' };
+        let rendered;
+        try {
+          rendered = Component.render ? Component.render(initialProps) : { html:'' };
+        } catch(execErr){
+          const msg = execErr.message||'';
+          if(needsAutoRepair(msg)){
+            rendered = { html:`<div class=\"p-3 text-xs text-amber-700 bg-amber-50 border border-amber-300 rounded\">Tentative: composant non exécutable (${msg}). Vérifie les imports ou régénère le fichier concerné.</div>` };
+            heuristics.push('auto-repair-hint');
+          } else {
+            rendered = { html:`<pre data-render-error>render error: ${msg.replace(/</g,'&lt;')}</pre>` };
+          }
+        }
+        // === Tentative Auto-Repair (mode B) ===
+        // Conditions: heuristique auto-repair-hint OU fallback + pas encore tenté + autorisé + clé OpenAI disponible
+        const shouldAttemptRepair = allowAutoRepair && !_autoRepairAttempt && (heuristics.includes('auto-repair-hint') || (typeof Component.render !== 'function')) && !!process.env.OPENAI_API_KEY;
+        if(shouldAttemptRepair){
+          try {
+            heuristics.push('auto-repair-pass-start');
+            const repairResp = await fetch('/api/repair/auto', {
+              method: 'POST',
+              headers: { 'Content-Type':'application/json' },
+              body: JSON.stringify({ filename:'Component.svelte', code: originalSource, maxPasses: 1, allowCatalog: true })
+            });
+            const repairJson = await repairResp.json();
+            if(repairJson?.success && repairJson.fixedCode && repairJson.fixedCode.trim() && repairJson.fixedCode !== originalSource){
+              autoRepairMeta = { attempted:true, success:true, passes: repairJson.passes, source: repairJson.source };
+              // Recompiler à partir du code réparé (une seule passe) — réutilise pipeline simplifiée
+              let repairedSource = repairJson.fixedCode;
+              // On applique les mêmes réécritures lib/unknown pour cohérence
+              const repairedAfterLib = rewriteLibImports(repairedSource, meta, dependencies);
+              const repairedAfterUnknown = injectUnknownComponentPlaceholders(repairedAfterLib, meta);
+              repairedSource = repairedAfterUnknown;
+              let repairedCompiled;
+              try { repairedCompiled = compile(repairedSource, { generate:'ssr', hydratable:true, filename:'Component.svelte' }); } catch(reCompErr){
+                autoRepairMeta.compileError = reCompErr.message;
+              }
+              if(repairedCompiled){
+                try {
+                  const transformed2 = transformEsmToCjs(repairedCompiled.js.code);
+                  const m2 = { exports:{} };
+                  const f2 = new Function('module','exports','require','__import', transformed2 + '\n;');
+                  // ré-exécution minimaliste (sans dép .svelte recompile car invariantes)
+                  f2(m2, m2.exports, (spec)=>{
+                    if(spec === 'svelte/internal') return localRequire('svelte/internal');
+                    try { return localRequire(spec); } catch { return { default:{ render:()=>({ html:`<span data-missing-module=\"${spec}\"></span>` }) } }; }
+                  }, ()=>({ default:{ render:()=>({ html:'<span data-import-stub></span>' }) } }));
+                  let C2 = m2.exports.default || m2.exports;
+                  if(C2 && C2.default && (C2.default.render||C2.default.$$render)) C2 = C2.default;
+                  if(C2 && !C2.render && C2.$$render){ C2 = { render:(p)=>({ html:C2.$$render({}, p||{}, {}, {}) }) }; }
+                  let out2 = '';
+                  try { out2 = (C2 && C2.render) ? C2.render({}).html : ''; } catch(e){ out2 = `<pre data-render-error>post-repair render error: ${e.message.replace(/</g,'&lt;')}</pre>`; }
+                  // Remplacer htmlBody par la version réparée seulement si non vide
+                  if(out2){
+                    rendered.html = out2 + `<div data-auto-repair-note class=\"hidden\">auto-repair applied</div>`;
+                    heuristics.push('auto-repair-success');
+                  } else {
+                    heuristics.push('auto-repair-empty-output');
+                  }
+                } catch(reEvalErr){
+                  autoRepairMeta.evalError = reEvalErr.message;
+                  heuristics.push('auto-repair-eval-error');
+                }
+              }
+            } else {
+              autoRepairMeta = { attempted:true, success:false, reason: repairJson?.error || 'repair-no-change' };
+              heuristics.push('auto-repair-no-change');
+            }
+          } catch(repairErr){
+            autoRepairMeta = { attempted:true, success:false, reason: repairErr.message || 'repair-exception' };
+            heuristics.push('auto-repair-exception');
+          }
+        } else if(allowAutoRepair && !_autoRepairAttempt && !process.env.OPENAI_API_KEY && heuristics.includes('auto-repair-hint')) {
+          autoRepairMeta = { attempted:false, success:false, reason:'missing-openai-key' };
+          heuristics.push('auto-repair-skip-no-key');
+        }
         htmlBody = rendered.html;
         globalThis.__LAST_COMPONENT_PROPS__ = initialProps;
         globalThis.__LAST_SSR_FALLBACK__ = fallbackUsed || (typeof Component.render !== 'function');
@@ -322,6 +403,7 @@ export async function POST({ request }) {
     if(meta.libStubs.length) metaParts.push('libstubs='+meta.libStubs.length);
     if(depErrors.length) metaParts.push('deperrors='+depErrors.length);
     if(depCssBlocks.length) metaParts.push('depCss='+depCssBlocks.length);
+    if(autoRepairMeta && autoRepairMeta.success) metaParts.push('autoRepair=1'); else if(autoRepairMeta && autoRepairMeta.attempted) metaParts.push('autoRepair=0');
     const metaComment = `<!--component-compile ${metaParts.join(' ')}-->`+
       (meta.missingComponents.length ? `\n<!--missing-components:${meta.missingComponents.join(',')}-->`:'')+
       (meta.libStubs.length ? `\n<!--missing-lib-components:${meta.libStubs.join(',')}-->`:'')+
@@ -353,7 +435,7 @@ export async function POST({ request }) {
     if(debug){
       if(debugStages) debugStages.finalSource = source;
   const hs = globalThis.__LAST_SSR_HEURISTICS__||[];
-  const r = json({ success:true, html, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null, heuristics: hs, heuristicPath: hs.join(' > '), strict }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages });
+  const r = json({ success:true, html, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null, heuristics: hs, heuristicPath: hs.join(' > '), strict, autoRepair: autoRepairMeta }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages });
       r.headers.set('X-Compile-Mode','ssr');
       r.headers.set('X-Fallback-Used', (globalThis.__LAST_SSR_FALLBACK__? '1':'0'));
       if(strict) r.headers.set('X-Strict','1');
