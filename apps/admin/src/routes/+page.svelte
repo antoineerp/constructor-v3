@@ -19,6 +19,28 @@
 	let previewAdvanced = false;
 	let lastPreviewCode = '';
 	let lastPreviewDependencies = {};
+	const API_BASE = import.meta.env?.PUBLIC_MAIN_API_BASE || '';
+
+	// Preview d'un composant individuel du catalogue
+	async function previewComponent(comp){
+		previewOpen = true; previewAdvanced = false; previewLoading = true; previewError=''; previewUrl='';
+		try {
+			let code = comp.code;
+			// Si le snippet n'a pas de <script>, injecter un export minimal pour éviter heuristique vide
+			if(!/<script[>\s]/.test(code)) code = `<script>export let props={};<\/script>\n`+code;
+			const res = await fetch(`${API_BASE}/api/compile/component`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code, debug:false }) });
+			const ct = res.headers.get('content-type')||'';
+			if(!res.ok){
+				if(ct.includes('application/json')){ const j= await res.json(); throw new Error(j.error||'Erreur compilation'); }
+				throw new Error('HTTP '+res.status);
+			}
+			const html = await res.text();
+			const blob = new Blob([html], { type:'text/html' });
+			previewUrl = URL.createObjectURL(blob);
+			lastPreviewCode = code; lastPreviewDependencies = {};
+		} catch(e){ previewError = e.message; }
+		finally { previewLoading = false; }
+	}
 
 	function closePreview(){
 		previewOpen = false; previewUrl=''; previewError='';
@@ -87,15 +109,33 @@
 					return `<div class=\\"border rounded p-2 bg-white shadow-sm flex flex-col gap-1\\"><${base}${attr? ' '+attr:''} />${attr?`<code class=\\"text-[10px] text-gray-500\\">props: ${attr.replace(/{/g,'(').replace(/}/g,')')}</code>`:''}</div>`;
 				}).join('\n');
 				const routesBlock = Array.isArray(bp.routes) && bp.routes.length ? `<section class=\"space-y-1\"><h2 class=\"text-sm font-semibold text-gray-700\">Routes</h2>${bp.routes.map(r=> `<div class=\\"text-[11px] text-gray-600 border-b last:border-b-0 py-1\\"><code>${(r.path||'/').replace(/</g,'&lt;')}</code> ${(r.description||'').replace(/</g,'&lt;')}</div>`).join('')}</section>` : '<div class=\\"text-[11px] text-gray-400\\">(Aucune route)</div>';
+				// Sections hero & features
+				const hero = bp.hero && typeof bp.hero==='object' ? bp.hero : null;
+				let heroBlock = '';
+				if(hero){
+					const hTitle = (hero.title||'').replace(/</g,'&lt;');
+					const hSub = (hero.subtitle||'').replace(/</g,'&lt;');
+					const cta = hero.cta && hero.cta.label ? `<a href=\\"${(hero.cta.href||'#').replace(/"/g,'&quot;')}\\" class=\\"inline-block mt-3 px-4 py-2 rounded bg-emerald-600 text-white text-xs font-medium\\">${hero.cta.label.replace(/</g,'&lt;')}</a>`:'';
+					heroBlock = `<section class=\\"rounded-lg p-6 bg-gradient-to-r from-emerald-500 to-teal-500 text-white space-y-2\\"><h1 class=\\"text-2xl font-bold\\">${hTitle}</h1>${hSub?`<p class=\\"text-sm opacity-90\\">${hSub}</p>`:''}${cta}</section>`;
+				}
+				const features = Array.isArray(bp.features)? bp.features.slice(0,12): [];
+				let featuresBlock = '';
+				if(features.length){
+					featuresBlock = `<section class=\\"space-y-3\\"><h2 class=\\"text-sm font-semibold text-gray-700\\">Features</h2><div class=\\"grid gap-3 md:grid-cols-2 lg:grid-cols-3\\">${features.map(f=> {
+						const fTitle = (f.title||'').replace(/</g,'&lt;');
+						const fDesc = (f.description||f.text||'').replace(/</g,'&lt;');
+						return `<div class=\\"p-3 rounded border bg-white shadow-sm flex flex-col gap-1\\"><div class=\\"font-semibold text-[12px] text-gray-800\\">${fTitle}</div>${fDesc?`<div class=\\"text-[11px] text-gray-500 leading-snug\\">${fDesc}</div>`:''}</div>`;
+					}).join('')}</div></section>`;
+				}
 				const palette = bp.color_palette || {};
 				const paletteCss = Object.entries(palette).map(([k,v])=> `--bp-${k}: ${String(v).replace(/`/g,'\\`')};`).join(' ');
 				const safeTitle = title.replace(/`/g,'\\`');
-				code = `<script>\nexport let blueprint = JSON.parse(atob('${encodedBlueprint}'));\n${imports}\n<\/script>\n<div class=\"p-5 font-sans text-sm space-y-6 bg-gradient-to-br from-gray-50 to-gray-100 min-h-full\" style=\"${paletteCss}\">\n<header class=\"space-y-1\"><h1 class=\"text-2xl font-bold\">${safeTitle}</h1><p class=\"text-[12px] text-gray-500\">Prévisualisation avancée (démo)</p></header>\n<section class=\"grid gap-4 md:grid-cols-2 lg:grid-cols-3\">${compsMarkup}</section>\n${routesBlock}\n</div>`;
+				code = `<script>\nexport let blueprint = JSON.parse(atob('${encodedBlueprint}'));\n${imports}\n<\/script>\n<div class=\"p-5 font-sans text-sm space-y-8 bg-gradient-to-br from-gray-50 to-gray-100 min-h-full\" style=\"${paletteCss}\">\n${heroBlock}\n<header class=\"space-y-1\"><h1 class=\"text-2xl font-bold\">${safeTitle}</h1><p class=\"text-[12px] text-gray-500\">Prévisualisation avancée (démo)</p></header>\n${featuresBlock}\n<section class=\"grid gap-4 md:grid-cols-2 lg:grid-cols-3\">${compsMarkup}</section>\n${routesBlock}\n</div>`;
 			}
 			const body = { code, debug:false };
 			if(advanced) body.strict = true;
 			if(Object.keys(dependencies).length) body.dependencies = dependencies;
-			const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+			const res = await fetch(`${API_BASE}/api/compile/component`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
 			const ct = res.headers.get('content-type')||'';
 			if(!res.ok){
 				if(ct.includes('application/json')){ const j = await res.json(); throw new Error(j.error||'Erreur compilation'); }
@@ -322,7 +362,10 @@
 						<div class="border rounded-lg p-4 bg-gradient-to-br from-gray-50 to-white flex flex-col">
 							<div class="flex items-center justify-between mb-2">
 								<h3 class="font-semibold text-gray-800 text-sm">{comp.name}</h3>
-								<span class="text-[10px] px-2 py-0.5 rounded bg-purple-100 text-purple-700">{comp.tags.join(', ')}</span>
+									<span class="flex items-center gap-2">
+										<span class="text-[10px] px-2 py-0.5 rounded bg-purple-100 text-purple-700">{comp.tags.join(', ')}</span>
+										<button class="text-[10px] px-2 py-0.5 rounded bg-indigo-600 text-white hover:bg-indigo-700" type="button" on:click={() => previewComponent(comp)}>Preview</button>
+									</span>
 							</div>
 							<p class="text-gray-600 text-xs mb-3 leading-relaxed line-clamp-3">{comp.purpose}</p>
 							<div class="flex items-center justify-between text-[10px] text-gray-400 mb-1">
