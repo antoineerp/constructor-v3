@@ -1,6 +1,5 @@
 <script>
   import '../app.css';
-  import '$lib/design/tokens.css';
   import '@fortawesome/fontawesome-free/css/all.min.css';
   import { onMount } from 'svelte';
 
@@ -48,6 +47,7 @@
 </script>
 
 <svelte:head>
+  <link rel="stylesheet" href="/api/design/tokens" data-tokens="1" />
   <title>{fullTitle}</title>
   {#if seo.description}<meta name="description" content={seo.description} />{/if}
   <!-- Open Graph -->

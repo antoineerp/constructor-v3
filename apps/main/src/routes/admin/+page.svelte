@@ -6,8 +6,13 @@
   import Input from '$lib/Input.svelte';
   import Modal from '$lib/Modal.svelte';
   import { supabase } from '$lib/supabase.js';
+  import { listPromptTemplates } from '$lib/prompt/promptLibrary.js';
 
   let activeTab = 'dashboard';
+  let promptTemplates = [];
+  function loadPrompts(){
+    try { promptTemplates = listPromptTemplates(); } catch { promptTemplates = []; }
+  }
   // Preview ad-hoc (C)
   let previewCode = `<script>\n  export let label = 'Bouton';\n  let count = 0;\n  function inc(){ count++; }\n<\/script>\n\n<button class=\"px-4 py-2 bg-blue-600 text-white rounded\" on:click={inc}>{label} {count}</button>`;
   let previewHtml = '';
@@ -248,6 +253,13 @@
           <i class="fas fa-eye mr-2"></i>
           Preview
         </button>
+        <button
+          class="py-4 px-1 border-b-2 font-medium text-sm {activeTab === 'prompts' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+          on:click={() => { activeTab = 'prompts'; loadPrompts(); }}
+        >
+          <i class="fas fa-paragraph mr-2"></i>
+          Prompts
+        </button>
       </nav>
     </div>
   </div>
@@ -477,6 +489,20 @@
             </div>
           </div>
         </div>
+      </Card>
+    {/if}
+
+    {#if activeTab === 'prompts'}
+      <Card title="Templates de Prompts" subtitle="Templates disponibles dans promptLibrary">
+        {#if !promptTemplates.length}
+          <p class="text-sm text-gray-500">Aucun template.</p>
+        {:else}
+          <ul class="list-disc ml-5 text-sm space-y-1">
+            {#each promptTemplates as p}
+              <li><code class="px-1.5 py-0.5 bg-gray-100 rounded text-[11px]">{p}</code></li>
+            {/each}
+          </ul>
+        {/if}
       </Card>
     {/if}
     

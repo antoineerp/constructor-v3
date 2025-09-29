@@ -35,4 +35,4 @@ export function setCached(hash, value, ttlMs = 5*60*1000){
   cache.set(hash, { value, expires: Date.now()+ttlMs });
 }
 
-export function stats(){ return { size: cache.size }; }
+// export function stats(){ return { size: cache.size }; } // désactivé (non utilisé)
