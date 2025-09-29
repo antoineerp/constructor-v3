@@ -11,6 +11,47 @@
 	let newTplDesc = '';
 	let tplError = '';
 
+	// Preview Template (SSR via endpoint compile/component)
+	let previewOpen = false;
+	let previewLoading = false;
+	let previewUrl = '';
+	let previewError = '';
+
+	function closePreview(){
+		previewOpen = false; previewUrl=''; previewError='';
+	}
+
+	async function previewTemplate(t){
+		previewError=''; previewUrl=''; previewLoading=true; previewOpen=true;
+		try {
+			const bp = t.blueprint_json || {};
+			const title = (bp.seo_meta?.title || t.name || 'Template Aperçu')+'';
+			const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(bp))));
+			// Svelte snippet basique affichant titre + routes si présentes
+			// (Pour éviter complexité on génère du HTML statique depuis blueprint dans un seul composant principal)
+			const routeBlocks = Array.isArray(bp.routes) ? bp.routes.map(r=> {
+				const p = (r.path||'/').replace(/`/g,'\\`');
+				const d = (r.description||'').replace(/`/g,'\\`').replace(/</g,'&lt;');
+				return `<div class=\"border rounded p-2 mb-2 bg-gray-50\"><code class=\"text-xs text-gray-600\">${p}</code><div class=\"text-[11px] text-gray-500 mt-1\">${d}</div></div>`;
+			}).join('') : '';
+			const safeTitle = title.replace(/`/g,'\\`');
+			const code = `<script>\nconst blueprint = JSON.parse(atob('${encoded}'));\n<\/script>\n<div class=\"p-4 font-sans text-sm space-y-3\">\n<h1 class=\"text-xl font-bold\">${safeTitle}</h1>\n${routeBlocks || '<div class=\\"text-[11px] text-gray-400\\">(Aucune route définie)</div>'}\n</div>`;
+			const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code, debug:false }) });
+			const ct = res.headers.get('content-type')||'';
+			if(!res.ok){
+				if(ct.includes('application/json')){ const j = await res.json(); throw new Error(j.error||'Erreur compilation'); }
+				throw new Error('Erreur HTTP '+res.status);
+			}
+			const html = await res.text();
+			const blob = new Blob([html], { type:'text/html' });
+			previewUrl = URL.createObjectURL(blob);
+		} catch(e){
+			previewError = e.message;
+		} finally {
+			previewLoading = false;
+		}
+	}
+
 	async function loadTemplates(){
 		try {
 			tplLoading = true; tplError='';
@@ -272,6 +313,9 @@
 										<div class="border rounded p-3 bg-gradient-to-br from-gray-50 to-white flex flex-col text-xs">
 											<h3 class="font-semibold text-gray-800 mb-1 flex items-center gap-2"><i class="fas fa-layer-group text-green-500"></i>{t.name}</h3>
 											<p class="text-gray-600 line-clamp-3 mb-2">{t.description}</p>
+											<div class="flex gap-2 mb-2">
+												<button class="px-2 py-1 rounded bg-green-600 text-white text-[11px]" type="button" on:click={() => previewTemplate(t)}>Prévisualiser</button>
+											</div>
 											<details class="mt-auto group">
 												<summary class="cursor-pointer text-[11px] text-green-600 hover:underline flex items-center gap-1"><i class="fas fa-eye"></i> Blueprint</summary>
 												<div class="mt-2 space-y-1">
@@ -291,6 +335,26 @@
 		{/if}
 	</main>
 </div>
+
+{#if previewOpen}
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" tabindex="0" on:keydown={(e)=> e.key==='Escape' && closePreview()} on:click|self={closePreview}>
+	<div class="bg-white rounded shadow-lg w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden">
+		<div class="px-4 py-2 border-b flex items-center gap-3 text-sm">
+			<strong>Prévisualisation Template</strong>
+			{#if previewLoading}<span class="text-xs text-gray-500 animate-pulse">Compilation…</span>{/if}
+			{#if previewError}<span class="text-xs text-red-600">{previewError}</span>{/if}
+			<button class="ml-auto text-xs px-2 py-1 rounded bg-gray-200 hover:bg-gray-300" on:click={closePreview}>Fermer</button>
+		</div>
+		<div class="flex-1 relative bg-gray-50">
+			{#if previewUrl && !previewLoading}
+				<iframe title="preview" src={previewUrl} class="absolute inset-0 w-full h-full bg-white border-0" sandbox="allow-scripts"></iframe>
+			{:else}
+				<div class="w-full h-full flex items-center justify-center text-xs text-gray-500">{previewError ? 'Erreur' : 'Compilation en cours…'}</div>
+			{/if}
+		</div>
+	</div>
+</div>
+{/if}
 
 <style>
 	/* Styles Tailwind seront appliqués */
