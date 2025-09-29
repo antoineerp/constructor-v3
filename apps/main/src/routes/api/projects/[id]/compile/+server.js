@@ -114,9 +114,10 @@ export async function POST(event){
     }
     const importStmtRegex = /import\s+[^'";]*?from\s+['"]([^'"\n]+)['"];?|import\s+['"]([^'"\n]+)['"];?/g;
     for(const [pathName, source] of svelteEntries){
+      let css = ''; let jsCode = ''; let error = null;
       try {
-  const c = compile(source, { generate:'dom', filename: pathName, css:true });
-        let jsCode = c.js.code;
+        const c = compile(source, { generate:'dom', filename: pathName, css:'injected' });
+        jsCode = c.js.code;
         // Inline CSS si présent (simple concat) — amélioration future: module séparé
         if(c.css && c.css.code){
           jsCode = `/* <style> inlined */\n` + jsCode + `\n/*# sourceMappingURL omitted */`;
@@ -143,7 +144,7 @@ export async function POST(event){
             }
           }
         } catch(_e){ /* ignore raw scan */ }
-  modules.push({ path: pathName, jsCode, imports: importMap });
+        modules.push({ path: pathName, jsCode, imports: importMap });
       } catch(e){
         modules.push({ path: pathName, error: e.message });
       }
@@ -301,6 +302,15 @@ export async function POST(event){
         const transformedCode = code
           .replace(/export\s+default\s+/, `window.${varName} = `)
           .replace(/import\s+([^;]+?)\s+from\s+['"]([^'"]+)['"];?/g, (match, imports, importPath) => {
+            // Gérer les imports $lib/* en les stubant avec des objets par défaut
+            if(importPath.startsWith('$lib/')){
+              if(importPath === '$lib/supabase.js' || importPath === '$lib/supabase'){
+                return `const ${imports.trim()} = { from: () => ({ select: () => Promise.resolve({ data: [], error: null }), eq: () => ({ select: () => Promise.resolve({ data: [], error: null }) }) }), auth: { getUser: () => Promise.resolve({ data: { user: null }, error: null }) } };`;
+              }
+              // Autres imports $lib (componentGenerator, etc.)
+              return `const ${imports.trim()} = {}; // $lib stub`;
+            }
+            
             const depVar = moduleVars.get(importPath);
             if(depVar){
               // Simple default import

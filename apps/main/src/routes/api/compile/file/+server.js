@@ -27,7 +27,7 @@ export async function GET({ url, request }) {
     if(!filename.endsWith('.svelte')) return json({ success:false, error:'Seuls les fichiers .svelte sont compilables' }, { status:400 });
 
     let compiled;
-    try { compiled = compile(code, { generate:'ssr', css:false }); } catch(e){ return json({ success:false, error:'Erreur compilation: '+e.message }, { status:400 }); }
+    try { compiled = compile(code, { generate:'ssr', css:'external' }); } catch(e){ return json({ success:false, error:'Erreur compilation: '+e.message }, { status:400 }); }
     let Component;
     try {
       const fn = new Function('require','module','exports', compiled.js.code);

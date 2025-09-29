@@ -154,11 +154,13 @@
   // ====== SUPABASE ======
 
   // ====== DATA DASHBOARD ======
+  // Données (offline, remplacent Supabase)
   let stats = { totalProjects: 0, totalPrompts: 0, totalTemplates: 0, totalComponents: 0 };
   let projects = [];
   let templates = [];
   let components = [];
   let usageStats = [];
+  let catalogLoading = false; let catalogError='';
 
   // ====== MODALES ======
   let showNewTemplateModal = false;
@@ -167,31 +169,29 @@
   let newComponent = { name: '', type: 'button', category: 'ui', code: '' };
 
   onMount(async () => {
-    await loadDashboardData();
+    await refreshCatalog();
     await loadAIStatus();
   });
 
-  async function loadDashboardData() {
+  async function refreshCatalog(){
+    catalogLoading = true; catalogError='';
     try {
-      const [projectsRes, templatesRes, componentsRes, statsRes] = await Promise.all([
-        supabase.from('projects').select('*').limit(5),
-        supabase.from('templates').select('*'),
-        supabase.from('components').select('*'),
-        supabase.from('usage_stats').select('*').order('date', { ascending: false }).limit(7)
-      ]);
-      projects = projectsRes.data || [];
-      templates = templatesRes.data || [];
-      components = componentsRes.data || [];
-      usageStats = statsRes.data || [];
+      const r = await fetch('/api/catalog?ts='+Date.now());
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const j = await r.json();
+      if(!j.success) throw new Error(j.error||'Échec catalog');
+      templates = j.templates || [];
+      components = j.components || [];
+      projects = j.projects || [];
+      // Synthèse stats (usageStats non disponible offline)
       stats = {
         totalProjects: projects.length,
-        totalPrompts: usageStats.reduce((sum, stat) => sum + (stat.total_prompts || 0), 0),
+        totalPrompts: 0,
         totalTemplates: templates.length,
         totalComponents: components.length
       };
-    } catch (error) {
-      console.error('Erreur lors du chargement des données:', error);
-    }
+    } catch(e){ catalogError = e.message; }
+    finally { catalogLoading = false; }
   }
 
   async function createTemplate() {
@@ -199,22 +199,24 @@
     try {
       let structure;
       try { structure = JSON.parse(newTemplate.structure || '{}'); } catch { structure = { routes: [], components: [], features: [] }; }
-      const { error } = await supabase.from('templates').insert([{ name: newTemplate.name, type: newTemplate.type, description: newTemplate.description, structure }]);
-      if (error) throw error;
+      const res = await fetch('/api/catalog', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name: newTemplate.name, type: newTemplate.type, description: newTemplate.description, structure }) });
+      const data = await res.json();
+      if(!data.success) throw new Error(data.error||'Échec création');
       newTemplate = { name: '', type: 'e-commerce', description: '', structure: '' };
       showNewTemplateModal = false;
-      await loadDashboardData();
+      await refreshCatalog();
     } catch (error) { alert('Erreur lors de la création du template: ' + error.message); }
   }
 
   async function createComponent() {
     if (!newComponent.name || !newComponent.code) return;
     try {
-      const { error } = await supabase.from('components').insert([{ name: newComponent.name, type: newComponent.type, category: newComponent.category, code: newComponent.code, props: {} }]);
-      if (error) throw error;
+      const comp = { id: 'cmp_'+Date.now().toString(36), name: newComponent.name, type: newComponent.type, category: newComponent.category, code: newComponent.code, created_at: Date.now() };
+      // Pas d'endpoint dédié: injection locale (volatil)
+      components = [comp, ...components];
+      stats.totalComponents = components.length;
       newComponent = { name: '', type: 'button', category: 'ui', code: '' };
       showNewComponentModal = false;
-      await loadDashboardData();
     } catch (error) { alert('Erreur lors de la création du composant: ' + error.message); }
   }
 

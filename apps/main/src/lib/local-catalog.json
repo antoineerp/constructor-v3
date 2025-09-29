@@ -1,0 +1,47 @@
+{
+  "templates": [
+    {
+      "id": "starter-landing",
+      "name": "Landing Starter",
+      "type": "landing-page",
+      "description": "Une landing page simple avec hero, features et CTA.",
+      "structure": {
+        "routes": ["+page.svelte"],
+        "components": ["Hero.svelte", "FeatureGrid.svelte", "CtaSection.svelte"],
+        "features": ["hero", "features", "cta"]
+      },
+      "created_at": 1696000000000
+    },
+    {
+      "id": "starter-blog",
+      "name": "Blog Minimal",
+      "type": "blog",
+      "description": "Blog minimal avec page d'accueil et article exemple.",
+      "structure": {
+        "routes": ["+page.svelte", "blog/+page.svelte", "blog/[slug]/+page.svelte"],
+        "components": ["PostCard.svelte", "Tag.svelte"],
+        "features": ["listing", "article"]
+      },
+      "created_at": 1696005000000
+    }
+  ],
+  "components": [
+    {
+      "id": "ButtonPrimary",
+      "name": "ButtonPrimary",
+      "type": "button",
+      "category": "ui",
+      "code": "<script>export let label='Action'; export let disabled=false; const click=()=>{ if(disabled) return; dispatchEvent(new CustomEvent('press')); };<\/script>\n<button class=\"px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50\" {disabled} on:click={click}>{label}</button>",
+      "created_at": 1696001000000
+    },
+    {
+      "id": "CardPanel",
+      "name": "CardPanel",
+      "type": "card",
+      "category": "ui",
+      "code": "<script>export let title='Titre';<\/script>\n<div class=\"p-4 rounded border shadow-sm bg-white space-y-2\"><h3 class=\"font-semibold text-gray-800 text-sm\">{title}</h3><slot /></div>",
+      "created_at": 1696002000000
+    }
+  ],
+  "projects": []
+}

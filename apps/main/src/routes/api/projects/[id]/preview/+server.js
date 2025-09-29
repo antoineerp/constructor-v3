@@ -58,7 +58,7 @@ export async function GET(event){
     }
     let html = '';
     try {
-      const c = compile(source, { generate:'ssr', css:false, filename: entry });
+      const c = compile(source, { generate:'ssr', css:'external', filename: entry });
       const fn = new Function('require','module','exports', c.js.code);
       const mod = { exports: {} };
       fn((n)=> (n==='svelte/internal'? require('svelte/internal'): require(n)), mod, mod.exports);

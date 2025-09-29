@@ -415,7 +415,7 @@ Ancienne version:
   for(const [fname, content] of Object.entries(files)){
     if(!fname.endsWith('.svelte')) continue;
     try {
-      const c = compile(content, { generate: 'ssr', css: false });
+      const c = compile(content, { generate: 'ssr', css: 'external' });
       // tester render
       try {
         const fn = new Function('require','module','exports', c.js.code);

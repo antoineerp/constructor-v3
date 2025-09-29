@@ -364,6 +364,8 @@
         appSelectedFile = firstSvelte || keys[0] || null;
         // Si on a trouvé un .svelte on bascule automatiquement sur l'onglet Rendu SSR
   if(firstSvelte) activeView = 'preview-ssr'; else activeView='files';
+        // Déclenchement auto de la réparation groupée (corrige erreurs de syntaxe initiales)
+        setTimeout(()=>{ try { bulkAutoRepair(); } catch(_e){} }, 50);
       } else {
         appSelectedFile = null;
       }
@@ -610,6 +612,14 @@
   async function compileSelected() {
     if(!appSelectedFile || !appSelectedFile.endsWith('.svelte')) { compileUrl=''; return; }
     if(compiling) return; // garde anti rafale
+    // Garde anti-boucle si une runtimeUrl a déjà été générée il y a <1s pour ce fichier
+    if(runtimeUrl && compileCache.has('__last_runtime_file') && compileCache.get('__last_runtime_file')===appSelectedFile){
+      const lastTs = compileCache.get('__last_runtime_ts');
+      if(lastTs && Date.now()-lastTs < 1000){
+        console.warn('[compileSelected] boucle runtime freinée');
+        return;
+      }
+    }
     // Si on a une erreur récente (<5s) pour ce fichier, ne pas relancer immédiatement
     const errInfo = compileErrorCache.get(appSelectedFile);
     if(errInfo && Date.now() - errInfo.lastTs < 5000) {
@@ -635,18 +645,23 @@
           compileDebugData = showCompileDebug ? data : null;
           lastInvalidImports = data.invalidImports||[];
           // Toujours nettoyer l'ancienne URL
-          if(runtimeUrl && runtimeUrl.startsWith('blob:')) URL.revokeObjectURL(runtimeUrl);
+          if(runtimeUrl && runtimeUrl.startsWith('blob:')) {
+            try { URL.revokeObjectURL(runtimeUrl); } catch(e) {}
+          }
           runtimeUrl = '';
-          if(data.runtimeHtml){
+          if(data.runtimeHtml && typeof data.runtimeHtml === 'string'){
             try { 
               const blobR = new Blob([data.runtimeHtml], { type:'text/html' }); 
               runtimeUrl = URL.createObjectURL(blobR);
-              console.log('[compileSelected] runtimeUrl générée:', runtimeUrl.slice(0,50) + '...');
+              console.log('[compileSelected] runtimeUrl générée pour', appSelectedFile);
+              compileCache.set('__last_runtime_file', appSelectedFile);
+              compileCache.set('__last_runtime_ts', Date.now());
             } catch(e){
               console.error('[compileSelected] erreur blob runtimeHtml:', e);
+              runtimeUrl = '';
             }
           } else {
-            console.warn('[compileSelected] pas de runtimeHtml dans la réponse');
+            console.warn('[compileSelected] pas de runtimeHtml valide dans la réponse');
           }
           const html = data.modules ? '<!-- modules compiled -->' : '';
           if(data.modules){
@@ -665,13 +680,21 @@
     finally { compiling = false; }
   }
 
-  // Mise à jour automatique prévisualisation SSR quand onglet actif
-  $: if(activeView === 'preview-ssr' && appSelectedFile?.endsWith('.svelte')) {
-    // Charger depuis cache sinon compiler (anti-boucle: compile uniquement si pas déjà en cours et pas erreur fraîche)
-    if(compileCache.has(appSelectedFile)) {
-      compileUrl = compileCache.get(appSelectedFile);
-    } else if(!compiling) {
-      compileSelected();
+  // Fonction pour charger la preview SSR sans boucle réactive
+  function loadSSRPreview() {
+    if(activeView === 'preview-ssr' && appSelectedFile?.endsWith('.svelte')) {
+      if(compileCache.has(appSelectedFile)) {
+        compileUrl = compileCache.get(appSelectedFile);
+      } else if(!compiling) {
+        compileSelected();
+      }
+    }
+  }
+
+  // Déclencher compilation seulement lors changement de fichier ou vue (pas sur chaque réactivité)
+  $: {
+    if(activeView === 'preview-ssr' && appSelectedFile) {
+      loadSSRPreview();
     }
   }
 
@@ -745,9 +768,22 @@
     finally { interactiveLoading = false; }
   }
 
-  // Mise à jour automatique prévisualisation interactive quand onglet actif
-  $: if(activeView === 'preview-interactive' && appSelectedFile?.endsWith('.svelte')) {
-    if(interactiveCache.has(appSelectedFile)) interactiveUrl = interactiveCache.get(appSelectedFile).url; else if(!interactiveLoading) buildInteractive();
+  // Fonction pour charger preview interactive sans boucle
+  function loadInteractivePreview() {
+    if(activeView === 'preview-interactive' && appSelectedFile?.endsWith('.svelte')) {
+      if(interactiveCache.has(appSelectedFile)) {
+        interactiveUrl = interactiveCache.get(appSelectedFile).url;
+      } else if(!interactiveLoading) {
+        buildInteractive();
+      }
+    }
+  }
+
+  // Déclencher seulement sur changement fichier/vue
+  $: {
+    if(activeView === 'preview-interactive' && appSelectedFile) {
+      loadInteractivePreview();
+    }
   }
 </script>
 

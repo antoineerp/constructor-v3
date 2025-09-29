@@ -30,7 +30,7 @@ export async function POST(event) {
     let autoRepairMeta = null;
     let compiled;
     try {
-      compiled = compile(source, { generate:'dom', css:true, dev:false, hydratable:true });
+      compiled = compile(source, { generate:'dom', css:'injected', dev:false, hydratable:true });
     } catch(e){
       const msg = e.message||'';
       const isSyntax = /Unexpected token|Expected token|end of input|Unexpected EOF|Expected /.test(msg);
@@ -44,7 +44,7 @@ export async function POST(event) {
             const repaired = repairJson.fixedCode;
             let repairedSource = repaired;
             if(!/<script[\s>]/.test(repairedSource)) repairedSource = `<script>export let props={};</script>\n` + repairedSource;
-            compiled = compile(repairedSource, { generate:'dom', css:true, dev:false, hydratable:true });
+            compiled = compile(repairedSource, { generate:'dom', css:'injected', dev:false, hydratable:true });
           } else {
             autoRepairMeta = { attempted:true, success:false, mode:'dom-compile-syntax', reason: repairJson?.error || 'repair-no-change' };
             return json({ success:false, stage:'compile', error:msg, autoRepair:autoRepairMeta });
