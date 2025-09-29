@@ -7,7 +7,7 @@ import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 
 import { computeProjectHash, getCached, setCached } from '$lib/preview/compileCache.js';
-import { supabase as clientSupabase } from '$lib/supabase.js';
+import { supabase as clientSupabase, isSupabaseEnabled } from '$lib/supabase.js';
 
 // POST /api/projects/:id/compile
 // Body optionnel: { entries?: string[], files?: Record<string,string> } (si files absent => charge depuis DB)
@@ -23,12 +23,22 @@ export async function POST(event){
   try {
     let projectFiles = injectedFiles;
     if(!projectFiles){
-      const qb = clientSupabase.from('projects').select('*').eq('id', projectId);
-      if(locals.user?.id) qb.eq('user_id', locals.user.id);
-      const { data: project, error } = await qb.single();
-      if(error) throw error;
-      if(!project?.code_generated) return json({ success:false, error:'Aucun code généré' }, { status:404 });
-      projectFiles = project.code_generated;
+      if(isSupabaseEnabled){
+        const qb = clientSupabase.from('projects').select('*').eq('id', projectId);
+        if(locals.user?.id) qb.eq('user_id', locals.user.id);
+        const { data: project, error } = await qb.single();
+        if(error) throw error;
+        if(!project?.code_generated) return json({ success:false, error:'Aucun code généré' }, { status:404 });
+        projectFiles = project.code_generated;
+      } else {
+        // Fallback mémoire (sandbox déconnecté)
+        projectFiles = {
+          'src/routes/+page.svelte': `<script>let n=0; const inc=()=>n++;<\/script>\n<h1 class="text-2xl font-bold text-indigo-600">Projet Démo {n}</h1>\n<button class="px-3 py-1 bg-indigo-600 text-white rounded" on:click={inc}>Incrémenter ({n})</button>\n<p class="text-xs text-gray-500">Fallback offline (no Supabase).</p>`,
+          'src/routes/about/+page.svelte': `<h2 class="text-xl font-semibold text-purple-600">À propos</h2><p class="text-sm text-gray-600">Page secondaire (fallback).</p>`,
+          'src/app.css': `@tailwind base;@tailwind components;@tailwind utilities; h1{font-family:system-ui}`,
+          'tailwind.config.cjs': `module.exports={content:["./src/**/*.svelte"],theme:{extend:{}}}`
+        };
+      }
     }
     // Filtrer uniquement fichiers Svelte + JS potentiels
   const svelteEntries = Object.entries(projectFiles).filter(([k])=> k.endsWith('.svelte'));

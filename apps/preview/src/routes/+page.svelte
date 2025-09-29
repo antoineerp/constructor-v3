@@ -294,7 +294,7 @@
 				<div class="px-3 py-2 text-xs border-b bg-gray-50 flex justify-between items-center">
 					<span>{entry}</span><span class="text-gray-500">iframe sandbox</span>
 				</div>
-				<Sandbox {compiledModules} {entry} key={iframeKey} />
+				<div class="p-2 text-[11px] text-gray-500">Sandbox initialisation… modules envoyés à l'iframe ci-dessous.{#if !sandboxEntry || !sandboxCompiledModules.length} <span class="text-red-600">(Modules absents)</span>{/if}</div>
 			</div>
     {:else}
       <p class="text-sm text-gray-500 italic">Aucun HTML disponible.</p>

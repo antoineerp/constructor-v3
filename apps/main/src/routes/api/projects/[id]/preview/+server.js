@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 
 import { computeFileHash, getCached, setCached } from '$lib/preview/compileCache.js';
-import { supabase as clientSupabase } from '$lib/supabase.js';
+import { supabase as clientSupabase, isSupabaseEnabled } from '$lib/supabase.js';
 
 // GET /api/projects/:id/preview
 // Retourne un rendu SSR HTML du fichier d'entrée (src/routes/+page.svelte) du code généré.
@@ -14,14 +14,22 @@ export async function GET(event){
   if(!projectId) return json({ success:false, error:'projectId manquant' }, { status:400 });
   try {
     // Récupération projet
-    const queryBuilder = clientSupabase.from('projects').select('*').eq('id', projectId);
-    if(locals.user?.id) queryBuilder.eq('user_id', locals.user.id);
-    const { data: project, error } = await queryBuilder.single();
-    if(error) throw error;
-    if(!project?.code_generated){
-      return json({ success:false, error:'Aucun code généré pour ce projet' }, { status:404 });
+    let files;
+    if(isSupabaseEnabled){
+      const queryBuilder = clientSupabase.from('projects').select('*').eq('id', projectId);
+      if(locals.user?.id) queryBuilder.eq('user_id', locals.user.id);
+      const { data: project, error } = await queryBuilder.single();
+      if(error) throw error;
+      if(!project?.code_generated){
+        return json({ success:false, error:'Aucun code généré pour ce projet' }, { status:404 });
+      }
+      files = project.code_generated;
+    } else {
+      files = {
+        'src/routes/+page.svelte': `<h1 class="text-2xl font-bold text-indigo-600">Demo Offline</h1><p class="text-sm text-gray-600">Preview SSR sans Supabase.</p>`,
+        'src/routes/blog/+page.svelte': `<h2 class="text-xl font-semibold text-purple-600">Blog</h2><p class="text-xs text-gray-500">Page blog fallback (offline).</p>`
+      };
     }
-    const files = project.code_generated;
     // Filtrer seulement les routes .svelte (heuristique)
     const svelteFiles = Object.keys(files).filter(f=> f.endsWith('.svelte'));
     if(!svelteFiles.length) return json({ success:false, error:'Aucun fichier Svelte présent' }, { status:404 });
