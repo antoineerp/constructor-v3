@@ -42,8 +42,14 @@
 
   function listLocalRoutes(){
     if(!appFiles) return [];
-    return Object.keys(appFiles).filter(f=> f.startsWith('src/routes/') && f.endsWith('+page.svelte'))
-      .map(f=> f.replace(/^src\/routes\//,'').replace(/\/\+page\.svelte$/,'') || '/')
+    return Object.keys(appFiles)
+      .filter(f=> f.startsWith('src/routes/') && f.endsWith('+page.svelte'))
+      .map(f=> {
+        const stripped = f.replace(/^src\/routes\//,'');
+        if(stripped === '+page.svelte') return '/';
+        const withoutSuffix = stripped.replace(/\/\+page\.svelte$/,'');
+        return withoutSuffix === '' ? '/' : withoutSuffix;
+      })
       .sort();
   }
 
@@ -64,19 +70,41 @@
         const routes = listLocalRoutes();
         appAvailableRoutes = routes;
         if(!routes.includes(path)) { appNavError='Route non trouvée'; return; }
-        const targetFile = Object.keys(appFiles).find(f=> f.startsWith('src/routes/') && f.endsWith('+page.svelte') && (f.replace(/^src\/routes\//,'').replace(/\/\+page\.svelte$/,'')||'/')===path);
+        const targetFile = Object.keys(appFiles).find(f=> {
+          if(!f.startsWith('src/routes/') || !f.endsWith('+page.svelte')) return false;
+          const stripped = f.replace(/^src\/routes\//,'');
+          const routePath = stripped === '+page.svelte' ? '/' : (stripped.replace(/\/\+page\.svelte$/,'') || '/');
+          return routePath === path;
+        });
         if(!targetFile){ appNavError='Fichier route introuvable'; return; }
   const source = `<script>import Page from '${targetFile}';<\/script><Page />`;
         const deps = collectDependencies(targetFile, appFiles[targetFile]);
-  const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: source, dependencies: { ...deps, [targetFile]: appFiles[targetFile] } }) });
-        if(!res.ok){ appNavError = await res.text(); }
-        else { const html = await res.text(); const blob = new Blob([html], { type:'text/html' }); appNavUrl = URL.createObjectURL(blob); appNavPath = path; }
+        const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: source, dependencies: { ...deps, [targetFile]: appFiles[targetFile] }, debug: true }) });
+        if(!res.ok){
+          appNavError = await res.text();
+        } else {
+          // Réponse debug JSON attendue
+          let data; try { data = await res.json(); } catch(_e){ data=null; }
+          if(!data || !data.success){
+            appNavError = data?.error || 'Erreur compile route';
+          } else {
+            const html = data.html || '';
+            const blob = new Blob([html], { type:'text/html' });
+            appNavUrl = URL.createObjectURL(blob); appNavPath = path;
+            if(data.meta?.fallbackUsed){
+              appNavError = (appNavError? appNavError+' | ':'') + 'SSR fallback utilisé sur route';
+            }
+          }
+        }
       }
     } catch(e){ appNavError = e.message; }
     finally { appNavLoading = false; }
   }
 
-  $: if(activeView==='app-nav' && appFiles && !appNavUrl && !appNavLoading){ loadAppRoute(appNavPath||'/'); }
+  $: if(activeView==='app-nav' && appFiles && !appNavLoading){
+    if(!appNavPath) appNavPath = '/';
+    if(!appNavUrl) loadAppRoute(appNavPath);
+  }
 
   async function generateStubComponent(name){
     if(!name || generatingStub) return;
@@ -950,7 +978,7 @@
                   <div class="p-4 text-xs text-red-600 bg-red-50 h-full overflow-auto">{compileUrl.slice(6)}</div>
                 {:else if compileUrl}
                     <div class="w-full h-full">
-                      <iframe title="Rendu SSR" src={compileUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
+                      <iframe title="Rendu SSR" src={compileUrl} sandbox="allow-scripts" referrerpolicy="no-referrer" class="absolute inset-0 w-full h-full bg-white"></iframe>
                       {#if showCompileDebug && compileDebugData}
                         <div class="absolute bottom-2 left-2 max-w-md text-[10px] bg-gray-900/90 text-gray-100 rounded shadow-lg p-3 space-y-2 border border-gray-700 overflow-auto max-h-60">
                           <div class="flex items-center justify-between">

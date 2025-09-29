@@ -1,6 +1,9 @@
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 
+// Forcer runtime Node (Vercel) afin d'autoriser require/new Function sans restrictions edge
+export const config = { runtime: 'nodejs18.x' };
+
 // POST /api/compile/dom  { code: string }
 // Retourne { success, js, css } pour exécution côté client (hydration interactive)
 export async function POST({ request }) {
@@ -19,7 +22,11 @@ export async function POST({ request }) {
       return json({ success:false, stage:'compile', error:e.message });
     }
     const { js, css } = compiled;
-    return json({ success:true, js: js.code, css: css.code });
+    // Sécurité: ajouter quelques headers passifs (ex: pour debug future instrumentation)
+    const resp = json({ success:true, js: js.code, css: css.code });
+    resp.headers.set('X-Compile-Mode','dom');
+    resp.headers.set('Cache-Control','no-store');
+    return resp;
   } catch(e){
     console.error('compile/dom error', e);
     return json({ success:false, error:e.message }, { status:500 });

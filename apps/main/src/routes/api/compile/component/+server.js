@@ -2,6 +2,9 @@ import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 import { createRequire } from 'module';
 
+// Forcer runtime Node (Vercel) pour ce handler lourd (compilation SSR)
+export const config = { runtime: 'nodejs18.x' };
+
 // Endpoint: compile & SSR un snippet Svelte (avec dépendances .svelte fournies) + hydratation.
 // Body attendu: { code: string, dependencies?: { [path:string]: string }, debug?: boolean }
 export async function POST({ request }) {
@@ -312,9 +315,25 @@ export async function POST({ request }) {
   const tailwindCdn = '<script src="https://cdn.tailwindcss.com" data-cdn="1"></script>';
   const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />\n${tailwindCdn}${importMap}${depCssTag}${ css?.code ? `\n<style>${css.code}</style>`:'' }${ !css?.code && domCssCode ? `\n<style>${domCssCode}</style>`:''}</head><body class="p-4">${metaComment}\n${wrapStart}${htmlBody}</div>${hydrationScript}</body></html>`;
 
-    if(debug){ if(debugStages) debugStages.finalSource = source; return json({ success:true, html, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages }); }
+    if(debug){
+      if(debugStages) debugStages.finalSource = source;
+      const r = json({ success:true, html, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages });
+      r.headers.set('X-Compile-Mode','ssr');
+      r.headers.set('X-Fallback-Used', (globalThis.__LAST_SSR_FALLBACK__? '1':'0'));
+      return r;
+    }
 
-    return new Response(html, { headers: { 'Content-Type':'text/html; charset=utf-8' } });
+    const csp = [
+      "default-src 'none'",
+      "style-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.tailwindcss.com",
+      "script-src 'unsafe-inline' blob: https://cdn.tailwindcss.com",
+      "font-src https://cdnjs.cloudflare.com",
+      "img-src data: blob:",
+      "connect-src 'none'",
+      "frame-ancestors 'none'"
+    ].join('; ');
+    const res = new Response(html, { headers: { 'Content-Type':'text/html; charset=utf-8', 'X-Compile-Mode':'ssr', 'X-Fallback-Used': (globalThis.__LAST_SSR_FALLBACK__? '1':'0'), 'Cache-Control':'no-store', 'Content-Security-Policy': csp } });
+    return res;
   } catch(e){
     console.error('compile/component fatal', e);
     return json({ success:false, error:e.message }, { status:500 });
