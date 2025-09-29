@@ -1,0 +1,8 @@
+{
+  "name": "demo",
+  "description": "Jeu de composants de démonstration intégré en dur pour tests UI",
+  "license": "MIT? (exemple)",
+  "version": "0.0.1-demo",
+  "importedAt": "2025-09-29T00:00:00.000Z",
+  "source": "local-demo"
+}

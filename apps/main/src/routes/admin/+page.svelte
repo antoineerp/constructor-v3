@@ -6,6 +6,17 @@
   import Input from '$lib/Input.svelte';
   import Modal from '$lib/Modal.svelte';
   import { listPromptTemplates } from '$lib/prompt/promptLibrary.js';
+  // Chargement librairies externes (ingérées localement)
+  let externalLibs = []; let externalLoading = false; let externalError='';
+  async function loadExternalLibs(){
+    externalLoading = true; externalError='';
+    try {
+      const r = await fetch('/api/external/list?ts='+Date.now());
+      if(!r.ok){ throw new Error('HTTP '+r.status); }
+      const j = await r.json(); externalLibs = j.libraries || [];
+    } catch(e){ externalError = e.message; externalLibs = []; }
+    finally { externalLoading = false; }
+  }
 
   let activeTab = 'dashboard';
   let promptTemplates = [];
@@ -295,6 +306,13 @@
           <i class="fas fa-paragraph mr-2"></i>
           Prompts
         </button>
+        <button
+          class="py-4 px-1 border-b-2 font-medium text-sm {activeTab === 'externals' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+          on:click={() => { activeTab = 'externals'; loadExternalLibs(); }}
+        >
+          <i class="fas fa-boxes-stacked mr-2"></i>
+          Librairies
+        </button>
       </nav>
     </div>
   </div>
@@ -394,6 +412,51 @@
           </div>
         </Card>
       </div>
+    {/if}
+
+    {#if activeTab === 'externals'}
+      <Card title="Librairies Externes" subtitle="Composants ingérés localement (offline)">
+        {#if externalLoading}
+          <p class="text-sm text-gray-500">Chargement...</p>
+        {:else if externalError}
+          <p class="text-sm text-red-600">Erreur: {externalError}</p>
+        {:else if !externalLibs.length}
+          <p class="text-sm text-gray-500">Aucune librairie ingérée. Utilisez tools/ingest-external.mjs pour en ajouter.</p>
+        {:else}
+          <div class="space-y-6">
+            {#each externalLibs as lib}
+              <div class="border rounded-lg bg-white shadow-sm">
+                <div class="px-4 py-3 flex items-center justify-between border-b bg-gray-50 rounded-t">
+                  <div>
+                    <h3 class="font-semibold text-gray-800 flex items-center gap-2"><span>{lib.id}</span>{#if lib.meta?.version}<span class="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{lib.meta.version}</span>{/if}</h3>
+                    <p class="text-xs text-gray-500">{lib.meta?.description || 'Pas de description'}</p>
+                  </div>
+                  <div class="text-xs text-gray-500">{lib.components.length} composant{lib.components.length>1?'s':''}</div>
+                </div>
+                {#if !lib.components.length}
+                  <div class="p-4 text-xs text-gray-500">Aucun composant</div>
+                {:else}
+                  <div class="grid md:grid-cols-2 gap-4 p-4">
+                    {#each lib.components as c}
+                      <div class="border rounded p-3 bg-gray-50 relative">
+                        <div class="flex items-center justify-between mb-2">
+                          <h4 class="text-sm font-semibold text-gray-800">{c.name}</h4>
+                          <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-700">{Math.round(c.size/10)/100} KB • {c.lines} l.</span>
+                        </div>
+                        <pre class="text-[10px] leading-4 max-h-40 overflow-auto bg-gray-800 text-gray-100 p-2 rounded">{c.snippet}</pre>
+                        <div class="mt-2 flex gap-2">
+                          <button class="text-[11px] underline" on:click={() => { navigator.clipboard.writeText(c.snippet); }}>Copier</button>
+                          <button class="text-[11px] underline" on:click={() => { previewCode = c.snippet; activeTab='preview'; }}>Prévisualiser</button>
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </Card>
     {/if}
 
 

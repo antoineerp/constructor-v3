@@ -151,7 +151,7 @@ Retourne uniquement le contenu brut du fichier .svelte.`;
     }
   }
 
-  async generateApplication(prompt, { model = 'gpt-4o-mini', maxFiles = 20, provider='openai', blueprint=null, fileAnalyses=null } = {}) {
+  async generateApplication(prompt, { model = 'gpt-4o-mini', maxFiles = 20, provider='openai', blueprint=null, fileAnalyses=null, uiStack=null, blueprintId=null } = {}) {
     // Fallback hors API pour tests / mode offline quand aucune clé
     if(provider==='openai' && !this.apiKey){
       return {
@@ -281,6 +281,55 @@ ${retrievalContext}
       return files;
     };
     const files = await attempt(0);
+    // --- Injection dépendances & scaffolding stack UI (MVP) ---
+    try {
+      if(uiStack){
+        // Assurer package.json existe
+        if(!files['package.json']){
+          files['package.json'] = JSON.stringify({ name:'app', private:true, version:'0.0.0', scripts:{ dev:'vite', build:'vite build', preview:'vite preview' }, devDependencies:{}, dependencies:{} }, null, 2);
+        }
+        let pkg; try { pkg = JSON.parse(files['package.json']); } catch(_e){ pkg = { name:'app', private:true, version:'0.0.0', scripts:{ dev:'vite' }, dependencies:{}, devDependencies:{} }; }
+        pkg.devDependencies = pkg.devDependencies||{}; pkg.dependencies = pkg.dependencies||{};
+        // Core dépendances toujours
+        pkg.devDependencies['@sveltejs/kit'] = pkg.devDependencies['@sveltejs/kit'] || '^2.5.0';
+        pkg.devDependencies['svelte'] = pkg.devDependencies['svelte'] || '^5.0.0';
+        pkg.devDependencies['vite'] = pkg.devDependencies['vite'] || '^5.4.0';
+        pkg.devDependencies['tailwindcss'] = pkg.devDependencies['tailwindcss'] || '^3.4.0';
+        pkg.devDependencies['postcss'] = pkg.devDependencies['postcss'] || '^8.4.0';
+        pkg.devDependencies['autoprefixer'] = pkg.devDependencies['autoprefixer'] || '^10.4.0';
+        pkg.dependencies['bits-ui'] = pkg.dependencies['bits-ui'] || '^0.21.0';
+        // Stack spécifique
+        if(uiStack === 'shadcn'){
+          pkg.dependencies['shadcn-svelte'] = pkg.dependencies['shadcn-svelte'] || '^0.8.0';
+          pkg.dependencies['lucide-svelte'] = pkg.dependencies['lucide-svelte'] || '^0.445.0';
+        } else if(uiStack === 'skeleton'){
+          pkg.dependencies['@skeletonlabs/skeleton'] = pkg.dependencies['@skeletonlabs/skeleton'] || '^2.9.0';
+        } else if(uiStack === 'flowbite'){
+          pkg.dependencies['flowbite-svelte'] = pkg.dependencies['flowbite-svelte'] || '^0.46.0';
+          pkg.dependencies['flowbite'] = pkg.dependencies['flowbite'] || '^2.3.0';
+        }
+        files['package.json'] = JSON.stringify(pkg, null, 2);
+        // Tailwind config minimal si absent
+        if(!files['tailwind.config.cjs']){
+          const plugins = [];
+          if(uiStack==='skeleton') plugins.push("require('@skeletonlabs/skeleton/tailwind/skeleton.cjs')");
+          if(uiStack==='flowbite') plugins.push("require('flowbite/plugin')");
+          files['tailwind.config.cjs'] = `module.exports = { content:["./src/**/*.{svelte,js,ts}"], theme:{ extend:{} }, plugins:[${plugins.join(',')}] }`;
+        }
+        if(!files['postcss.config.cjs']) files['postcss.config.cjs'] = `module.exports={ plugins:{ tailwindcss:{}, autoprefixer:{} } }`;
+        if(!files['src/app.css']) files['src/app.css'] = '@tailwind base;@tailwind components;@tailwind utilities;';
+        // Layout injection (squelette pour stack)
+        if(!files['src/routes/+layout.svelte']){
+          let banner = '';
+            if(uiStack==='shadcn') banner = '<div class="text-[10px] px-2 py-1 bg-purple-600/10 text-purple-700 rounded mb-4">shadcn + Bits UI</div>';
+            else if(uiStack==='skeleton') banner = '<div class="text-[10px] px-2 py-1 bg-emerald-600/10 text-emerald-700 rounded mb-4">Skeleton + Bits UI</div>';
+            else if(uiStack==='flowbite') banner = '<div class="text-[10px] px-2 py-1 bg-blue-600/10 text-blue-700 rounded mb-4">Flowbite + Bits UI</div>';
+          files['src/routes/+layout.svelte'] = `<script>export let data;\n</script>\n<div class=\"min-h-screen font-sans bg-gray-50 text-gray-800\">\n<header class=\"p-4 border-b bg-white\"><h1 class=\"font-bold\">App Générée</h1></header>\n<main class=\"max-w-5xl mx-auto p-6\">${banner}<slot/>\n</main>\n<footer class=\"p-4 text-xs text-gray-500\">Generated (${uiStack})</footer>\n</div>`;
+        }
+        // Marquer manifest stack
+        files['ui-stack.json'] = JSON.stringify({ stack: uiStack, blueprint: blueprintId||null, generatedAt: new Date().toISOString() }, null, 2);
+      }
+    } catch(_e){ /* ignore injection errors */ }
     // Vérification imports manquants simples
     const missingImports = [];
     const fileNames = new Set(Object.keys(files));

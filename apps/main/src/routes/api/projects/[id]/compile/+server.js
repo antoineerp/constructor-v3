@@ -245,6 +245,73 @@ export async function POST(event){
     // On ne recompile pas dans cette passe (éviter boucle) – on renvoie suggestion
   }
   const result = { modules: [...modules, ...wrapperModules], entry, cached:false, timings:{ total_ms: Date.now()-t0 }, routes: routeCandidates, wrappers, quality, validation_summary, css: globalCss, cssHash, guardMeta, variantMeta, invalidImports: allInvalid, autoFix: autoFixReport };
+  // ----------- Construction d'un runtime HTML auto-porté (import map) -----------
+  try {
+    // Ne construire que si aucune erreur de compilation majeure dans modules
+    const moduleErrors = modules.filter(m=> m.error);
+    if(moduleErrors.length){
+      const errHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Erreur compilation</title><style>body{font:12px monospace;background:#111;color:#eee;padding:16px}</style></head><body><h1>Erreurs</h1><ul>${moduleErrors.map(m=> `<li><strong>${m.path}</strong>: ${m.error.replace(/</g,'&lt;')}</li>`).join('')}</ul></body></html>`;
+      result.runtimeHtml = errHtml;
+    } else {
+      const rewritten = new Map();
+      const importRegex = /import\s+[^;'"`]+?from\s+['"]([^'"\n]+)['"];?|import\s+['"]([^'"\n]+)['"];?/g;
+      function toAbsolute(spec, from){
+        if(!spec) return spec;
+        if(spec.startsWith('src/')) return spec; // déjà absolu relatif projet
+        if(!spec.startsWith('.')) return spec; // dépendance externe (laisse tel quel)
+        const baseDir = path.posix.dirname(from);
+        const joined = path.posix.normalize(path.posix.join(baseDir, spec));
+        return joined;
+      }
+      for(const m of modules){
+        if(!m.jsCode) continue;
+        let code = m.jsCode;
+        code = code.replace(importRegex, (full, g1, g2) => {
+          const orig = g1 || g2;
+            if(!orig) return full;
+            const abs = toAbsolute(orig, m.path);
+            if(abs !== orig && /\.svelte$/.test(abs)){
+              // remplacer dans la déclaration
+              return full.replace(orig, abs);
+            }
+            if(/\.svelte$/.test(orig) && orig.startsWith('.')){
+              // cas fallback
+              const abs2 = toAbsolute(orig, m.path);
+              return full.replace(orig, abs2);
+            }
+            return full;
+        });
+        rewritten.set(m.path, code);
+      }
+      // Construire import map data: pour chaque module Svelte
+      const imports = {};
+      for(const [p, code] of rewritten.entries()){
+        const b64 = Buffer.from(code,'utf-8').toString('base64');
+        imports[p] = `data:application/javascript;base64,${b64}`;
+      }
+      // Réécrire wrappers également (ils importent les pages)
+      for(const w of wrapperModules){
+        if(!w.jsCode) continue;
+        const b64 = Buffer.from(w.jsCode,'utf-8').toString('base64');
+        imports[`__wrapper__:${w.pattern}`] = `data:application/javascript;base64,${b64}`;
+      }
+      const entryModule = rewritten.has(entry) ? entry : (rewritten.keys().next().value);
+      const csp = [
+        "default-src 'none'",
+        "style-src 'unsafe-inline' https://cdn.tailwindcss.com",
+        "script-src 'unsafe-inline' data: blob: https://cdn.tailwindcss.com",
+        "font-src https://cdnjs.cloudflare.com",
+        "img-src data:",
+        "connect-src 'none'",
+        "frame-ancestors 'none'"
+      ].join('; ');
+      const importMap = `<script type=\"importmap\">${JSON.stringify({ imports })}<\/script>`;
+      const boot = `<script type=\"module\">\nimport App from '${entryModule}';\nconst root=document.getElementById('app');\ntry{new App({target:root});}catch(e){root.innerHTML='<pre style=\\'color:#b91c1c;font:12px monospace;white-space:pre-wrap\\'>Runtime error: '+(e.message||e)+'</pre>';console.error('runtime error',e);}\n<\/script>`;
+      result.runtimeHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<title>Runtime Preview</title>\n<meta http-equiv=\"Content-Security-Policy\" content=\"${csp.replace(/"/g,'&quot;')}\">\n<script src=\"https://cdn.tailwindcss.com\"><\/script>${importMap}\n</head><body class='p-4'><div id='app' data-runtime='1'>Chargement...</div>${boot}</body></html>`;
+    }
+  } catch(e){
+    result.runtimeHtml = `<!DOCTYPE html><html><body><pre style='color:#b91c1c'>Runtime bundle error: ${String(e).replace(/</g,'&lt;')}</pre></body></html>`;
+  }
     setCached(hash, result, 2*60*1000); // 2 min
   return json({ success:true, projectHash: hash, requestCount: globalThis.__COMPILE_REQS, ...result });
   } catch(e){

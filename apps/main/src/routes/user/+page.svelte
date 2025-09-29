@@ -11,6 +11,7 @@
   let appValidation = null; // { filename: { diagnostics, ssrOk, domOk, formatted, ... } }
   let appSelectedFile = null;
   let appError = '';
+  let uiStackChoice = null; let uiStackDecision = null; let uiBlueprintRef = null;
   // Fichiers / analyses
   let uploading = false;
   let analyzing = false;
@@ -33,6 +34,9 @@
   let generatingAll = false; // flag génération groupée
   let showCompileDebug = false; // toggle debug panel
   let compileDebugData = null; // stockage réponse debug
+  let runtimeHtml = '';
+  let runtimeUrl = '';
+  let lastInvalidImports = [];
   // --- App navigation preview (étape 4) ---
   let appNavUrl = '';
   let appNavPath = '/';
@@ -41,10 +45,6 @@
   let appAvailableRoutes = [];
   // --- Blueprint quick generation & patch ---
   import { onMount } from 'svelte';
-  let availableBlueprintIds = ['skeleton-base','flowbite-kit','bits-headless','shadcn-skeleton'];
-  let quickBlueprintId = 'skeleton-base';
-  let quickIncludeExample = true;
-  let quickGenLoading = false;
   let patchOps = ''; // zone texte JSON pour opérations
   let patchError=''; let patchApplied='';
   let isOffline = false;
@@ -56,18 +56,7 @@
     } catch(_e){ isOffline = true; }
   }
 
-  async function quickGenerateBlueprint(){
-    quickGenLoading = true; patchError='';
-    try {
-      const res = await fetch('/api/blueprint/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: quickBlueprintId, includeExample: quickIncludeExample, language:'ts' }) });
-      const data = await res.json();
-      if(!data.success) throw new Error(data.error||'échec génération');
-      appFiles = data.files; appValidation = null; blueprintData = { id: data.meta.id, routes: Object.keys(data.files).filter(f=> f.startsWith('src/routes/') && f.endsWith('+page.svelte')).map(f=> ({ path: f })) };
-      const first = Object.keys(appFiles).find(f=> f.endsWith('.svelte'));
-      appSelectedFile = first || null; activeView = first? 'preview-ssr':'files';
-    } catch(e){ patchError = 'Blueprint: '+e.message; }
-    finally { quickGenLoading=false; }
-  }
+  // Sélecteur manuel supprimé: la stack est choisie automatiquement par heuristique.
 
   function examplePatch(){
     const target = appSelectedFile || 'src/routes/+page.svelte';
@@ -360,10 +349,13 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ prompt: appPrompt, fileHashes: fileHashesForGeneration })
         });
-        data = await res.json();
-        if (!data.success) throw new Error(data.error || 'Erreur inconnue');
-        appFiles = data.files || null;
-        appValidation = data.validation || null;
+  data = await res.json();
+  if (!data.success) throw new Error(data.error || 'Erreur inconnue');
+  appFiles = data.files || null;
+  appValidation = data.validation || null;
+  uiStackChoice = data.ui_stack || null;
+  uiStackDecision = data.ui_decision || null;
+  uiBlueprintRef = data.blueprint_ref || null;
       }
       if(appFiles){
         const keys = Object.keys(appFiles);
@@ -626,11 +618,9 @@
     }
     compiling = true; compileUrl='';
     try {
-      // Utilise endpoint component compile direct sans projet persistant
-      const deps = collectDependencies(appSelectedFile, appFiles[appSelectedFile]);
-      const payload = { code: appFiles[appSelectedFile], dependencies: deps };
-      if(showCompileDebug) payload.debug = true;
-      const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      // Utilise endpoint project compile pour obtenir invalidImports + runtimeHtml
+      const filesPayload = { ...appFiles };
+      const res = await fetch(`/api/projects/${projectId||'ephem'}/compile`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ files: filesPayload, file: appSelectedFile }) });
       if(!res.ok){
         const text = await res.text();
         compileUrl='error:'+ text;
@@ -639,19 +629,25 @@
         else { errInfo.lastTs = now; errInfo.count++; errInfo.lastError = text.slice(0,180); compileErrorCache.set(appSelectedFile, errInfo); }
       }
       else {
-        if(showCompileDebug){
-          const data = await res.json();
-          compileDebugData = data;
-          if(data.html){
-            const blob = new Blob([data.html], { type:'text/html' });
-            compileUrl = URL.createObjectURL(blob);
-            compileCache.set(appSelectedFile, compileUrl);
+        const data = await res.json();
+        if(!data.success){ compileUrl='error:'+ (data.error||'Erreur'); }
+        else {
+          compileDebugData = showCompileDebug ? data : null;
+          lastInvalidImports = data.invalidImports||[];
+          if(data.runtimeHtml){
+            try { const blobR = new Blob([data.runtimeHtml], { type:'text/html' }); runtimeUrl = URL.createObjectURL(blobR); } catch(_e){}
           }
-        } else {
-          const html = await res.text();
-          const blob = new Blob([html], { type:'text/html' });
-            compileUrl = URL.createObjectURL(blob);
-            compileCache.set(appSelectedFile, compileUrl);
+          const html = data.modules ? '<!-- modules compiled -->' : '';
+          if(data.modules){
+            // Trouver module correspondant au fichier sélectionné
+            const mod = data.modules.find(m=> m.path===appSelectedFile && m.jsCode);
+            if(mod){
+              const preview = `<!DOCTYPE html><html><body><pre style=\"font:11px monospace;white-space:pre-wrap;padding:8px\">${mod.jsCode.replace(/</g,'&lt;').slice(0,15000)}</pre></body></html>`;
+              const blob = new Blob([preview], { type:'text/html' });
+              compileUrl = URL.createObjectURL(blob);
+              compileCache.set(appSelectedFile, compileUrl);
+            }
+          }
         }
       }
     } catch(e){ compileUrl = 'error:'+e.message; }
@@ -757,6 +753,20 @@
         <label for="app_prompt" class="block text-sm font-medium text-gray-700 mb-1">Prompt</label>
         <textarea id="app_prompt" bind:value={appPrompt} rows="8" placeholder="Ex: Génère une mini app SvelteKit avec une page d'accueil, page produits et page contact. Utilise Tailwind." class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"></textarea>
         <p class="text-[11px] text-gray-500 mt-1 leading-snug">Décris architecture, pages, style, contraintes (taille, libs). Moins de 8 fichiers recommandé.</p>
+        {#if uiStackChoice}
+          <div class="mt-2 border rounded bg-gray-50 px-3 py-2 text-[11px] text-gray-700 space-y-1">
+            <div><span class="font-semibold">Stack UI choisie:</span> <span class="uppercase tracking-wide text-purple-600 font-semibold">{uiStackChoice}</span> {#if uiBlueprintRef}<span class="ml-2 px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">{uiBlueprintRef}</span>{/if}</div>
+            {#if uiStackDecision?.reasoning?.length}
+              <details class="mt-1">
+                <summary class="cursor-pointer text-gray-600">Raisons ({uiStackDecision.reasoning.length})</summary>
+                <ul class="list-disc ml-5 mt-1 space-y-0.5">
+                  {#each uiStackDecision.reasoning.slice(0,10) as r}<li>{r}</li>{/each}
+                  {#if uiStackDecision.reasoning.length>10}<li>…</li>{/if}
+                </ul>
+              </details>
+            {/if}
+          </div>
+        {/if}
       </div>
       <div class="flex items-center gap-2 text-xs bg-gray-50 border rounded p-2">
         <label class="flex items-center gap-2 cursor-pointer select-none">
@@ -770,13 +780,7 @@
           {#if appIsGenerating || blueprintGenerating}<i class="fas fa-spinner fa-spin"></i>{:else}<i class="fas fa-gears"></i>{/if}
           {useBlueprintMode ? 'Générer Blueprint' : 'Générer'}
         </button>
-        <div class="flex items-center gap-2">
-          <select class="text-xs border rounded px-2 py-1" bind:value={quickBlueprintId}>
-            {#each availableBlueprintIds as id}<option value={id}>{id}</option>{/each}
-          </select>
-          <label class="flex items-center gap-1 text-[10px]"><input type="checkbox" bind:checked={quickIncludeExample} class="rounded border-gray-300"/>exemples</label>
-          <button class="px-3 py-1 rounded text-xs bg-white border hover:bg-gray-50 disabled:opacity-50" on:click={quickGenerateBlueprint} disabled={quickGenLoading}><i class="fas fa-bolt mr-1"></i>{quickGenLoading? '...' : 'Blueprint rapide'}</button>
-        </div>
+        <!-- Sélecteur blueprint manuel retiré (stack auto). -->
         <div class="relative">
           <label class="px-4 py-2 rounded-lg text-sm bg-white border hover:bg-gray-50 flex items-center gap-2 cursor-pointer">
             <i class="fas fa-upload"></i> {uploading ? 'Upload...' : 'Ajouter fichiers'}
