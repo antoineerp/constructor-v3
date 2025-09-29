@@ -352,7 +352,8 @@ export async function POST({ request }) {
 
     if(debug){
       if(debugStages) debugStages.finalSource = source;
-      const r = json({ success:true, html, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null, heuristics: globalThis.__LAST_SSR_HEURISTICS__||[], strict }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages });
+  const hs = globalThis.__LAST_SSR_HEURISTICS__||[];
+  const r = json({ success:true, html, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null, heuristics: hs, heuristicPath: hs.join(' > '), strict }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages });
       r.headers.set('X-Compile-Mode','ssr');
       r.headers.set('X-Fallback-Used', (globalThis.__LAST_SSR_FALLBACK__? '1':'0'));
       if(strict) r.headers.set('X-Strict','1');

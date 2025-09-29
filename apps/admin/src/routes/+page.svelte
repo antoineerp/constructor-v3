@@ -17,6 +17,8 @@
 	let previewUrl = '';
 	let previewError = '';
 	let previewAdvanced = false;
+	let lastPreviewCode = '';
+	let lastPreviewDependencies = {};
 
 	function closePreview(){
 		previewOpen = false; previewUrl=''; previewError='';
@@ -45,12 +47,13 @@
 				// Construire index du catalog
 				const catalogByName = new Map(componentsCatalog.map(c=> [c.name, c]));
 				const selected = [];
+				const blueprintCompMetadata = [];
 				for(const item of core){
-					let name = null;
-					if(typeof item === 'string') name = item; else if(item && typeof item === 'object') name = item.name || item.id || item.label;
+					let name = null; let props = {};
+					if(typeof item === 'string') name = item; else if(item && typeof item === 'object'){ name = item.name || item.id || item.label; if(item.props && typeof item.props==='object') props = item.props; }
 					if(!name) continue;
 					const comp = catalogByName.get(name);
-					if(comp){ selected.push(comp); }
+					if(comp){ selected.push(comp); blueprintCompMetadata.push({ name, props }); }
 				}
 				// Si rien trouvé, fallback sur 2 composants génériques du catalog (démo)
 				if(!selected.length) selected.push(...componentsCatalog.slice(0,2));
@@ -66,7 +69,23 @@
 					const base = p.split('/').pop().replace(/\.svelte$/,'');
 					return `import ${base} from '${p}';`;
 				}).join('\n');
-				const compsMarkup = Object.keys(dependencies).map(p=> `<div class=\"border rounded p-2 bg-white shadow-sm\"><${p.split('/').pop().replace(/\.svelte$/,'')} /></div>`).join('\n');
+				// Générer attributs dynamiques si présents dans blueprint
+				function buildAttrString(props){
+					const parts=[];
+					for(const [k,v] of Object.entries(props||{})){
+						if(v==null) continue;
+						if(typeof v === 'string') parts.push(`${k}="${v.replace(/"/g,'&quot;')}"`);
+						else if(typeof v === 'number' || typeof v === 'boolean') parts.push(`${k}={${v}}`);
+						else parts.push(`${k}={${JSON.stringify(v)}}`);
+					}
+					return parts.join(' ');
+				}
+				const compsMarkup = Object.keys(dependencies).map(p=> {
+					const base = p.split('/').pop().replace(/\.svelte$/,'');
+					const meta = blueprintCompMetadata.find(m=> m.name===base) || blueprintCompMetadata.find(m=> m.name.toLowerCase()===base.toLowerCase());
+					const attr = meta ? buildAttrString(meta.props) : '';
+					return `<div class=\\"border rounded p-2 bg-white shadow-sm flex flex-col gap-1\\"><${base}${attr? ' '+attr:''} />${attr?`<code class=\\"text-[10px] text-gray-500\\">props: ${attr.replace(/{/g,'(').replace(/}/g,')')}</code>`:''}</div>`;
+				}).join('\n');
 				const routesBlock = Array.isArray(bp.routes) && bp.routes.length ? `<section class=\"space-y-1\"><h2 class=\"text-sm font-semibold text-gray-700\">Routes</h2>${bp.routes.map(r=> `<div class=\\"text-[11px] text-gray-600 border-b last:border-b-0 py-1\\"><code>${(r.path||'/').replace(/</g,'&lt;')}</code> ${(r.description||'').replace(/</g,'&lt;')}</div>`).join('')}</section>` : '<div class=\\"text-[11px] text-gray-400\\">(Aucune route)</div>';
 				const palette = bp.color_palette || {};
 				const paletteCss = Object.entries(palette).map(([k,v])=> `--bp-${k}: ${String(v).replace(/`/g,'\\`')};`).join(' ');
@@ -84,6 +103,7 @@
 			const html = await res.text();
 			const blob = new Blob([html], { type:'text/html' });
 			previewUrl = URL.createObjectURL(blob);
+			lastPreviewCode = code; lastPreviewDependencies = dependencies;
 		} catch(e){
 			previewError = e.message;
 		} finally {
@@ -385,6 +405,15 @@
 			{#if previewLoading}<span class="text-xs text-gray-500 animate-pulse">Compilation…</span>{/if}
 			{#if previewError}<span class="text-xs text-red-600">{previewError}</span>{/if}
 			<button class="ml-auto text-xs px-2 py-1 rounded bg-gray-200 hover:bg-gray-300" on:click={closePreview}>Fermer</button>
+			{#if previewUrl && !previewLoading}
+				<button class="text-xs px-2 py-1 rounded bg-purple-600 text-white hover:bg-purple-700" on:click={() => {
+					try {
+						const payload = { mainCode: lastPreviewCode, deps: Object.entries(lastPreviewDependencies).map(([path,code])=>({ filename: path.split('/').pop(), code })) };
+						localStorage.setItem('sandbox-svelte-v1', JSON.stringify(payload));
+						window.open('/sandbox','_blank','noopener');
+					} catch(e){ alert('Transfert sandbox impossible: '+e.message); }
+				}}>Envoyer vers Sandbox</button>
+			{/if}
 		</div>
 		<div class="flex-1 relative bg-gray-50">
 			{#if previewUrl && !previewLoading}
