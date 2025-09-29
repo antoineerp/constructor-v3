@@ -16,27 +16,66 @@
 	let previewLoading = false;
 	let previewUrl = '';
 	let previewError = '';
+	let previewAdvanced = false;
 
 	function closePreview(){
 		previewOpen = false; previewUrl=''; previewError='';
 	}
 
-	async function previewTemplate(t){
-		previewError=''; previewUrl=''; previewLoading=true; previewOpen=true;
+	async function previewTemplate(t, advanced=false){
+		previewError=''; previewUrl=''; previewLoading=true; previewOpen=true; previewAdvanced = advanced;
 		try {
 			const bp = t.blueprint_json || {};
 			const title = (bp.seo_meta?.title || t.name || 'Template Aperçu')+'';
-			const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(bp))));
-			// Svelte snippet basique affichant titre + routes si présentes
-			// (Pour éviter complexité on génère du HTML statique depuis blueprint dans un seul composant principal)
-			const routeBlocks = Array.isArray(bp.routes) ? bp.routes.map(r=> {
-				const p = (r.path||'/').replace(/`/g,'\\`');
-				const d = (r.description||'').replace(/`/g,'\\`').replace(/</g,'&lt;');
-				return `<div class=\"border rounded p-2 mb-2 bg-gray-50\"><code class=\"text-xs text-gray-600\">${p}</code><div class=\"text-[11px] text-gray-500 mt-1\">${d}</div></div>`;
-			}).join('') : '';
-			const safeTitle = title.replace(/`/g,'\\`');
-			const code = `<script>\nconst blueprint = JSON.parse(atob('${encoded}'));\n<\/script>\n<div class=\"p-4 font-sans text-sm space-y-3\">\n<h1 class=\"text-xl font-bold\">${safeTitle}</h1>\n${routeBlocks || '<div class=\\"text-[11px] text-gray-400\\">(Aucune route définie)</div>'}\n</div>`;
-			const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code, debug:false }) });
+			const encodedBlueprint = btoa(unescape(encodeURIComponent(JSON.stringify(bp))));
+			let code='';
+			let dependencies = {};
+			if(!advanced){
+				// Version simple (ancienne)
+				const routeBlocks = Array.isArray(bp.routes) ? bp.routes.map(r=> {
+					const p = (r.path||'/').replace(/`/g,'\\`');
+					const d = (r.description||'').replace(/`/g,'\\`').replace(/</g,'&lt;');
+					return `<div class=\\"border rounded p-2 mb-2 bg-gray-50\\"><code class=\\"text-xs text-gray-600\\">${p}</code><div class=\\"text-[11px] text-gray-500 mt-1\\">${d}</div></div>`;
+				}).join('') : '';
+				const safeTitle = title.replace(/`/g,'\\`');
+				code = `<script>\nexport let blueprint = JSON.parse(atob('${encodedBlueprint}'));\n<\/script>\n<div class=\"p-4 font-sans text-sm space-y-3\">\n<h1 class=\"text-xl font-bold\">${safeTitle}</h1>\n${routeBlocks || '<div class=\\"text-[11px] text-gray-400\\">(Aucune route définie)</div>'}\n</div>`;
+			} else {
+				// Mode avancé : intégrer des composants dynamiques indiqués par blueprint.core_components
+				const core = Array.isArray(bp.core_components)? bp.core_components.slice(0,12): [];
+				// Construire index du catalog
+				const catalogByName = new Map(componentsCatalog.map(c=> [c.name, c]));
+				const selected = [];
+				for(const item of core){
+					let name = null;
+					if(typeof item === 'string') name = item; else if(item && typeof item === 'object') name = item.name || item.id || item.label;
+					if(!name) continue;
+					const comp = catalogByName.get(name);
+					if(comp){ selected.push(comp); }
+				}
+				// Si rien trouvé, fallback sur 2 composants génériques du catalog (démo)
+				if(!selected.length) selected.push(...componentsCatalog.slice(0,2));
+				// Créer dépendances
+				for(const comp of selected){
+					let fname = comp.filename || (comp.name.replace(/[^A-Za-z0-9_]/g,'') + '.svelte');
+					if(!/\.svelte$/.test(fname)) fname += '.svelte';
+					const fullPath = `src/lib/preview/${fname}`;
+					dependencies[fullPath] = comp.code;
+				}
+				// Imports
+				const imports = Object.keys(dependencies).map(p=> {
+					const base = p.split('/').pop().replace(/\.svelte$/,'');
+					return `import ${base} from '${p}';`;
+				}).join('\n');
+				const compsMarkup = Object.keys(dependencies).map(p=> `<div class=\"border rounded p-2 bg-white shadow-sm\"><${p.split('/').pop().replace(/\.svelte$/,'')} /></div>`).join('\n');
+				const routesBlock = Array.isArray(bp.routes) && bp.routes.length ? `<section class=\"space-y-1\"><h2 class=\"text-sm font-semibold text-gray-700\">Routes</h2>${bp.routes.map(r=> `<div class=\\"text-[11px] text-gray-600 border-b last:border-b-0 py-1\\"><code>${(r.path||'/').replace(/</g,'&lt;')}</code> ${(r.description||'').replace(/</g,'&lt;')}</div>`).join('')}</section>` : '<div class=\\"text-[11px] text-gray-400\\">(Aucune route)</div>';
+				const palette = bp.color_palette || {};
+				const paletteCss = Object.entries(palette).map(([k,v])=> `--bp-${k}: ${String(v).replace(/`/g,'\\`')};`).join(' ');
+				const safeTitle = title.replace(/`/g,'\\`');
+				code = `<script>\nexport let blueprint = JSON.parse(atob('${encodedBlueprint}'));\n${imports}\n<\/script>\n<div class=\"p-5 font-sans text-sm space-y-6 bg-gradient-to-br from-gray-50 to-gray-100 min-h-full\" style=\"${paletteCss}\">\n<header class=\"space-y-1\"><h1 class=\"text-2xl font-bold\">${safeTitle}</h1><p class=\"text-[12px] text-gray-500\">Prévisualisation avancée (démo)</p></header>\n<section class=\"grid gap-4 md:grid-cols-2 lg:grid-cols-3\">${compsMarkup}</section>\n${routesBlock}\n</div>`;
+			}
+			const body = { code, debug:false };
+			if(Object.keys(dependencies).length) body.dependencies = dependencies;
+			const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
 			const ct = res.headers.get('content-type')||'';
 			if(!res.ok){
 				if(ct.includes('application/json')){ const j = await res.json(); throw new Error(j.error||'Erreur compilation'); }
@@ -314,7 +353,8 @@
 											<h3 class="font-semibold text-gray-800 mb-1 flex items-center gap-2"><i class="fas fa-layer-group text-green-500"></i>{t.name}</h3>
 											<p class="text-gray-600 line-clamp-3 mb-2">{t.description}</p>
 											<div class="flex gap-2 mb-2">
-												<button class="px-2 py-1 rounded bg-green-600 text-white text-[11px]" type="button" on:click={() => previewTemplate(t)}>Prévisualiser</button>
+												<button class="px-2 py-1 rounded bg-green-600 text-white text-[11px]" type="button" on:click={() => previewTemplate(t,false)}>Preview</button>
+												<button class="px-2 py-1 rounded bg-emerald-600 text-white text-[11px]" type="button" on:click={() => previewTemplate(t,true)}>Avancé</button>
 											</div>
 											<details class="mt-auto group">
 												<summary class="cursor-pointer text-[11px] text-green-600 hover:underline flex items-center gap-1"><i class="fas fa-eye"></i> Blueprint</summary>
@@ -341,6 +381,7 @@
 	<div class="bg-white rounded shadow-lg w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden">
 		<div class="px-4 py-2 border-b flex items-center gap-3 text-sm">
 			<strong>Prévisualisation Template</strong>
+			{#if previewAdvanced}<span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[10px] font-medium">AVANCÉ</span>{/if}
 			{#if previewLoading}<span class="text-xs text-gray-500 animate-pulse">Compilation…</span>{/if}
 			{#if previewError}<span class="text-xs text-red-600">{previewError}</span>{/if}
 			<button class="ml-auto text-xs px-2 py-1 rounded bg-gray-200 hover:bg-gray-300" on:click={closePreview}>Fermer</button>
