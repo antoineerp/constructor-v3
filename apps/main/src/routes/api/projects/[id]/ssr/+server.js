@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
+
 import { supabase } from '$lib/supabase.js';
 
 // Endpoint expérimental SSR minimal (pas de vrai router SvelteKit complet)

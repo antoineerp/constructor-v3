@@ -123,8 +123,9 @@ export function detectCapabilities(blueprint){
 }
 
 // Version async avec embeddings pour affiner (ajuste score plutôt que remplacer)
-import { openaiService } from '$lib/openaiService.js';
 import { getEmbeddingCache, setEmbeddingCache, cosineSim } from './embeddingCache.js';
+
+import { openaiService } from '$lib/openaiService.js';
 
 async function embed(text){
   const key = 'cap:' + text;

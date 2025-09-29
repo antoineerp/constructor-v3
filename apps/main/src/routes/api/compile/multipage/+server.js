@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { POST as compileSingle } from '../component/+server.js';
+
 
 // Endpoint expérimental: compile plusieurs pages Svelte indépendantes et retourne un manifest { path: html }.
 // Body: { pages:[ { path:string, code:string, dependencies?:{[k:string]:string} } ], strict?:boolean, debug?:boolean }

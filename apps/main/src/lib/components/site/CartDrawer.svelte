@@ -1,6 +1,7 @@
 <script>
-  import { cart } from '$lib/stores/cart.js';
   import { fly } from 'svelte/transition';
+
+  import { cart } from '$lib/stores/cart.js';
   export let open = false;
   let unsub;
   let items = [];

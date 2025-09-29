@@ -1,6 +1,6 @@
 <script>
-  import SiteGenerator from '$lib/SiteGenerator.svelte';
   import ChatGenerator from '$lib/ChatGenerator.svelte';
+  import SiteGenerator from '$lib/SiteGenerator.svelte';
 
   let provider = 'openai';
   let generationProfile = 'safe';

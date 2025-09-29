@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+
 import { ensureDesignTokens } from '../prompt/promptBuilders.js';
 
 describe('ensureDesignTokens', () => {

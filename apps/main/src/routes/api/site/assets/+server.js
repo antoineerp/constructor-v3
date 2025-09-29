@@ -1,7 +1,8 @@
-import { json } from '@sveltejs/kit';
 import { createClient } from '@supabase/supabase-js';
-import { openaiService } from '$lib/openaiService.js';
+import { json } from '@sveltejs/kit';
+
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
+import { openaiService } from '$lib/openaiService.js';
 
 // Endpoint: POST /api/site/assets
 // Body: { projectId, type?: 'articles-hero' | 'all' }

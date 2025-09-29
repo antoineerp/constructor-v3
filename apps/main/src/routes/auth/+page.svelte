@@ -1,6 +1,7 @@
 <script>
-  import { supabase } from '$lib/supabase.js';
   import { onMount } from 'svelte';
+
+  import { supabase } from '$lib/supabase.js';
   let mode = 'login'; // 'login' | 'signup'
   let email = '';
   let password = '';

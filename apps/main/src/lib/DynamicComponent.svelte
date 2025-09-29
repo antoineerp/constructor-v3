@@ -1,6 +1,7 @@
 <script>
-  import { componentGenerator } from './componentGenerator.js';
   import { onMount } from 'svelte';
+
+  import { componentGenerator } from './componentGenerator.js';
   
   export let description = '';
   export let type = 'generic';

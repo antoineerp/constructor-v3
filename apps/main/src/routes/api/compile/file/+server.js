@@ -1,7 +1,9 @@
-import { json } from '@sveltejs/kit';
 import { createClient } from '@supabase/supabase-js';
-import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
+import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
+
+import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
+
 
 // GET /api/compile/file?projectId=..&filename=..
 // Retourne HTML SSR du fichier .svelte stocké (projects/project_files)

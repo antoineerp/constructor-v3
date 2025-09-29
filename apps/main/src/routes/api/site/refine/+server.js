@@ -1,8 +1,8 @@
-import { json } from '@sveltejs/kit';
-import { openaiService } from '$lib/openaiService.js';
-import { supabase as clientSupabase } from '$lib/supabase.js';
 import { createClient } from '@supabase/supabase-js';
+import { json } from '@sveltejs/kit';
+
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
+import { supabase as clientSupabase } from '$lib/supabase.js';
 import { validateAndFix, unifyPalette, addAccessibilityFixes } from '$lib/validator/svelteValidator.js';
 
 /*

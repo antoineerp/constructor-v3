@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+
 import { openaiService } from '$lib/openaiService.js';
 
 export async function GET(){

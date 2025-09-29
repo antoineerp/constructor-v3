@@ -1,5 +1,4 @@
 <script>
-  import { supabase } from '$lib/supabase.js';
   export let provider = 'openai';
 
   let userPrompt = '';

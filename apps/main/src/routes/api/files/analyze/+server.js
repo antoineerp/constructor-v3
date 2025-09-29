@@ -1,8 +1,10 @@
-import { json } from '@sveltejs/kit';
 import crypto from 'crypto';
-import { supabase } from '$lib/supabase.js';
+
+import { json } from '@sveltejs/kit';
+
 import { env } from '$env/dynamic/private';
 import { openaiService } from '$lib/openaiService.js';
+import { supabase } from '$lib/supabase.js';
 
 // Endpoint générique d'analyse d'un fichier (image / pdf / texte brut)
 // Méthodes acceptées: POST multipart/form-data (file) ou JSON { base64, mime?, text?, bucketObject? }

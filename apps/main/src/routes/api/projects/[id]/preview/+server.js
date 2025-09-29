@@ -1,7 +1,8 @@
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
-import { supabase as clientSupabase } from '$lib/supabase.js';
+
 import { computeFileHash, getCached, setCached } from '$lib/preview/compileCache.js';
+import { supabase as clientSupabase } from '$lib/supabase.js';
 
 // GET /api/projects/:id/preview
 // Retourne un rendu SSR HTML du fichier d'entrée (src/routes/+page.svelte) du code généré.

@@ -1,11 +1,13 @@
+import crypto from 'crypto';
+import fs from 'fs';
+import { execSync } from 'node:child_process';
+import path from 'path';
+
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
-import { execSync } from 'node:child_process';
-import fs from 'fs';
-import crypto from 'crypto';
-import path from 'path';
-import { supabase as clientSupabase } from '$lib/supabase.js';
+
 import { computeProjectHash, getCached, setCached } from '$lib/preview/compileCache.js';
+import { supabase as clientSupabase } from '$lib/supabase.js';
 
 // POST /api/projects/:id/compile
 // Body optionnel: { entries?: string[], files?: Record<string,string> } (si files absent => charge depuis DB)

@@ -1,6 +1,7 @@
+import { createRequire } from 'module';
+
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
-import { createRequire } from 'module';
 
 // Forcer runtime Node (Vercel) pour ce handler lourd (compilation SSR)
 // Node 18 rejeté par Vercel (message "invalid runtime"), on passe à Node 20.
@@ -14,6 +15,13 @@ export async function POST(event) {
     const body = await request.json();
   const { code, dependencies = {}, debug = false, strict = false, allowAutoRepair = true, _autoRepairAttempt = false } = body || {};
     if(!code || !code.trim()) return json({ success:false, error:'Code requis' }, { status:400 });
+    // Précheck jQuery ($) si mode strict
+    if(strict){
+      const jqueryPattern = /\$\(document\)|\$\.ajax\s*\(|\$\([^)]*\)\s*\.(on|ready|ajax|addClass|removeClass|toggleClass|css|attr)\b/;
+      if(jqueryPattern.test(code)){
+        return json({ success:false, error:'Usage jQuery ($) détecté – interdit en mode strict.', stage:'precheck-jquery' }, { status:400 });
+      }
+    }
     if(typeof globalThis.__COMP_COMPONENT_COUNT === 'undefined') globalThis.__COMP_COMPONENT_COUNT = 0;
     globalThis.__COMP_COMPONENT_COUNT++;
 
@@ -119,12 +127,47 @@ export async function POST(event) {
     const afterUnknown = injectUnknownComponentPlaceholders(afterLib, meta); if(debugStages) debugStages.afterUnknown = afterUnknown;
     source = afterUnknown;
 
-    // Compiler composant principal (SSR)
+    // Compiler composant principal (SSR) – avec tentative d'auto-réparation si erreur syntaxe
     let compiled;
     try { compiled = compile(source, { generate:'ssr', hydratable:true, filename:'Component.svelte' }); }
     catch(e){
       const loc = e.start ? { line:e.start.line, column:e.start.column } : null;
-      return json({ success:false, error:'Erreur compilation: '+e.message, position:loc, stage:'ssr-compile', debugStages }, { status:400 });
+      const compileErrMsg = e.message || '';
+      const isSyntax = /Unexpected token|Expected token|end of input|Unexpected EOF|Expected /.test(compileErrMsg);
+      const canAttemptSyntaxRepair = allowAutoRepair && !_autoRepairAttempt && isSyntax && !!process.env.OPENAI_API_KEY;
+      if(canAttemptSyntaxRepair){
+        heuristics.push('auto-repair-compile-syntax-hint');
+        try {
+          const repairResp = await fetch('/api/repair/auto', {
+            method:'POST',
+            headers:{ 'Content-Type':'application/json' },
+            body: JSON.stringify({ filename:'Component.svelte', code: originalSource, maxPasses:1, allowCatalog:true })
+          });
+          const repairJson = await repairResp.json();
+          if(repairJson?.success && repairJson.fixedCode && repairJson.fixedCode !== originalSource){
+            autoRepairMeta = { attempted:true, success:true, passes: repairJson.passes, source: repairJson.source, mode:'compile-syntax' };
+            try {
+              const repairedSource = repairJson.fixedCode;
+              // réapplique réécritures pour cohérence
+              const repairedAfterLib = rewriteLibImports(repairedSource, meta, dependencies);
+              const repairedAfterUnknown = injectUnknownComponentPlaceholders(repairedAfterLib, meta);
+              source = repairedAfterUnknown;
+              compiled = compile(source, { generate:'ssr', hydratable:true, filename:'Component.svelte' });
+            } catch(reComp2){
+              autoRepairMeta.compileError = reComp2.message;
+              return json({ success:false, error:'Erreur compilation après auto-réparation: '+reComp2.message, position:loc, stage:'ssr-compile-repair', autoRepair:autoRepairMeta, debugStages }, { status:400 });
+            }
+          } else {
+            autoRepairMeta = { attempted:true, success:false, reason: repairJson?.error || 'repair-no-change', mode:'compile-syntax' };
+            return json({ success:false, error:'Erreur compilation: '+compileErrMsg, position:loc, stage:'ssr-compile', autoRepair:autoRepairMeta, debugStages }, { status:400 });
+          }
+        } catch(repairErr){
+          autoRepairMeta = { attempted:true, success:false, reason: repairErr.message||'repair-exception', mode:'compile-syntax' };
+          return json({ success:false, error:'Erreur compilation: '+compileErrMsg, position:loc, stage:'ssr-compile', autoRepair:autoRepairMeta, debugStages }, { status:400 });
+        }
+      } else {
+        return json({ success:false, error:'Erreur compilation: '+compileErrMsg, position:loc, stage:'ssr-compile', debugStages }, { status:400 });
+      }
     }
     const { js, css } = compiled;
 
@@ -223,21 +266,17 @@ export async function POST(event) {
               fallbackNote = (fallbackNote?fallbackNote+';':'')+'normalized-arity-ssr-fn';
               heuristics.push('normalized:arity-ssr-fn');
             } else if(usesRendererPush){
-              const ssrFn = Component;
-              Component = {
-                render: (props)=>{
-                  try {
-                    const chunks = [];
-                    const $$renderer = { push:(s)=>{ if(s!=null) chunks.push(String(s)); }, replace:(s)=>{ if(s!=null) chunks.push(String(s)); } };
-                    if(ssrFn.length >= 2) ssrFn($$renderer, props||{}); else ssrFn($$renderer);
-                    return { html: chunks.join('') };
-                  } catch(e){
-                    return { html:`<pre data-render-error>renderer-push error: ${e.message.replace(/</g,'&lt;')}</pre>` };
-                  }
-                }
-              };
-              fallbackNote = (fallbackNote?fallbackNote+';':'')+'normalized-renderer-push-fn';
-              heuristics.push('normalized:renderer-push');
+              // Plutôt que d'envelopper, on renvoie une erreur explicite pour éviter de masquer la vraie cause.
+              const fnPreview = (()=>{ try { return (''+Component).slice(0,500); } catch { return 'n/a'; } })();
+              const hasDollar = /(^|[^A-Za-z0-9_$])\$[\.(\[]/.test(fnPreview) || /\$\([^)]*\)/.test(fnPreview);
+              const reason = hasDollar ? 'Le code SSR contient un symbole $ non défini (probable code jQuery). Aucune librairie jQuery chargée.' : 'Forme SSR non supportée (renderer.push)';
+              heuristics.push('abort:renderer-push');
+              if(debug){
+                return json({ success:false, error: reason, meta:{ heuristics, rendererFnSnippet: fnPreview } }, { status:422 });
+              } else {
+                const html = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Erreur SSR</title></head><body><pre style="color:#b91c1c;font:12px/1.4 monospace;white-space:pre-wrap;">${reason}\n\nExtrait:\n${fnPreview.replace(/</g,'&lt;')}</pre></body></html>`;
+                return new Response(html, { status:422, headers:{ 'Content-Type':'text/html; charset=utf-8','X-Compile-Mode':'ssr','X-Renderer-Push-Abort':'1' } });
+              }
             }
           } catch(_e){ /* ignore heuristic error */ }
         }
@@ -410,21 +449,26 @@ export async function POST(event) {
       (depErrors.length ? `\n<!--dependency-errors:${depErrors.map(d=> d.dep+':'+d.error).join('|')}-->`:'');
 
     // Import map étendu: couvrir sous-chemins svelte/internal/* requis par hydratation (ex: disclose-version)
-    const importMap = domJsCode && /svelte\/internal/.test(domJsCode)
-      ? `\n<script type="importmap">${JSON.stringify({
-          imports: {
-            'svelte/internal': 'https://cdn.jsdelivr.net/npm/svelte@4.2.0/internal/index.js',
-            'svelte/internal/': 'https://cdn.jsdelivr.net/npm/svelte@4.2.0/internal/'
-          }
-        })}</script>`
-      : '';
+    // Import map: certaines CDN jsdelivr renvoient 404 sur sous chemins internal/flags/legacy.
+    // On bascule vers unpkg (plus tolérant) et on ajoute un fallback dynamique si le fetch échoue côté client.
+    const needsInternal = domJsCode && /svelte\/internal/.test(domJsCode);
+    const importMap = needsInternal ? `\n<script type="importmap">${JSON.stringify({
+      imports: {
+        'svelte/internal': 'https://unpkg.com/svelte@4.2.0/internal/index.js',
+        'svelte/internal/': 'https://unpkg.com/svelte@4.2.0/internal/'
+      }
+    })}</script>\n<script>/* importmap-fallback */(async()=>{try{const r=await fetch('https://unpkg.com/svelte@4.2.0/internal/index.js',{method:'HEAD'});if(!r.ok) console.warn('svelte/internal unreachable');}catch(e){console.warn('svelte/internal check failed',e);}})();</script>`: '';
     const wrapStart = canRequire ? '<div id="__component_root">' : '<div id="__component_root" data-no-ssr="1">';
     const depCssTag = depCssBlocks.length ? `\n<style data-deps-css="1">${depCssBlocks.join('\n/* --- */\n')}</style>` : '';
     let hydrationScript='';
     if(canRequire && domJsCode){
       const b64 = Buffer.from(domJsCode,'utf-8').toString('base64');
       const propsB64 = Buffer.from(JSON.stringify(globalThis.__LAST_COMPONENT_PROPS__||{}),'utf-8').toString('base64');
-      hydrationScript = `<script>(function(){try{const js=atob('${b64}');const blob=new Blob([js],{type:'text/javascript'});const u=URL.createObjectURL(blob);const props=JSON.parse(atob('${propsB64}'));import(u).then(m=>{const C=m.default||m;const root=document.getElementById('__component_root');if(root){new C({target:root, hydrate:true, props});}}).catch(e=>console.warn('Hydration fail',e));}catch(e){console.warn('Hydration bootstrap error',e);}})();</script>`;
+  hydrationScript = `<script>(function(){const ROOT_ID='__component_root';function surface(err,label){console.error(label,err);var r=document.getElementById(ROOT_ID);if(r){r.setAttribute('data-hydration-error', err.message||String(err));r.innerHTML='<pre style=\"color:#b91c1c;font:11px/1.4 monospace;white-space:pre-wrap;padding:8px;border:1px solid #fca5a5;background:#fef2f2;border-radius:4px;\">Hydration error: '+(err.message||String(err)).replace(/</g,'&lt;')+'</pre>';}}
+try{const js=atob('${b64}');const blob=new Blob([js],{type:'text/javascript'});const u=URL.createObjectURL(blob);const props=JSON.parse(atob('${propsB64}'));
+import(u).then(m=>{try{const C=m.default||m;const root=document.getElementById(ROOT_ID);if(!C){throw new Error('Aucun export default trouvé');} if(root){new C({target:root, hydrate:true, props});}}catch(e){surface(e,'Hydration construct error');}}).catch(e=>surface(e,'Hydration import fail'));
+window.addEventListener('unhandledrejection',ev=>surface(ev.reason||ev,'Unhandled promise rejection'));
+}catch(e){surface(e,'Hydration bootstrap error');}})();</script>`;
     } else if(!canRequire && domCompileError){
       hydrationScript = `<!-- dom compile error: ${domCompileError} -->`;
     }

@@ -2,9 +2,9 @@
 // afin que la clé ne soit pas écrite en dur dans le bundle build côté serveur.
 import { env } from '$env/dynamic/private';
 import { extractJson, withJsonEnvelope } from '$lib/ai/jsonExtractor.js';
-import { simpleCache } from '$lib/quality/simpleCache.js';
 import { topComponentCodeSnippets } from '$lib/catalog/components.js';
 import { buildPrompt } from '$lib/prompt/promptLibrary.js';
+import { simpleCache } from '$lib/quality/simpleCache.js';
 
 // Résolution simplifiée des imports relatifs vers des fichiers Svelte.
 // from: fichier courant (ex: src/routes/+page.svelte)

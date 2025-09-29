@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+
 import { supabase, isSupabaseEnabled } from '$lib/supabase.js';
 
 export async function GET(){

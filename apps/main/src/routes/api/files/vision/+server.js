@@ -1,7 +1,8 @@
 import { json } from '@sveltejs/kit';
+
+import { env } from '$env/dynamic/private';
 import { openaiService } from '$lib/openaiService.js';
 import { supabase } from '$lib/supabase.js';
-import { env } from '$env/dynamic/private';
 
 // Analyse d'image simplifiée via Chat Completions multimodal
 // Entrées: multipart/form-data avec 'file' OU JSON { base64: string } OU { bucketObject: string }

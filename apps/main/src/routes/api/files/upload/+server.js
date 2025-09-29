@@ -1,7 +1,9 @@
-import { json } from '@sveltejs/kit';
-import { supabase } from '$lib/supabase.js';
-import { env } from '$env/dynamic/private';
 import crypto from 'crypto';
+
+import { json } from '@sveltejs/kit';
+
+import { env } from '$env/dynamic/private';
+import { supabase } from '$lib/supabase.js';
 
 // Configuration basique
 const ALLOWED_MIME = new Set(['image/png','image/jpeg','image/webp','image/gif']);

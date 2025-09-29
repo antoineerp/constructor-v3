@@ -1,9 +1,9 @@
 <script>
   import { onMount } from 'svelte';
-  import { supabase } from '$lib/supabase.js';
+
   import Button from '$lib/Button.svelte';
   import Card from '$lib/Card.svelte';
-  import Input from '$lib/Input.svelte';
+  import { supabase } from '$lib/supabase.js';
   
   let connectionStatus = 'testing';
   let connectionMessage = '';

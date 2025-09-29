@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+
   import Button from '$lib/Button.svelte';
   import Card from '$lib/Card.svelte';
   import Input from '$lib/Input.svelte';
@@ -7,6 +8,33 @@
   import { supabase } from '$lib/supabase.js';
 
   let activeTab = 'dashboard';
+  // Preview ad-hoc (C)
+  let previewCode = `<script>\n  export let label = 'Bouton';\n  let count = 0;\n  function inc(){ count++; }\n<\/script>\n\n<button class=\"px-4 py-2 bg-blue-600 text-white rounded\" on:click={inc}>{label} {count}</button>`;
+  let previewHtml = '';
+  let previewLoading = false;
+  let previewError = '';
+  let previewStrict = false;
+  let previewHeuristics = [];
+  let iframeKey = 0; // force reload iframe
+  async function runPreview(){
+    previewLoading = true; previewError=''; previewHeuristics=[];
+    try {
+      const r = await fetch('/api/compile/component?ts=' + Date.now(), { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ code: previewCode, debug:true, strict: previewStrict }) });
+      if(!r.ok){
+        let txt = await r.text();
+        try { const j = JSON.parse(txt); previewError = j.error || ('HTTP '+r.status); } catch { previewError = txt.slice(0,400); }
+        return;
+      }
+      const j = await r.json();
+      previewHtml = j.html || '';
+      previewHeuristics = j.meta?.heuristics || [];
+      iframeKey++; // changer clé pour recharger
+    } catch(e){
+      previewError = e.message;
+    } finally {
+      previewLoading = false;
+    }
+  }
 
   // ====== IA ======
   let aiProviders = [];
@@ -213,6 +241,13 @@
           <i class="fas fa-robot mr-2"></i>
           IA
         </button>
+        <button
+          class="py-4 px-1 border-b-2 font-medium text-sm {activeTab === 'preview' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+          on:click={() => { activeTab = 'preview'; }}
+        >
+          <i class="fas fa-eye mr-2"></i>
+          Preview
+        </button>
       </nav>
     </div>
   </div>
@@ -405,6 +440,42 @@
             <p class="text-sm text-gray-500">Aucun provider détecté.</p>
           {/if}
           <div class="text-xs text-gray-500 mt-4">Actualisé manuellement à chaque ouverture de l'onglet.</div>
+        </div>
+      </Card>
+    {/if}
+
+    {#if activeTab === 'preview'}
+      <Card title="Preview Composant" subtitle="Compilation SSR + hydratation en direct">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-sm font-semibold text-gray-700">Code Svelte</h3>
+              <div class="flex items-center gap-3 text-xs">
+                <label class="inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" bind:checked={previewStrict}> <span>Strict</span></label>
+                <button class="px-2 py-1 rounded bg-blue-600 text-white disabled:opacity-40" on:click={runPreview} disabled={previewLoading}>{previewLoading ? 'Compilation...' : 'Compiler'}</button>
+              </div>
+            </div>
+            <textarea class="w-full h-72 font-mono text-xs p-2 border rounded bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500" bind:value={previewCode}></textarea>
+            {#if previewError}
+              <div class="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 p-2 rounded">{previewError}</div>
+            {/if}
+            {#if previewHeuristics.length}
+              <div class="mt-3 text-[11px] text-gray-600 flex flex-wrap gap-1">{#each previewHeuristics as h}<span class="px-1.5 py-0.5 bg-gray-200 rounded">{h}</span>{/each}</div>
+            {/if}
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-gray-700 mb-2">Résultat</h3>
+            {#if previewHtml}
+              <iframe key={iframeKey} title="Preview composant" class="w-full h-72 border rounded bg-white" srcdoc={previewHtml}></iframe>
+            {:else}
+              <div class="w-full h-72 border rounded bg-gray-50 grid place-items-center text-xs text-gray-500">Aucun rendu (compiler pour voir)</div>
+            {/if}
+            <div class="mt-2 flex gap-2 text-[10px] text-gray-500">
+              <button class="underline" on:click={() => { navigator.clipboard.writeText(previewHtml||''); }}>Copier HTML</button>
+              <button class="underline" on:click={() => { previewCode = '<script>\n let t = new Date().toLocaleTimeString();<\/script>\n<p>Horloge: {t}</p>'; }}>Exemple simple</button>
+              <button class="underline" on:click={() => { previewCode = '<h1>Hello</h1>'; }}>Minimal</button>
+            </div>
+          </div>
         </div>
       </Card>
     {/if}

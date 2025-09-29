@@ -1,7 +1,8 @@
 import { json } from '@sveltejs/kit';
+
 import { openaiService } from '$lib/openaiService.js';
-import { validateFiles } from '$lib/validation/validator.js';
 import { supabase } from '$lib/supabase.js';
+import { validateFiles } from '$lib/validation/validator.js';
 
 // Génération d'une mini application multi-fichiers.
 // Body attendu: { prompt: string }
@@ -11,6 +12,9 @@ export async function POST({ request, locals }) {
     const { prompt, fileHashes } = await request.json();
     if (!prompt || !prompt.trim()) {
       return json({ success:false, error:'Prompt requis' }, { status:400 });
+    }
+    if(!openaiService.apiKey){
+      return json({ success:false, error:'Clé OpenAI absente: génération impossible (aucun fallback).', missingKey:'openai' }, { status:503 });
     }
     let analyses = [];
     if(Array.isArray(fileHashes) && fileHashes.length){

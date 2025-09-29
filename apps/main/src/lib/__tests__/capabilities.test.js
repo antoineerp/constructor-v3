@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+
 import { detectCapabilities } from '../catalog/capabilities.js';
 
 describe('detectCapabilities', () => {

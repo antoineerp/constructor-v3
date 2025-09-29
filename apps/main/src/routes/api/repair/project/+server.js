@@ -1,7 +1,8 @@
 import { json } from '@sveltejs/kit';
+
 import { openaiService } from '$lib/openaiService.js';
-import { validateFiles } from '$lib/validation/validator.js';
 import { supabase as clientSupabase } from '$lib/supabase.js';
+import { validateFiles } from '$lib/validation/validator.js';
 
 /* Réparation d'un fichier appartenant à un projet blueprint persisté.
 Body: { projectId, filename, intent?, diagnostics?[] }

@@ -1,0 +1,13 @@
+# Ignorer (redondant avec flat config 'ignores', mais utile pour certains outils/éditeurs qui lisent encore ce fichier)### Obsolète : la config ESLint flat utilise désormais `ignores` dans `eslint.config.js`.
+
+node_modules/# Ce fichier est laissé volontairement minimal pour supprimer l'avertissement ESLint.
+
+dist/# (Anciennes entrées supprimées)
+
+build/
+.svelte-kit/
+.vercel/
+.output/
+coverage/
+# Artifacts divers
+*.log

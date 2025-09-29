@@ -1,18 +1,19 @@
+import { createClient } from '@supabase/supabase-js';
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
-import { openaiService } from '$lib/openaiService.js';
-import { supabase as clientSupabase, isSupabaseEnabled } from '$lib/supabase.js';
-import { createClient } from '@supabase/supabase-js';
+
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
-import { summarizeCatalog, selectComponentsForBlueprint } from '$lib/catalog/components.js';
 import { buildDiagnostics, shouldTriggerCritic, buildCriticPrompt } from '$lib/ai/critic.js';
-import { computeQuality } from '$lib/quality/qualityMetrics.js';
-import { buildGlobalGenerationPromptAsync } from '$lib/prompt/promptBuilders.js';
-import { validateAndFix, unifyPalette, addAccessibilityFixes } from '$lib/validator/svelteValidator.js';
-import { validateFiles } from '$lib/validation/validator.js';
+import { summarizeCatalog, selectComponentsForBlueprint } from '$lib/catalog/components.js';
 import { upsertSnippet } from '$lib/embeddings';
-import { runSvelteCheckSnippet } from '$lib/validation/svelteCheckRunner.js';
 import { applyGuardRails } from '$lib/generation/guardrails.js';
+import { openaiService } from '$lib/openaiService.js';
+import { buildGlobalGenerationPromptAsync } from '$lib/prompt/promptBuilders.js';
+import { computeQuality } from '$lib/quality/qualityMetrics.js';
+import { supabase as clientSupabase, isSupabaseEnabled } from '$lib/supabase.js';
+import { runSvelteCheckSnippet } from '$lib/validation/svelteCheckRunner.js';
+import { validateFiles } from '$lib/validation/validator.js';
+import { validateAndFix, unifyPalette, addAccessibilityFixes } from '$lib/validator/svelteValidator.js';
 
 // Orchestrateur: génère blueprint et/ou code application selon état projet.
 // Body: { query?: string, projectId?: string, regenerateFile?: string }
@@ -102,6 +103,13 @@ export async function POST(event) {
     if (!blueprint) {
       const effectiveQuery = query || project?.original_query;
       if (!effectiveQuery) return json({ success:false, error:'Impossible de déterminer la requête de base' }, { status:400 });
+      // Vérifier disponibilité des clés pour provider demandé AVANT tentative
+      if(provider==='openai' && !openaiService.apiKey){
+        return json({ success:false, error:'Clé OpenAI absente: impossible de générer le site (aucun fallback).', provider, missingKey:'openai' }, { status:503 });
+      }
+      if(provider==='claude' && !openaiService.claudeKey){
+        return json({ success:false, error:'Clé Claude absente: impossible de générer le site (aucun fallback).', provider, missingKey:'claude' }, { status:503 });
+      }
       // Construire un contexte conversationnel (dernier messages utilisateur) pour enrichir si fourni
       let conversationSnippet = '';
       if (Array.isArray(chatContext) && chatContext.length) {
@@ -168,16 +176,26 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
         }
       } catch(e){
         console.warn('Single-pass global failed, fallback orchestrated', e.message);
+        if(/Clé API OpenAI manquante|Clé API Claude manquante/.test(e.message||'')){
+          return json({ success:false, error:'Échec génération (clé provider manquante ou invalide).', provider, detail:e.message }, { status:503 });
+        }
       }
     }
 
   timings.singlePassAttempt = Date.now();
   if(simpleMode){
   const appPrompt = buildAppPrompt(blueprint, { simpleMode: true, generationProfile });
-    files = await openaiService.generateApplication(appPrompt, { model: 'gpt-4o-mini', maxFiles: 5, provider });
+    try {
+      files = await openaiService.generateApplication(appPrompt, { model: 'gpt-4o-mini', maxFiles: 5, provider });
+    } catch(e){
+      if(/Clé API OpenAI manquante|Clé API Claude manquante/.test(e.message||'')){
+        return json({ success:false, error:'Impossible de générer (clé API manquante) – aucun fallback.', provider, detail:e.message }, { status:503 });
+      }
+      throw e;
+    }
     } else if(Object.keys(files).length === 0) {
       // Ancien mode orchestré seulement si single-pass non satisfaisant
-  const perFile = blueprint?.recommended_prompts?.per_file || [];
+      const perFile = blueprint?.recommended_prompts?.per_file || [];
   const tBeforePerFile = Date.now();
       if(perFile.length){
         for(const entry of perFile){
@@ -185,7 +203,13 @@ Blueprint existant (tronqué): ${JSON.stringify({ sample_content: blueprint.samp
           if(!filename || !filePrompt) continue;
           try {
             const context = buildPerFilePrompt({ blueprint, filePrompt, filename, already: files, catalogSummary });
-      const result = await openaiService.generateApplication(context, { model: 'gpt-4o-mini', maxFiles: 1, provider });
+      let result; try { result = await openaiService.generateApplication(context, { model: 'gpt-4o-mini', maxFiles: 1, provider }); }
+            catch(e){
+              if(/Clé API OpenAI manquante|Clé API Claude manquante/.test(e.message||'')){
+                return json({ success:false, error:'Génération interrompue (clé provider manquante) – aucun fallback.', provider, detail:e.message, partial: Object.keys(files) }, { status:503 });
+              }
+              throw e;
+            }
             // On attend exactement 1 clé (filename attendu). Sinon on tente de récupérer la première.
             if(result[filename]) files[filename] = result[filename];
             else {

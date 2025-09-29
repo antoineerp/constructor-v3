@@ -1,7 +1,9 @@
-import { compile } from 'svelte/compiler';
-import prettier from 'prettier';
 import * as path from 'path';
+
 import { ESLint } from 'eslint';
+import prettier from 'prettier';
+import { compile } from 'svelte/compiler';
+
 import { toText } from '../utils/to-text.js';
 // Charge optionnellement le formatter dédié multi-fichiers (Svelte + Tailwind)
 let formatFilesFn = null;
@@ -164,6 +166,24 @@ export async function validateFiles(files) {
     }
 
     if (ext === '.svelte') {
+      // Détection précoce de patterns jQuery/legacy ($, $.ajax, $(document).ready) pour éviter runtime "$ is not defined"
+      try {
+        // On ignore les occurrences de $: store Svelte via heuristique: "$: " ou "$store" ne doivent pas compter.
+        const jqueryPatterns = [/\$\(document\)/, /\$\.ajax\s*\(/, /\$\(['"].+['"]\)/];
+        const suspicious = [];
+        for(const re of jqueryPatterns){ if(re.test(content)) suspicious.push(re.source); }
+        // Heuristique plus large: un appel $(...) suivi d'un point .on/.addClass etc.
+        const genericDollar = /\$\([^)]*\)\s*\.(on|ready|ajax|addClass|removeClass|toggleClass|css|attr)\b/;
+        if(genericDollar.test(content) && !suspicious.includes(genericDollar.source)) suspicious.push(genericDollar.source);
+        // Exclure les cas Svelte réactifs ($:) et $page, $session, etc.
+        if(suspicious.length){
+          diagnostics.push({
+            severity: 'warning',
+            source: 'precheck',
+            message: 'Usage probable de jQuery ($) détecté. Svelte ne fournit pas $ par défaut. Remplacer par DOM natif ou onMount, ou injecter une lib (cash-dom). Patterns: '+suspicious.join(', ')
+          });
+        }
+      } catch(_e) { /* silencieux */ }
       try {
         compile(content, { generate: 'ssr' });
         ssrOk = true;

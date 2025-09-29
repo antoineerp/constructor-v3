@@ -1,6 +1,6 @@
 // Centralisation des builders de prompts pour génération "premier coup" optimisée
-import { summarizeCatalog, selectComponentsForBlueprint } from '$lib/catalog/components.js';
 import { detectCapabilities, detectCapabilitiesWithEmbeddings, deriveCapabilityComponents, enrichRoutesWithCapabilities } from '$lib/catalog/capabilities.js';
+import { summarizeCatalog } from '$lib/catalog/components.js';
 
 // Génère des design tokens basiques si absents
 export function ensureDesignTokens(blueprint){

@@ -1,10 +1,10 @@
 <script>
-  import HeaderPro from './HeaderPro.svelte';
-  import FooterPro from './FooterPro.svelte';
-  import HeroSplit from './HeroSplit.svelte';
   import FeatureGridMinimal from './FeatureGridMinimal.svelte';
-  import PricingTableSimple from './PricingTableSimple.svelte';
+  import FooterPro from './FooterPro.svelte';
+  import HeaderPro from './HeaderPro.svelte';
+  import HeroSplit from './HeroSplit.svelte';
   import NewsletterSignup from './NewsletterSignup.svelte';
+  import PricingTableSimple from './PricingTableSimple.svelte';
 </script>
 
 <div class="min-h-screen flex flex-col">

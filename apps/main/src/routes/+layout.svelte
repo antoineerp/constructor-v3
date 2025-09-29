@@ -2,8 +2,9 @@
   import '../app.css';
   import '$lib/design/tokens.css';
   import '@fortawesome/fontawesome-free/css/all.min.css';
-  import { supabase } from '$lib/supabase.js';
   import { onMount } from 'svelte';
+
+  import { supabase } from '$lib/supabase.js';
 
   let session = null;
   let loadingSession = true;

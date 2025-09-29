@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+
 import { semanticSearch } from '$lib/embeddings';
 
 export async function POST({ request }) {

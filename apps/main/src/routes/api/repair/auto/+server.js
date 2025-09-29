@@ -1,10 +1,11 @@
 import { json } from '@sveltejs/kit';
-import { openaiService } from '$lib/openaiService.js';
-import { validateFiles } from '$lib/validation/validator.js';
-import { componentsCatalog } from '$lib/catalog/components.js';
+
 import { runAllTransforms } from '$lib/ast/transformers.js';
-import { runSvelteCheckSnippet } from '$lib/validation/svelteCheckRunner.js';
+import { componentsCatalog } from '$lib/catalog/components.js';
+import { openaiService } from '$lib/openaiService.js';
 import { supabase as clientSupabase } from '$lib/supabase.js';
+import { runSvelteCheckSnippet } from '$lib/validation/svelteCheckRunner.js';
+import { validateFiles } from '$lib/validation/validator.js';
 
 /* Auto-réparation multi-passes.
 Body: {
