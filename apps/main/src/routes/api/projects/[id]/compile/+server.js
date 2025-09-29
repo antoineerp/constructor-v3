@@ -283,31 +283,73 @@ export async function POST(event){
         });
         rewritten.set(m.path, code);
       }
-      // Construire import map data: pour chaque module Svelte
-      const imports = {};
-      for(const [p, code] of rewritten.entries()){
-        const b64 = Buffer.from(code,'utf-8').toString('base64');
-        imports[p] = `data:application/javascript;base64,${b64}`;
-      }
-      // Réécrire wrappers également (ils importent les pages)
-      for(const w of wrapperModules){
-        if(!w.jsCode) continue;
-        const b64 = Buffer.from(w.jsCode,'utf-8').toString('base64');
-        imports[`__wrapper__:${w.pattern}`] = `data:application/javascript;base64,${b64}`;
-      }
+      // Construction d'un bundle inline plus fiable (évite import maps + CSP issues)
       const entryModule = rewritten.has(entry) ? entry : (rewritten.keys().next().value);
-      const csp = [
-        "default-src 'none'",
-        "style-src 'unsafe-inline' https://cdn.tailwindcss.com",
-        "script-src 'unsafe-inline' data: blob: https://cdn.tailwindcss.com",
-        "font-src https://cdnjs.cloudflare.com",
-        "img-src data:",
-        "connect-src 'none'",
-        "frame-ancestors 'none'"
-      ].join('; ');
-      const importMap = `<script type=\"importmap\">${JSON.stringify({ imports })}<\/script>`;
-      const boot = `<script type=\"module\">\nimport App from '${entryModule}';\nconst root=document.getElementById('app');\ntry{new App({target:root});}catch(e){root.innerHTML='<pre style=\\'color:#b91c1c;font:12px monospace;white-space:pre-wrap\\'>Runtime error: '+(e.message||e)+'</pre>';console.error('runtime error',e);}\n<\/script>`;
-      result.runtimeHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<title>Runtime Preview</title>\n<meta http-equiv=\"Content-Security-Policy\" content=\"${csp.replace(/"/g,'&quot;')}\">\n<script src=\"https://cdn.tailwindcss.com\"><\/script>${importMap}\n</head><body class='p-4'><div id='app' data-runtime='1'>Chargement...</div>${boot}</body></html>`;
+      if(!entryModule) throw new Error('Aucun module d\'entrée trouvé');
+      
+      // Créer un bundle inline avec tous les modules
+      const bundleLines = [];
+      
+      // Ajouter tous les modules comme des exports globaux
+      const moduleVars = new Map();
+      let moduleCounter = 0;
+      
+      for(const [path, code] of rewritten.entries()){
+        const varName = `__mod_${moduleCounter++}`;
+        moduleVars.set(path, varName);
+        // Transformer export default en variable globale
+        const transformedCode = code
+          .replace(/export\s+default\s+/, `window.${varName} = `)
+          .replace(/import\s+([^;]+?)\s+from\s+['"]([^'"]+)['"];?/g, (match, imports, importPath) => {
+            const depVar = moduleVars.get(importPath);
+            if(depVar){
+              // Simple default import
+              if(/^\w+$/.test(imports.trim())){
+                return `const ${imports.trim()} = window.${depVar};`;
+              }
+            }
+            return `// Import non résolu: ${match}`;
+          });
+        bundleLines.push(`// Module: ${path}`);
+        bundleLines.push(transformedCode);
+        bundleLines.push('');
+      }
+      
+      // Script de démarrage
+      const entryVar = moduleVars.get(entryModule);
+      bundleLines.push(`// Démarrage`);
+      bundleLines.push(`try{`);
+      bundleLines.push(`  const App = window.${entryVar};`);
+      bundleLines.push(`  if(App && typeof App === 'function'){`);
+      bundleLines.push(`    new App({target: document.getElementById('app')});`);
+      bundleLines.push(`  } else {`);
+      bundleLines.push(`    throw new Error('Module d\\'entrée invalide: ' + typeof App);`);
+      bundleLines.push(`  }`);
+      bundleLines.push(`}catch(e){`);
+      bundleLines.push(`  document.getElementById('app').innerHTML = '<pre style="color:#b91c1c;font:12px monospace;padding:8px;border:1px solid #fca5a5;border-radius:4px;background:#fef2f2">Erreur runtime: ' + (e.message || e) + '</pre>';`);
+      bundleLines.push(`  console.error('Runtime error:', e);`);
+      bundleLines.push(`}`);
+      
+      const bundleScript = bundleLines.join('\n');
+      
+      result.runtimeHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <title>Sandbox Runtime</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { padding: 16px; font-family: system-ui; }
+    #app { min-height: 200px; }
+  </style>
+</head>
+<body>
+  <div id='app'>Initialisation...</div>
+  <script>
+${bundleScript}
+  </script>
+</body>
+</html>`;
     }
   } catch(e){
     result.runtimeHtml = `<!DOCTYPE html><html><body><pre style='color:#b91c1c'>Runtime bundle error: ${String(e).replace(/</g,'&lt;')}</pre></body></html>`;

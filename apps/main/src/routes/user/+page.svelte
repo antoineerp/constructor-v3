@@ -634,8 +634,19 @@
         else {
           compileDebugData = showCompileDebug ? data : null;
           lastInvalidImports = data.invalidImports||[];
+          // Toujours nettoyer l'ancienne URL
+          if(runtimeUrl && runtimeUrl.startsWith('blob:')) URL.revokeObjectURL(runtimeUrl);
+          runtimeUrl = '';
           if(data.runtimeHtml){
-            try { const blobR = new Blob([data.runtimeHtml], { type:'text/html' }); runtimeUrl = URL.createObjectURL(blobR); } catch(_e){}
+            try { 
+              const blobR = new Blob([data.runtimeHtml], { type:'text/html' }); 
+              runtimeUrl = URL.createObjectURL(blobR);
+              console.log('[compileSelected] runtimeUrl générée:', runtimeUrl.slice(0,50) + '...');
+            } catch(e){
+              console.error('[compileSelected] erreur blob runtimeHtml:', e);
+            }
+          } else {
+            console.warn('[compileSelected] pas de runtimeHtml dans la réponse');
           }
           const html = data.modules ? '<!-- modules compiled -->' : '';
           if(data.modules){
@@ -1133,12 +1144,17 @@
               {:else if !appSelectedFile.endsWith('.svelte')}
                 <div class="h-full flex items-center justify-center text-gray-500 text-xs">Mode interactif seulement pour .svelte</div>
               {:else}
-                {#if interactiveLoading && !interactiveUrl}
+                <!-- Prioriser runtimeUrl (plus fiable) si disponible, sinon fallback vers interactiveUrl -->
+                {#if runtimeUrl}
+                  <iframe title="Runtime Sandbox" sandbox="allow-scripts" src={runtimeUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
+                {:else if interactiveLoading && !interactiveUrl}
                   <div class="h-full flex items-center justify-center text-gray-500 text-xs gap-2"><i class="fas fa-spinner fa-spin"></i> Construction sandbox...</div>
                 {:else if interactiveUrl && interactiveUrl.startsWith('error:')}
                   <div class="p-4 text-xs text-red-600 bg-red-50 h-full overflow-auto">{interactiveUrl.slice(6)}</div>
                 {:else if interactiveUrl}
                   <iframe title="Sandbox Interactif" sandbox="allow-scripts" src={interactiveUrl} class="absolute inset-0 w-full h-full bg-white"></iframe>
+                {:else}
+                  <div class="h-full flex items-center justify-center text-gray-500 text-xs gap-2"><i class="fas fa-spinner fa-spin"></i> Compilation en cours...</div>
                 {/if}
               {/if}
             </div>
