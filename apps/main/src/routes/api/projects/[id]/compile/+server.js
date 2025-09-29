@@ -54,7 +54,7 @@ export async function POST(event){
       return json({ success:true, cached:true, projectHash: hash, requestCount: globalThis.__COMPILE_REQS, ...cached });
     }
   const modules = [];
-  const pageFiles = []; // conserver liste pages pour wrappers
+  let pageFiles = []; // sera recalculé après boucle
     // Caching CSS (hash sur app.css + tailwind.config.cjs)
     let globalCss = '';
     let cssHash = null;
@@ -97,7 +97,7 @@ export async function POST(event){
     const importStmtRegex = /import\s+[^'";]*?from\s+['"]([^'"\n]+)['"];?|import\s+['"]([^'"\n]+)['"];?/g;
     for(const [pathName, source] of svelteEntries){
       try {
-        const c = compile(source, { generate:'dom', format:'esm', filename: pathName, css:true });
+  const c = compile(source, { generate:'dom', filename: pathName, css:true });
         let jsCode = c.js.code;
         // Inline CSS si présent (simple concat) — amélioration future: module séparé
         if(c.css && c.css.code){
@@ -112,8 +112,7 @@ export async function POST(event){
             const resolved = resolveImport(spec, pathName);
             if(resolved) importMap.push({ spec, target: resolved });
         }
-        modules.push({ path: pathName, jsCode, imports: importMap });
-        if(/\/\+page\.svelte$/.test(pathName)) pageFiles.push(pathName);
+  modules.push({ path: pathName, jsCode, imports: importMap });
       } catch(e){
         modules.push({ path: pathName, error: e.message });
       }
@@ -123,6 +122,8 @@ export async function POST(event){
       modules.push({ path: scriptPath, jsCode: code, loadScript: true });
     }
   const routeCandidates = Object.keys(projectFiles).filter(f=> f.startsWith('src/routes/') && f.endsWith('.svelte'));
+  // Recalcul pages (plus fiable que détection inline)
+  pageFiles = modules.filter(m=> m.path && /\/\+page\.svelte$/.test(m.path)).map(m=> m.path);
 
   // ---------- Précompilation wrappers (layouts + page) ----------
   function collectLayouts(pagePath){
@@ -164,13 +165,22 @@ export async function POST(event){
   const openTags = layouts.map((_,i)=> `<L${i} {params} {data}>`).join('');
   const closeTags = layouts.map((_,i)=> `</L${layouts.length-1 - i}>`).join('');
   const wrapperSource = `<script>\n${imports.join('\n')}\nexport let params;\nexport let data;\n</script>\n${openTags}<Page {params} {data}/> ${closeTags}`;
-      const cWrap = compile(wrapperSource, { generate:'dom', format:'esm', filename:`__wrapper__${pattern}.svelte` });
+  const cWrap = compile(wrapperSource, { generate:'dom', filename:`__wrapper__${pattern}.svelte` });
       const codes = layouts.map(l=> projectFiles[l]||'').concat(projectFiles[pagePath]||'');
       const hash = hashStr(codes.join('\u0000'));
       wrappers.push({ pattern, dynamic: hasDynamic, paramNames, hash, jsCode: cWrap.js.code });
     } catch(e){
       wrappers.push({ pattern: pagePath, error: e.message });
     }
+  }
+  // Fallback: si aucune page n'a produit de wrapper (ex: heuristique ratée), créer un wrapper minimal pour l'entry principal
+  if(wrappers.filter(w=> !w.error).length === 0 && modules.length){
+    try {
+      const entryMod = entry;
+      const wrapperSource = `<script>import Page from '${entryMod}'; export let params; export let data;</script><Page {params} {data}/>`;
+      const cWrap = compile(wrapperSource, { generate:'dom', filename:`__wrapper__/.svelte` });
+      wrappers.push({ pattern:'/', dynamic:false, paramNames:[], hash: 'w0', jsCode: cWrap.js.code });
+    } catch(_e){ /* ignore fallback failure */ }
   }
     // Récupération qualité la plus récente
     let quality = null; let validation_summary = null;
