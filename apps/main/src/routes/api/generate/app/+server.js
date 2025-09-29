@@ -14,7 +14,13 @@ export async function POST({ request, locals }) {
       return json({ success:false, error:'Prompt requis' }, { status:400 });
     }
     if(!openaiService.apiKey){
-      return json({ success:false, error:'Clé OpenAI absente: génération impossible (aucun fallback).', missingKey:'openai' }, { status:503 });
+      // Fallback offline mock: génère 3 fichiers basiques pour ne pas bloquer l'UI (sans validation lourde pour rapidité tests)
+      const mock = {
+        'README.md': '# Application Mock\n\nGénérée en mode offline (aucune clé OpenAI).',
+  'src/routes/+page.svelte': `<script>let c=0; const inc=()=>c++;<\/script>\n<h1 class=\"text-2xl font-bold text-purple-600\">Mock App Offline<\/h1>\n<p class=\"text-sm text-gray-600\">Aucune clé OpenAI détectée. Ceci est un blueprint simulé pour test UI.<\/p>\n<p class=\"text-xs text-gray-400\">Bienvenue dans l\'application Offline.<\/p>\n<button class=\"mt-4 px-3 py-1 rounded bg-purple-600 text-white\" on:click={inc}>Compteur {c}<\/button>`,
+        'src/routes/about/+page.svelte': '<h2 class="text-xl font-semibold">À propos (offline)</h2><p class="text-sm text-gray-600">Mode dégradé.</p>'
+      };
+      return json({ success:true, files: mock, offline:true, warning:'Mode offline: clé OpenAI absente.' });
     }
     let analyses = [];
     if(Array.isArray(fileHashes) && fileHashes.length){

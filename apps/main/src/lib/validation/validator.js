@@ -8,12 +8,16 @@ import { toText } from '../utils/to-text.js';
 // Charge optionnellement le formatter dédié multi-fichiers (Svelte + Tailwind)
 let formatFilesFn = null;
 try {
-  // Chargement via alias Vite ($tools/format) défini dans vite.config.js
-  const mod = await import('$tools/format');
-  formatFilesFn = mod.formatFiles;
-} catch(_e) {
-  // silencieux si absent (en build SSR Vercel, alias résolu via Vite)
-}
+  // On saute complètement le chargement si on est dans Vitest (import.meta.vitest) ou NODE_ENV === 'test'
+  const isVitest = typeof import.meta !== 'undefined' && import.meta?.vitest;
+  const isTestEnv = process?.env?.NODE_ENV === 'test';
+  if(!isVitest && !isTestEnv){
+    // Construire la chaîne dynamiquement pour empêcher Vite d'essayer de résoudre l'alias lors de la transformation
+    const modPath = '$' + 'tools/format';
+    const mod = await import(modPath);
+    formatFilesFn = mod.formatFiles;
+  }
+} catch(_e) { /* ignore absence alias / échec format optionnel */ }
 
 // ESLint singleton (flat config inline) — on ne dépend plus de découverte de fichier ni de fallback.
 let eslintInstance; let eslintInitError=null;
@@ -184,6 +188,18 @@ export async function validateFiles(files) {
           });
         }
       } catch(_e) { /* silencieux */ }
+      // Interdiction d'importer directement une route (+page/+layout) depuis une autre route ou composant
+      try {
+        const badImportRe = /import\s+[^;]*from\s+['"]((?:\.\.?\/)+|src\/)?routes\/[^'";]+\+page\.svelte['"]/g;
+        const badLayoutRe = /import\s+[^;]*from\s+['"]((?:\.\.?\/)+|src\/)?routes\/[^'";]+\+layout\.svelte['"]/g;
+        if(badImportRe.test(content) || badLayoutRe.test(content)){
+          diagnostics.push({
+            severity: 'error',
+            source: 'routing-rule',
+            message: 'Import direct d\'une route (+page/+layout) détecté. Extraire le contenu dans src/lib/YourComponent.svelte et importer ce composant à la place.'
+          });
+        }
+      } catch(_e){ /* ignore */ }
       try {
         compile(content, { generate: 'ssr' });
         ssrOk = true;

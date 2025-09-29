@@ -39,6 +39,62 @@
   let appNavLoading = false;
   let appNavError = '';
   let appAvailableRoutes = [];
+  // --- Blueprint quick generation & patch ---
+  import { onMount } from 'svelte';
+  let availableBlueprintIds = ['skeleton-base','flowbite-kit','bits-headless','shadcn-skeleton'];
+  let quickBlueprintId = 'skeleton-base';
+  let quickIncludeExample = true;
+  let quickGenLoading = false;
+  let patchOps = ''; // zone texte JSON pour opérations
+  let patchError=''; let patchApplied='';
+  let isOffline = false;
+  async function detectOffline(){
+    try {
+      const r = await fetch('/api/openai/ping');
+      const j = await r.json();
+      if(!j?.ok) isOffline = true;
+    } catch(_e){ isOffline = true; }
+  }
+
+  async function quickGenerateBlueprint(){
+    quickGenLoading = true; patchError='';
+    try {
+      const res = await fetch('/api/blueprint/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: quickBlueprintId, includeExample: quickIncludeExample, language:'ts' }) });
+      const data = await res.json();
+      if(!data.success) throw new Error(data.error||'échec génération');
+      appFiles = data.files; appValidation = null; blueprintData = { id: data.meta.id, routes: Object.keys(data.files).filter(f=> f.startsWith('src/routes/') && f.endsWith('+page.svelte')).map(f=> ({ path: f })) };
+      const first = Object.keys(appFiles).find(f=> f.endsWith('.svelte'));
+      appSelectedFile = first || null; activeView = first? 'preview-ssr':'files';
+    } catch(e){ patchError = 'Blueprint: '+e.message; }
+    finally { quickGenLoading=false; }
+  }
+
+  function examplePatch(){
+    const target = appSelectedFile || 'src/routes/+page.svelte';
+    const original = (appFiles?.[target]||'');
+    const updated = original.includes('Patch appliqué') ? original : original.replace('</h2>','</h2>\n<p class=\\"text-sm text-emerald-600\\">Patch appliqué ✔</p>');
+    const ops = [
+      { op:'add', path:'src/lib/components/Badge.svelte', content:'<script>export let text=\"Hi\";<\/script><span class=\"px-2 py-0.5 rounded bg-purple-600/10 text-purple-700 text-xs\">{text}</span>' },
+      { op:'update', path: target, content: updated }
+    ];
+    patchOps = JSON.stringify(ops, null, 2);
+  }
+
+  async function applyPatch(){
+    patchError=''; patchApplied='';
+    let ops; try { ops = JSON.parse(patchOps||'[]'); } catch(e){ patchError='JSON invalide opérations'; return; }
+    if(!Array.isArray(ops)){ patchError='ops doit être un tableau'; return; }
+    try {
+      const res = await fetch('/api/blueprint/patch', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ files: appFiles||{}, operations: ops }) });
+      const data = await res.json();
+      if(!data.success) throw new Error(data.error||'échec patch');
+      appFiles = data.files; patchApplied = `Opérations appliquées: ${data.applied.length}, erreurs: ${data.errors.length}`;
+      if(appSelectedFile && !appFiles[appSelectedFile]) appSelectedFile = Object.keys(appFiles).find(f=> f.endsWith('.svelte'))||null;
+      compileCache.clear(); interactiveCache.clear();
+    } catch(e){ patchError = e.message; }
+  }
+
+  onMount(()=>{ detectOffline(); });
 
   function listLocalRoutes(){
     if(!appFiles) return [];
@@ -691,7 +747,7 @@
 <div class="max-w-6xl mx-auto px-4 py-10">
   <h1 class="text-3xl font-bold text-gray-900 mb-6 flex items-center gap-3">
     <i class="fas fa-diagram-project text-purple-600"></i>
-    Générateur d'application
+    Générateur d'application {#if isOffline}<span class="text-xs px-2 py-1 rounded bg-amber-500/20 text-amber-700 border border-amber-400">Offline</span>{/if}
   </h1>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -714,6 +770,13 @@
           {#if appIsGenerating || blueprintGenerating}<i class="fas fa-spinner fa-spin"></i>{:else}<i class="fas fa-gears"></i>{/if}
           {useBlueprintMode ? 'Générer Blueprint' : 'Générer'}
         </button>
+        <div class="flex items-center gap-2">
+          <select class="text-xs border rounded px-2 py-1" bind:value={quickBlueprintId}>
+            {#each availableBlueprintIds as id}<option value={id}>{id}</option>{/each}
+          </select>
+          <label class="flex items-center gap-1 text-[10px]"><input type="checkbox" bind:checked={quickIncludeExample} class="rounded border-gray-300"/>exemples</label>
+          <button class="px-3 py-1 rounded text-xs bg-white border hover:bg-gray-50 disabled:opacity-50" on:click={quickGenerateBlueprint} disabled={quickGenLoading}><i class="fas fa-bolt mr-1"></i>{quickGenLoading? '...' : 'Blueprint rapide'}</button>
+        </div>
         <div class="relative">
           <label class="px-4 py-2 rounded-lg text-sm bg-white border hover:bg-gray-50 flex items-center gap-2 cursor-pointer">
             <i class="fas fa-upload"></i> {uploading ? 'Upload...' : 'Ajouter fichiers'}
@@ -727,6 +790,15 @@
       {#if appError}
         <div class="text-xs text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded">{appError}</div>
       {/if}
+        <div class="border rounded p-2 space-y-2 bg-gray-50">
+          <div class="flex items-center justify-between text-[11px] font-semibold text-gray-700"><span><i class="fas fa-wrench text-purple-500"></i> Patch incrémental</span><button class="text-[10px] px-2 py-0.5 border rounded hover:bg-white" on:click={examplePatch}>Exemple</button></div>
+          <textarea class="w-full h-32 text-xs font-mono border rounded p-2" bind:value={patchOps} placeholder="Entrer opérations JSON ici..."></textarea>
+          <div class="flex gap-2">
+            <button class="px-3 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50" on:click={applyPatch} disabled={!patchOps.trim() || !appFiles}>Appliquer patch</button>
+            {#if patchApplied}<span class="text-[10px] text-emerald-700">{patchApplied}</span>{/if}
+            {#if patchError}<span class="text-[10px] text-red-600">{patchError}</span>{/if}
+          </div>
+        </div>
       {#if useBlueprintMode && blueprintData}
         <div class="text-[11px] bg-indigo-50 border border-indigo-200 text-indigo-700 rounded p-2 space-y-1 max-h-48 overflow-auto">
           <div class="font-semibold flex items-center gap-1"><i class="fas fa-sitemap"></i> Blueprint</div>

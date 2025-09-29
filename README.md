@@ -9,6 +9,17 @@ npm run format   # Prettier --write .
 npm run lint     # (placeholder ESLint si config active)
 ```
 
+### Ingestion composants externes (prototype)
+
+Ingestion locale d'une librairie de composants Svelte (copie snapshot sans réseau):
+
+```bash
+node apps/main/tools/ingest-external.mjs skeleton /chemin/vers/mes/sources/skeleton
+```
+
+Résultat: fichiers sous `apps/main/src/lib/external/skeleton/components/` + `meta.json`.
+
+
 Config Prettier: `prettier.config.cjs`.
 Format programmatique: `apps/main/tools/format-files.mjs` (entrée JSON { files: { path: code } }).
 

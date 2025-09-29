@@ -40,6 +40,22 @@ export async function POST(event){
         };
       }
     }
+    // Détection brute imports interdits (avant compilation Svelte) sur l'ensemble des fichiers
+    const preInvalidImports = [];
+    try {
+      const routeImportPattern = /import\s+[^;]*from\s+['"]([^'"\n]+)['"]/g;
+      for(const [fname, code] of Object.entries(projectFiles)){
+        if(!fname.endsWith('.svelte') && !fname.endsWith('.js') && !fname.endsWith('.ts')) continue;
+        let m; while((m = routeImportPattern.exec(code))){
+          const spec = m[1];
+          if(/(^|\/)(\.\.\/)+routes\//.test(spec) || /(^|\/)routes\//.test(spec) || /src\/routes\//.test(spec)){
+            if(/\+page\.svelte$/.test(spec) || /\+layout\.svelte$/.test(spec)){
+              preInvalidImports.push({ from: fname, spec, line: code.slice(0,m.index).split('\n').length });
+            }
+          }
+        }
+      }
+    } catch(_e){ /* ignore scan errors */ }
     // Filtrer uniquement fichiers Svelte + JS potentiels
   const svelteEntries = Object.entries(projectFiles).filter(([k])=> k.endsWith('.svelte'));
   const loadScriptEntries = Object.entries(projectFiles).filter(([k])=> /\+(page|layout)\.(js|ts)$/.test(k));
@@ -54,6 +70,7 @@ export async function POST(event){
       return json({ success:true, cached:true, projectHash: hash, requestCount: globalThis.__COMPILE_REQS, ...cached });
     }
   const modules = [];
+  const invalidImports = [];
   let pageFiles = []; // sera recalculé après boucle
     // Caching CSS (hash sur app.css + tailwind.config.cjs)
     let globalCss = '';
@@ -111,7 +128,20 @@ export async function POST(event){
             if(!spec) continue;
             const resolved = resolveImport(spec, pathName);
             if(resolved) importMap.push({ spec, target: resolved });
+            if(/^(\.\.\/)+routes\//.test(spec) || /^(\.\.?\/)?routes\//.test(spec) || /src\/routes\//.test(spec)){
+              invalidImports.push({ from: pathName, spec });
+            }
         }
+        // Scan brut du source original aussi (au cas où l'import a été tree-shaké)
+        try {
+          const rawImportRe = /import\s+[^;]*from\s+['"]([^'"\n]+)['"]/g;
+          let rm; while((rm = rawImportRe.exec(source))){
+            const spec = rm[1];
+            if(/routes\/[^'";]+\+page\.svelte$/.test(spec) || /routes\/[^'";]+\+layout\.svelte$/.test(spec)){
+              invalidImports.push({ from: pathName, spec, raw:true });
+            }
+          }
+        } catch(_e){ /* ignore raw scan */ }
   modules.push({ path: pathName, jsCode, imports: importMap });
       } catch(e){
         modules.push({ path: pathName, error: e.message });
@@ -206,7 +236,7 @@ export async function POST(event){
     paramNames: w.paramNames,
     jsCode: w.jsCode
   }));
-  const result = { modules: [...modules, ...wrapperModules], entry, cached:false, timings:{ total_ms: Date.now()-t0 }, routes: routeCandidates, wrappers, quality, validation_summary, css: globalCss, cssHash, guardMeta, variantMeta };
+  const result = { modules: [...modules, ...wrapperModules], entry, cached:false, timings:{ total_ms: Date.now()-t0 }, routes: routeCandidates, wrappers, quality, validation_summary, css: globalCss, cssHash, guardMeta, variantMeta, invalidImports: [...preInvalidImports, ...invalidImports] };
     setCached(hash, result, 2*60*1000); // 2 min
   return json({ success:true, projectHash: hash, requestCount: globalThis.__COMPILE_REQS, ...result });
   } catch(e){
