@@ -8,6 +8,16 @@ if(!connectionString) {
 }
 
 const pool = connectionString ? new Pool({ connectionString, max: 5 }) : null;
-export const db = pool ? drizzle(pool) : (new Proxy({}, {
-  get(){ throw new Error('db indisponible: définir DATABASE_URL'); }
-}) as any);
+
+// Typage: on déduit le type retourné par drizzle() sans imposer un schéma.
+type DrizzleDB = ReturnType<typeof drizzle>;
+
+function createUnavailableDb(): DrizzleDB {
+  return new Proxy({}, {
+    get(){
+      throw new Error('db indisponible: définir DATABASE_URL');
+    }
+  }) as DrizzleDB;
+}
+
+export const db: DrizzleDB = pool ? drizzle(pool) : createUnavailableDb();
