@@ -93,6 +93,7 @@
 				code = `<script>\nexport let blueprint = JSON.parse(atob('${encodedBlueprint}'));\n${imports}\n<\/script>\n<div class=\"p-5 font-sans text-sm space-y-6 bg-gradient-to-br from-gray-50 to-gray-100 min-h-full\" style=\"${paletteCss}\">\n<header class=\"space-y-1\"><h1 class=\"text-2xl font-bold\">${safeTitle}</h1><p class=\"text-[12px] text-gray-500\">Prévisualisation avancée (démo)</p></header>\n<section class=\"grid gap-4 md:grid-cols-2 lg:grid-cols-3\">${compsMarkup}</section>\n${routesBlock}\n</div>`;
 			}
 			const body = { code, debug:false };
+			if(advanced) body.strict = true;
 			if(Object.keys(dependencies).length) body.dependencies = dependencies;
 			const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
 			const ct = res.headers.get('content-type')||'';

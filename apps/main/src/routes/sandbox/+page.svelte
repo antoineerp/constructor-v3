@@ -27,6 +27,7 @@
   let errorSSR = '';
   let errorDOM = '';
   let showDebug = true;
+  let strictMode = false;
   let debugData = null; // réponse JSON debug du endpoint component
 
   // Persistence locale simple
@@ -74,6 +75,7 @@
       const dependencies = buildDependenciesMap();
       const payload = { code: mainCode, dependencies };
       if(showDebug) payload.debug = true;
+      if(strictMode) payload.strict = true;
       const res = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       if(!res.ok){
         errorSSR = await res.text();
@@ -164,6 +166,7 @@
           <div class="flex items-center gap-2">
             <button class="px-2 py-1 rounded bg-purple-600 text-white" on:click={()=> { compileSSR(); compileDOM(); }} disabled={compilingSSR||compilingDOM}>{(compilingSSR||compilingDOM)?'...':'Compiler'}</button>
             <button class="px-2 py-1 rounded bg-gray-700 text-white" on:click={()=> showDebug=!showDebug}>{showDebug?'Debug ON':'Debug OFF'}</button>
+            <label class="inline-flex items-center gap-1 cursor-pointer select-none"><input type="checkbox" bind:checked={strictMode} class="rounded border-gray-300" /> <span>Strict</span></label>
           </div>
         </div>
         <textarea bind:value={mainCode} rows="22" class="w-full p-2 text-[11px] font-mono border-0 focus:ring-0 outline-none resize-y"></textarea>
@@ -231,6 +234,12 @@
                 <div class="text-gray-500 mb-1">Meta</div>
                 <pre class="bg-gray-900 text-gray-100 p-2 rounded overflow-auto max-h-32">{JSON.stringify(debugData.meta,null,2)}</pre>
               </div>
+              {#if debugData.meta?.heuristicPath}
+              <div>
+                <div class="text-gray-500 mb-1">Heuristics Path</div>
+                <div class="bg-gray-900 text-emerald-300 p-2 rounded font-mono break-all">{debugData.meta.heuristicPath}</div>
+              </div>
+              {/if}
               <div>
                 <div class="text-gray-500 mb-1">SSR JS (transformé)</div>
                 <pre class="bg-gray-900 text-gray-100 p-2 rounded overflow-auto max-h-32">{debugData.ssrTransformed||debugData.ssrJs}</pre>
