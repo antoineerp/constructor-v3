@@ -91,14 +91,20 @@ export const tokens = {
         '--color-border': '#2a303c'
       }
     }
-  }
+  } as Record<ThemeName, Theme>
 };
+
+type ThemeName = 'light' | 'dark';
+
+interface Theme {
+  overrides?: Record<string, string>;
+}
 
 // Generate CSS custom properties from tokens
 export function tokensToCss(vars = tokens) {
-  const lines = [];
+  const lines: string[] = [];
   // primitives colors flatten
-  function walk(obj, path = []) {
+  function walk(obj: Record<string, any>, path: string[] = []) {
     Object.entries(obj).forEach(([k, v]) => {
       const next = [...path, k];
       if (typeof v === 'object' && v && !Array.isArray(v)) walk(v, next);
@@ -114,16 +120,16 @@ export function tokensToCss(vars = tokens) {
   walk(vars.primitives.spacing, ['space']);
   walk(vars.primitives.radius, ['radius']);
   walk(vars.primitives.font.size, ['font-size']);
-  // Semantic shortcuts
+  // Semantic shortcuts -> générer variables --color-xxx
   Object.entries(vars.semantic.color).forEach(([k, val]) => {
     lines.push(`--color-${k}: ${val};`);
   });
   return `:root{\n${lines.join('\n')}\n}`;
 }
 
-export function themeOverrides(themeName) {
+export function themeOverrides(themeName: ThemeName) {
   const t = tokens.themes[themeName];
   if (!t || !t.overrides) return '';
-  const lines = Object.entries(t.overrides).map(([k, v]) => `${k}: ${v};`);
-  return `[data-theme='${themeName}']{\n${lines.join('\n')}\n}`;
+  const pairs = Object.entries(t.overrides).map(([k, v]) => `${k}: ${v};`);
+  return `[data-theme='${themeName}']{\n${pairs.join('\n')}\n}`;
 }
