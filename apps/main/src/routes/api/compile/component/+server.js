@@ -482,7 +482,7 @@ export async function POST(event) {
     // Import map: certaines CDN jsdelivr renvoient 404 sur sous chemins internal/flags/legacy.
     // On bascule vers unpkg (plus tolérant) et on ajoute un fallback dynamique si le fetch échoue côté client.
     const needsInternal = domJsCode && /svelte\/internal/.test(domJsCode);
-    const importMap = needsInternal ? `\n<script type="importmap">${JSON.stringify({
+      const importMap = needsInternal ? `\n<script type="importmap">${JSON.stringify({
       imports: {
         'svelte/internal': 'https://unpkg.com/svelte@4.2.0/internal/index.js',
         'svelte/internal/': 'https://unpkg.com/svelte@4.2.0/internal/'
@@ -509,7 +509,7 @@ window.addEventListener('unhandledrejection',ev=>surface(ev.reason||ev,'Unhandle
     if(debug){
       if(debugStages) debugStages.finalSource = source;
   const hs = globalThis.__LAST_SSR_HEURISTICS__||[];
-  const r = json({ success:true, html, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null, heuristics: hs, heuristicPath: hs.join(' > '), strict, autoRepair: autoRepairMeta }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages });
+      const r = json({ success:true, html, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null, heuristics: hs, heuristicPath: hs.join(' > '), strict, autoRepair: autoRepairMeta }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages });
       r.headers.set('X-Compile-Mode','ssr');
       r.headers.set('X-Fallback-Used', (globalThis.__LAST_SSR_FALLBACK__? '1':'0'));
       if(strict) r.headers.set('X-Strict','1');

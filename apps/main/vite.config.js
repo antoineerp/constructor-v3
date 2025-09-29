@@ -13,5 +13,13 @@ export default defineConfig({
 			'$tools/format': resolve(__dirname, 'tools/format-files.mjs')
 		}
 	},
-	server: { port: 5173 }
+	server: { port: 5173 },
+	build: {
+		target: 'es2022',
+		rollupOptions: {
+			output: {
+				format: 'es'
+			}
+		}
+	}
 });

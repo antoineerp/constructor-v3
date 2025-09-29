@@ -15,6 +15,8 @@
   // Preview ad-hoc (C)
   let previewCode = `<script>\n  export let label = 'Bouton';\n  let count = 0;\n  function inc(){ count++; }\n<\/script>\n\n<button class=\"px-4 py-2 bg-blue-600 text-white rounded\" on:click={inc}>{label} {count}</button>`;
   let previewHtml = '';
+  let previewDomJs = ''; // JS DOM hydratation renvoyé par endpoint (extraction base64)
+  let previewSsrJs = ''; // JS SSR original (pour diff logique)
   let previewLoading = false;
   let previewError = '';
   let previewStrict = false;
@@ -93,12 +95,28 @@
   const inject = `<scr` + `ipt>window.addEventListener('component-hydration-error', e => { parent.postMessage({ type: 'hydration-error', message: (e.detail&&e.detail.message)||e.detail||'Hydration error' }, '*'); });</scr` + `ipt>`;
       previewHtml = (j.html || '') + inject;
       previewHeuristics = j.meta?.heuristics || [];
+      previewSsrJs = j.ssrJs || '';
+      previewDomJs = j.domJs || '';
       iframeKey++; // changer clé pour recharger
     } catch(e){
       previewError = e.message;
     } finally {
       previewLoading = false;
     }
+  }
+
+  // Diff SSR vs Fast (DOM) très simple (ligne à ligne) – affiché sur demande
+  let showDiff = false;
+  $: diffBlocks = showDiff ? computeDiff(previewSsrJs, previewDomJs) : [];
+  function computeDiff(a, b){
+    if(!a || !b) return [];
+    const al = a.split(/\n/); const bl = b.split(/\n/);
+    const max = Math.max(al.length, bl.length); const out=[];
+    for(let i=0;i<max;i++){
+      const L = al[i]||''; const R = bl[i]||'';
+      if(L!==R) out.push({ i:i+1, left:L, right:R });
+    }
+    return out.slice(0,200); // limite
   }
 
   // ===== Overlay Hydration =====
@@ -439,7 +457,7 @@
           <div>
             <h3 class="text-sm font-semibold text-gray-700 mb-2">Résultat</h3>
             {#if previewHtml}
-              <iframe key={iframeKey} title="Preview composant" class="w-full h-72 border rounded bg-white" srcdoc={previewHtml}></iframe>
+              <iframe key={iframeKey} title="Preview composant" class="w-full h-72 border rounded bg-white" srcdoc={previewHtml} sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer"></iframe>
             {:else}
               <div class="w-full h-72 border rounded bg-gray-50 grid place-items-center text-xs text-gray-500">Aucun rendu (compiler pour voir)</div>
             {/if}
@@ -447,7 +465,26 @@
               <button class="underline" on:click={() => { navigator.clipboard.writeText(previewHtml||''); }}>Copier HTML</button>
               <button class="underline" on:click={() => { previewCode = '<script>\n let t = new Date().toLocaleTimeString();<\/script>\n<p>Horloge: {t}</p>'; }}>Exemple simple</button>
               <button class="underline" on:click={() => { previewCode = '<h1>Hello</h1>'; }}>Minimal</button>
+              {#if previewSsrJs && previewDomJs}
+                <button class="underline" on:click={() => showDiff = !showDiff}>{showDiff? 'Masquer diff':'Diff SSR/Fast'}</button>
+              {/if}
             </div>
+            {#if showDiff}
+              <div class="mt-3 border rounded bg-gray-900 text-gray-100 max-h-64 overflow-auto text-[10px] p-2">
+                <div class="mb-1 text-xs text-blue-300">Diff (max 200 lignes divergentes) – gauche=SSR, droite=DOM</div>
+                {#each diffBlocks as d}
+                  <div class="grid grid-cols-2 gap-2 mb-1">
+                    <div>
+                      <span class="text-amber-400">{d.i}</span> <code class="break-all">{d.left}</code>
+                    </div>
+                    <div>
+                      <span class="text-amber-400">{d.i}</span> <code class="break-all">{d.right}</code>
+                    </div>
+                  </div>
+                {/each}
+                {#if !diffBlocks.length}<div class="text-gray-400">Aucune différence détectée.</div>{/if}
+              </div>
+            {/if}
           </div>
         </div>
       </Card>
