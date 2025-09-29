@@ -7,6 +7,7 @@ import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 
 import { computeProjectHash, getCached, setCached } from '$lib/preview/compileCache.js';
+import { fixRouteImports } from '$lib/fix/routeImports.js';
 import { supabase as clientSupabase, isSupabaseEnabled } from '$lib/supabase.js';
 
 // POST /api/projects/:id/compile
@@ -19,7 +20,7 @@ export async function POST(event){
   if(!projectId) return json({ success:false, error:'projectId manquant' }, { status:400 });
   let body = {};
   try { body = await request.json(); } catch(_e) {}
-  const { entries = [], files: injectedFiles, file } = body;
+  const { entries = [], files: injectedFiles, file, autoFix } = body;
   try {
     let projectFiles = injectedFiles;
     if(!projectFiles){
@@ -236,7 +237,14 @@ export async function POST(event){
     paramNames: w.paramNames,
     jsCode: w.jsCode
   }));
-  const result = { modules: [...modules, ...wrapperModules], entry, cached:false, timings:{ total_ms: Date.now()-t0 }, routes: routeCandidates, wrappers, quality, validation_summary, css: globalCss, cssHash, guardMeta, variantMeta, invalidImports: [...preInvalidImports, ...invalidImports] };
+  let allInvalid = [...preInvalidImports, ...invalidImports];
+  let autoFixReport = null;
+  if(autoFix && allInvalid.length){
+    const fix = fixRouteImports(projectFiles);
+    autoFixReport = { created: fix.created, changes: fix.changes };
+    // On ne recompile pas dans cette passe (éviter boucle) – on renvoie suggestion
+  }
+  const result = { modules: [...modules, ...wrapperModules], entry, cached:false, timings:{ total_ms: Date.now()-t0 }, routes: routeCandidates, wrappers, quality, validation_summary, css: globalCss, cssHash, guardMeta, variantMeta, invalidImports: allInvalid, autoFix: autoFixReport };
     setCached(hash, result, 2*60*1000); // 2 min
   return json({ success:true, projectHash: hash, requestCount: globalThis.__COMPILE_REQS, ...result });
   } catch(e){
