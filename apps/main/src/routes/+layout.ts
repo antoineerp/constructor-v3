@@ -1,7 +1,6 @@
 // SEO layout: fournit données standard OG/Twitter + title/description par défaut
-import type { LayoutLoad } from './$types';
-
-export const load: LayoutLoad = async () => {
+// On retire l'import de types local car les types générés ne sont pas présents lors de la compilation isolée (tsc --noEmit)
+export const load = async () => {
   // Fallback meta (peuvent être surchargées par des pages via export const seo = {...})
   const base = {
     title: 'Constructor V3',
