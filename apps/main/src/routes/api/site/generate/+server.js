@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 
@@ -36,7 +35,7 @@ export async function POST(event) {
     let serverSupabase = null;
     if (authHeader?.toLowerCase().startsWith('bearer ')) {
       const token = authHeader.split(' ')[1];
-      serverSupabase = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, { global: { headers: { Authorization: `Bearer ${token}` } } });
+  // Supabase retiré
       try {
         const { data: { user }, error: userErr } = await serverSupabase.auth.getUser();
         if (!userErr && user) userId = user.id;

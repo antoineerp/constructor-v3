@@ -5,7 +5,6 @@
   import Card from '$lib/Card.svelte';
   import Input from '$lib/Input.svelte';
   import Modal from '$lib/Modal.svelte';
-  import { supabase } from '$lib/supabase.js';
   import { listPromptTemplates } from '$lib/prompt/promptLibrary.js';
 
   let activeTab = 'dashboard';
@@ -24,6 +23,53 @@
   let rawJsPreview = '';
   let previewHeuristics = [];
   let iframeKey = 0; // force reload iframe
+  let fastPreview = true; // active le mode compilation rapide worker
+  let faithfulPreview = false; // build fidèle serveur
+  let fastStatus = 'idle'; // idle|compiling|error|ok
+  let faithfulStatus = 'idle';
+  let importWarnings = [];
+  let rewritesMeta = null;
+
+  // Chargement du worker compileRapid dynamiquement (évite bundling si non utilisé)
+  let compileRapidFn;
+  async function ensureRapid(){
+    if(!compileRapidFn){
+      try { const mod = await import('../../lib/compile/rapidCompiler.ts'); compileRapidFn = mod.compileRapid; }
+      catch(e){ console.warn('Rapid compiler indisponible', e); }
+    }
+    return compileRapidFn;
+  }
+
+  async function runFastPreview(){
+    fastStatus = 'compiling';
+    importWarnings = []; rewritesMeta=null;
+    try {
+      const rapid = await ensureRapid();
+      if(!rapid) throw new Error('compileRapid non chargé');
+      const res = await rapid(previewCode, 'Component.svelte');
+      if(!res.ok){ throw new Error(res.error||'Erreur compileRapid'); }
+      // Insérer le JS compilé dans une iframe sandbox simple
+      const jsCode = res.js || '';
+      const cssCode = res.css || '';
+      const html = [
+        '<!DOCTYPE html><html><head><meta charset="utf-8"><style>', cssCode, '</style></head><body>',
+        '<div id="app"></div>',
+        '<scr' + 'ipt type="module">',
+        jsCode,
+        '\n;try{const C=Component; new C({ target: document.getElementById("app"), props:{ label:"Fast" } });}catch(e){ document.body.innerHTML="<pre>"+e.message+"</pre>"; }',
+        '</scr' + 'ipt></body></html>'
+      ].join('');
+      const blobHtml = new Blob([html], { type:'text/html' });
+      const url = URL.createObjectURL(blobHtml);
+      fastIframeSrc = url;
+      fastStatus = 'ok';
+    } catch(e){
+      fastStatus = 'error'; fastError = e.message;
+    }
+  }
+
+  let fastIframeSrc = '';
+  let fastError = '';
   async function runPreview(){
     previewLoading = true; previewError=''; previewHeuristics=[]; rawError=''; rawJsPreview='';
     try {
@@ -33,6 +79,7 @@
           try { const j = await rRaw.json(); rawError = '[raw] '+(j.error||'Erreur inconnue'); } catch { rawError='[raw] Erreur compilation'; }
         } else {
           const jRaw = await rRaw.json(); rawJsPreview = (jRaw.js||'').slice(0,3000);
+          if(jRaw.rewrites){ rewritesMeta = jRaw.rewrites; importWarnings = jRaw.rewrites.warnings||[]; }
         }
       }
       const r = await fetch('/api/compile/component?ts=' + Date.now(), { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ code: previewCode, debug:true, strict: previewStrict, enableRendererNormalization:false }) });
@@ -42,7 +89,9 @@
         return;
       }
       const j = await r.json();
-      previewHtml = j.html || '';
+      // Inject listener pour relayer les erreurs d'hydratation vers parent
+  const inject = `<scr` + `ipt>window.addEventListener('component-hydration-error', e => { parent.postMessage({ type: 'hydration-error', message: (e.detail&&e.detail.message)||e.detail||'Hydration error' }, '*'); });</scr` + `ipt>`;
+      previewHtml = (j.html || '') + inject;
       previewHeuristics = j.meta?.heuristics || [];
       iframeKey++; // changer clé pour recharger
     } catch(e){
@@ -51,6 +100,15 @@
       previewLoading = false;
     }
   }
+
+  // ===== Overlay Hydration =====
+  let hydrationMessage = '';
+  let overlayVisible = false;
+  function showHydrationError(msg){ hydrationMessage = msg; overlayVisible = true; const el = document.getElementById('hydration-overlay'); const msgEl = document.getElementById('hydration-overlay-msg'); if(el&&msgEl){ msgEl.textContent = msg; el.classList.remove('hidden'); } }
+  function hideOverlay(){ overlayVisible=false; const el = document.getElementById('hydration-overlay'); if(el){ el.classList.add('hidden'); } }
+  onMount(()=>{
+    window.addEventListener('message', (e)=>{ if(e.data && e.data.type==='hydration-error'){ showHydrationError(e.data.message); } });
+  });
 
   // ====== IA ======
   let aiProviders = [];
@@ -65,51 +123,6 @@
   }
 
   // ====== SUPABASE ======
-  let supaStatus = 'idle';
-  let supaMessage = '';
-  let supaTemplates = [];
-  let supaComponents = [];
-  let supaProjects = [];
-
-  async function testSupabaseConnection() {
-    supaStatus = 'testing';
-    supaMessage = 'Test de connexion...';
-    try {
-      const { error: healthErr } = await supabase.from('templates').select('*', { count: 'exact', head: true });
-      if (healthErr) throw healthErr;
-      const [templatesRes, componentsRes, projectsRes] = await Promise.all([
-        supabase.from('templates').select('*').limit(5),
-        supabase.from('components').select('*').limit(5),
-        supabase.from('projects').select('*').limit(5)
-      ]);
-      if (templatesRes.error || componentsRes.error || projectsRes.error) {
-        throw (templatesRes.error || componentsRes.error || projectsRes.error);
-      }
-      supaTemplates = templatesRes.data || [];
-      supaComponents = componentsRes.data || [];
-      supaProjects = projectsRes.data || [];
-      supaStatus = 'success';
-      supaMessage = `✅ Connexion OK (${supaTemplates.length} templates, ${supaComponents.length} composants)`;
-    } catch (e) {
-      supaStatus = 'error';
-      supaMessage = '❌ ' + (e.message || 'Erreur connexion');
-      console.error('Supabase test error', e);
-    }
-  }
-
-  async function supabaseTestCreate() {
-    if (supaStatus !== 'success') return;
-    try {
-      const { error } = await supabase.from('projects').insert([
-        { name: 'Test Project', description: 'Projet test', status: 'draft', code_generated: { note: 'test' } }
-      ]);
-      if (error) throw error;
-      await testSupabaseConnection();
-      alert('Création test réussie');
-    } catch (e) {
-      alert('Erreur création: ' + e.message);
-    }
-  }
 
   // ====== DATA DASHBOARD ======
   let stats = { totalProjects: 0, totalPrompts: 0, totalTemplates: 0, totalComponents: 0 };
@@ -244,13 +257,6 @@
           Composants ({stats.totalComponents})
         </button>
         <button
-          class="py-4 px-1 border-b-2 font-medium text-sm {activeTab === 'supabase' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
-          on:click={() => { activeTab='supabase'; if(supaStatus==='idle') testSupabaseConnection(); }}
-        >
-          <i class="fas fa-database mr-2"></i>
-          Supabase
-        </button>
-        <button
           class="py-4 px-1 border-b-2 font-medium text-sm {activeTab === 'ai' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
           on:click={() => { activeTab = 'ai'; loadAIStatus(); }}
         >
@@ -372,77 +378,6 @@
       </div>
     {/if}
 
-    {#if activeTab === 'supabase'}
-      <Card title="Statut Supabase" subtitle="Test de connectivité & données de base" class="mb-8">
-        <div class="flex flex-col gap-4">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              {#if supaStatus === 'testing'}
-                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-              {:else if supaStatus === 'success'}
-                <div class="h-6 w-6 bg-green-500 rounded-full flex items-center justify-center text-white text-xs">OK</div>
-              {:else if supaStatus === 'error'}
-                <div class="h-6 w-6 bg-red-500 rounded-full flex items-center justify-center text-white text-xs">!</div>
-              {:else}
-                <div class="h-6 w-6 bg-gray-300 rounded-full"></div>
-              {/if}
-              <div class="text-sm font-medium">{supaMessage || 'En attente'}</div>
-            </div>
-            <div class="flex gap-2">
-              <button class="px-3 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200" on:click={testSupabaseConnection}>Retester</button>
-              <button class="px-3 py-1.5 text-xs rounded bg-indigo-600 text-white disabled:opacity-40" on:click={supabaseTestCreate} disabled={supaStatus!=='success'}>Test création</button>
-            </div>
-          </div>
-          {#if supaStatus==='error'}
-            <div class="text-xs text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded">Vérifie variables d'environnement PUBLIC_SUPABASE_URL / PUBLIC_SUPABASE_ANON_KEY et migrations SQL.</div>
-          {/if}
-        </div>
-      </Card>
-      {#if supaStatus==='success'}
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <Card title="Templates" subtitle={`${supaTemplates.length} templates`}> 
-            <div class="space-y-2">
-              {#each supaTemplates as t}
-                <div class="p-2 rounded bg-gray-50 border">
-                  <p class="text-xs font-medium">{t.name}</p>
-                  <p class="text-[11px] text-gray-500">{t.type}</p>
-                </div>
-              {/each}
-              {#if !supaTemplates.length}<p class="text-xs text-gray-500">Aucun template.</p>{/if}
-            </div>
-          </Card>
-          <Card title="Composants" subtitle={`${supaComponents.length} composants`}>
-            <div class="space-y-2">
-              {#each supaComponents as c}
-                <div class="p-2 rounded bg-gray-50 border">
-                  <p class="text-xs font-medium">{c.name}</p>
-                  <p class="text-[11px] text-gray-500">{c.category} • {c.type}</p>
-                </div>
-              {/each}
-              {#if !supaComponents.length}<p class="text-xs text-gray-500">Aucun composant.</p>{/if}
-            </div>
-          </Card>
-          <Card title="Projets" subtitle={`${supaProjects.length} projets`}>
-            <div class="space-y-2">
-              {#each supaProjects as p}
-                <div class="p-2 rounded bg-gray-50 border">
-                  <p class="text-xs font-medium">{p.name}</p>
-                  <p class="text-[11px] text-gray-500">{p.status}</p>
-                </div>
-              {/each}
-              {#if !supaProjects.length}<p class="text-xs text-gray-500">Aucun projet.</p>{/if}
-            </div>
-          </Card>
-        </div>
-        <Card title="Aide rapide" class="mt-6">
-          <ul class="text-xs text-gray-600 list-disc ml-5 space-y-1">
-            <li>Exécute d'abord migrations: supabase-schema.sql puis supabase-data.sql</li>
-            <li>Variables publiques côté frontend: PUBLIC_SUPABASE_URL & PUBLIC_SUPABASE_ANON_KEY</li>
-            <li>Pour opérations avancées serveur: SUPABASE_SERVICE_ROLE_KEY (ne jamais exposer côté client)</li>
-          </ul>
-        </Card>
-      {/if}
-    {/if}
 
     {#if activeTab === 'ai'}
       <Card title="Statut des Fournisseurs IA" subtitle="Clés détectées côté serveur">
@@ -489,7 +424,12 @@
             {#if rawJsPreview}
               <details class="mt-2 text-[10px]">
                 <summary class="cursor-pointer text-gray-600">Voir JS SSR brut (tronc.)</summary>
+                      <label class="flex items-center gap-1"><input type="checkbox" bind:checked={fastPreview}> <span>Fast preview</span></label>
+                      <label class="flex items-center gap-1"><input type="checkbox" bind:checked={faithfulPreview}> <span>Aperçu fidèle</span></label>
                 <pre class="mt-1 max-h-40 overflow-auto bg-gray-900 text-[10px] text-gray-100 p-2 rounded">{rawJsPreview}</pre>
+                      {#if fastPreview}
+                        <button class="px-3 py-1.5 rounded bg-indigo-600 text-white disabled:opacity-40" on:click={runFastPreview} disabled={fastStatus==='compiling'}>{fastStatus==='compiling'?'Fast...':'Fast DOM'}</button>
+                      {/if}
               </details>
             {/if}
             {#if previewHeuristics.length}

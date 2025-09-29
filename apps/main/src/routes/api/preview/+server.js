@@ -1,7 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
 import { json } from '@sveltejs/kit';
 
-import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 
 // Endpoint: /api/preview
 // Query params: projectId (obligatoire), file (optionnel)
@@ -18,23 +16,11 @@ export async function GET({ url, request }) {
 
     // Auth facultative: si header Authorization présent on le propage pour respecter RLS
     const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
-    const supabase = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, authHeader ? { global: { headers: { Authorization: authHeader } } } : {});
+  // Supabase retiré
 
     // Récupérer fichiers du projet (table project_files de préférence sinon fallback code_generated)
-    const { data: project, error: pErr } = await supabase.from('projects').select('*').eq('id', projectId).single();
-    if (pErr) throw pErr;
-
-    // Essayer project_files
-    const { data: files, error: fErr } = await supabase.from('project_files').select('filename, content').eq('project_id', projectId).limit(50);
-    if (fErr) {
-      console.warn('project_files indisponible, fallback code_generated');
-    }
-    let mapping = {};
-    if (files && files.length) {
-      for (const f of files) mapping[f.filename] = f.content;
-    } else {
-      mapping = project.code_generated || {};
-    }
+    // Supabase retiré : retourner sandbox vide simulé
+    let mapping = { 'src/routes/+page.svelte': '<h1>Sandbox hors ligne</h1><p>Supabase désactivé.</p>' };
 
     // Détecter fichiers de pages +page.svelte
     const pageFiles = Object.keys(mapping).filter(k => /src\/routes\/.+\+page\.svelte$|src\/routes\/\+page\.svelte$/.test(k));

@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 
@@ -13,7 +12,7 @@ export async function GET({ url, request }) {
     const filename = url.searchParams.get('filename');
     if(!projectId || !filename) return json({ success:false, error:'projectId & filename requis' }, { status:400 });
     const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
-    const client = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, authHeader ? { global:{ headers:{ Authorization: authHeader } } } : {});
+  // Supabase retiré
     // Chercher d'abord project_files
     let code = '';
     const { data:pf, error:pfErr } = await client.from('project_files').select('content').eq('project_id', projectId).eq('filename', filename).maybeSingle();

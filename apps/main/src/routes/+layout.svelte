@@ -3,44 +3,12 @@
   import '@fortawesome/fontawesome-free/css/all.min.css';
   import { onMount } from 'svelte';
 
-  import { supabase } from '$lib/supabase.js';
-
+  // Supabase retiré : session désactivée
   let session = null;
-  let loadingSession = true;
-  let isAdmin = false; // heuristique simple: email se terminant par 'admin' ou domain spécifique
-
-  async function loadSession() {
-    const { data: { session: s } } = await supabase.auth.getSession();
-    session = s;
-    loadingSession = false;
-    if (session?.user?.email) {
-      // règle provisoire: admin si email contient '+admin' ou se termine par '@admin.local'
-      const email = session.user.email.toLowerCase();
-      isAdmin = email.includes('+admin') || email.endsWith('@admin.local');
-    }
-  }
-
-  onMount(async () => {
-    await loadSession();
-    const { data: authListener } = supabase.auth.onAuthStateChange((_evt, _sess) => {
-      session = _sess; loadSession();
-    });
-  });
-
-  async function logout() {
-    await supabase.auth.signOut();
-    session = null; isAdmin = false;
-    window.location.href = '/auth';
-  }
-
-  function handleAuthNav() {
-    if (!session) {
-      window.location.href = '/auth';
-      return;
-    }
-    // session existante => aller vers dashboard approprié
-    window.location.href = isAdmin ? '/admin' : '/user';
-  }
+  let loadingSession = false;
+  let isAdmin = false;
+  function handleAuthNav(){ window.location.href = '/auth'; }
+  function logout(){ /* no-op */ }
   export let data;
   $: seo = data?.seo || {};
   const fullTitle = seo?.title ? seo.title : 'Constructor V3';

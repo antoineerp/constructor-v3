@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import { json } from '@sveltejs/kit';
 
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
@@ -16,7 +15,7 @@ export async function GET({ url, request }) {
     const projectId = url.searchParams.get('projectId');
     if(!projectId) return json({ success:false, error:'projectId requis' }, { status:400 });
     const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
-    const supabase = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, authHeader ? { global:{ headers:{ Authorization: authHeader } } } : {});
+  // Supabase retiré
     const { data: project, error: pErr } = await supabase.from('projects').select('id').eq('id', projectId).single();
     if(pErr) throw pErr;
     const { data: pfiles, error: fErr } = await supabase.from('project_files').select('filename, stage, pass_index').eq('project_id', project.id).order('filename');
@@ -35,7 +34,7 @@ export async function POST({ request }) {
     if(!projectId || !pass) return json({ success:false, error:'projectId et pass requis' }, { status:400 });
     if(!PASS_ORDER.includes(pass)) return json({ success:false, error:'Pass inconnue' }, { status:400 });
     const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
-    const supabase = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, authHeader ? { global:{ headers:{ Authorization: authHeader } } } : {});
+  // Supabase retiré
     const { data: project, error: pErr } = await supabase.from('projects').select('*').eq('id', projectId).single();
     if(pErr) throw pErr;
     const blueprint = project.blueprint_json;

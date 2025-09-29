@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import { json } from '@sveltejs/kit';
 
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
@@ -16,7 +15,7 @@ export async function POST({ request }) {
     const { projectId, type = 'articles-hero' } = body;
     if(!projectId) return json({ success:false, error:'projectId requis' }, { status:400 });
     const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
-    const supabase = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, authHeader ? { global:{ headers:{ Authorization: authHeader } } } : {});
+  // Supabase retiré
   const { data: project, error: pErr } = await supabase.from('projects').select('*').eq('id', projectId).single();
     if(pErr) throw pErr;
     if(!project.blueprint_json) return json({ success:false, error:'Blueprint manquant' }, { status:400 });

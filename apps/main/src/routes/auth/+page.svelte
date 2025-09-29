@@ -13,22 +13,13 @@
     errorMsg=''; message='';
     if(!email || !password) { errorMsg='Email et mot de passe requis.'; return; }
     loading = true;
-    try {
-      if(mode==='signup'){
-        const { error } = await supabase.auth.signUp({ email, password });
-        if(error) throw error; message='Vérifie ta boîte mail pour confirmer.';
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if(error) throw error; message='Connexion réussie. Redirection...';
-        setTimeout(()=> window.location.href='/user', 600);
-      }
-    } catch(e){ errorMsg = e.message; }
-    finally { loading=false; }
+    // Sans Supabase : simple redirection après pseudo validation
+    setTimeout(()=> { window.location.href='/user'; }, 300);
+    loading = false;
   }
 
   onMount(async ()=>{
-    const { data: { session } } = await supabase.auth.getSession();
-    if(session) window.location.href = '/user';
+     // Supabase retiré : aucune session
   });
 </script>
 

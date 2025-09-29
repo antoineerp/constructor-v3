@@ -1,29 +1,7 @@
-import { createClient } from '@supabase/supabase-js';
-
-import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
-
-// Mode désactivation : si variables manquantes OU DISABLE_SUPABASE=1 => stub in‑memory
-const disabled = !PUBLIC_SUPABASE_URL || !PUBLIC_SUPABASE_ANON_KEY || process.env.DISABLE_SUPABASE === '1';
-
-function makeStub(){
-	const builder = () => ({
-		select(){ return Promise.resolve({ data: [], error:null }); },
-		eq(){ return builder(); },
-		order(){ return builder(); },
-		limit(){ return builder(); },
-		single(){ return Promise.resolve({ data:null, error:null }); },
-		maybeSingle(){ return Promise.resolve({ data:null, error:null }); },
-		insert(){ return Promise.resolve({ data:[], error:null }); },
-		update(){ return Promise.resolve({ data:[], error:null }); },
-		upsert(){ return Promise.resolve({ data:[], error:null }); },
-		delete(){ return Promise.resolve({ data:[], error:null }); }
-	});
-	return {
-		__stub: true,
-		from(){ return builder(); },
-		auth: { getUser: async () => ({ data:{ user:null }, error:null }) }
-	};
+// Supabase retiré : export d'un stub minimal pour compatibilité résiduelle
+function noopBuilder(){
+  const chain = () => ({ select: ()=>Promise.resolve({ data:[], error:null }), eq:()=>chain(), order:()=>chain(), limit:()=>chain(), single:()=>Promise.resolve({ data:null, error:null }), maybeSingle:()=>Promise.resolve({ data:null, error:null }), insert:()=>Promise.resolve({ data:[], error:null }), update:()=>Promise.resolve({ data:[], error:null }), upsert:()=>Promise.resolve({ data:[], error:null }), delete:()=>Promise.resolve({ data:[], error:null }) });
+  return chain;
 }
-
-export const supabase = disabled ? makeStub() : createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY);
-export const isSupabaseEnabled = !disabled;
+export const supabase = { from(){ return noopBuilder()(); }, auth:{ getUser: async () => ({ data:{ user:null }, error:null }), getSession: async () => ({ data:{ session:null }, error:null }), onAuthStateChange: ()=>({ data:{ subscription:{ unsubscribe(){} } } }) } };
+export const isSupabaseEnabled = false;
