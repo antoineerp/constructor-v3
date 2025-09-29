@@ -1,12 +1,15 @@
 // Web Worker pour compilation rapide Svelte côté navigateur
-// Utilise svelte/compiler dynamiquement (à ajouter via CDN ou build séparé)
+// Import statique de svelte/compiler pour éviter le code splitting (et l'erreur rollup iife multi-chunk)
+
+// NOTE: Cet import alourdit le bundle du worker mais évite l'erreur:
+// "Invalid value 'iife' for option 'output.format' - UMD and IIFE output formats are not supported for code-splitting builds"
+// Si besoin d'optimiser plus tard, on pourra configurer le format worker en 'es' ou externaliser 'svelte/compiler'.
+// @ts-ignore
+import * as svelte from 'svelte/compiler';
 
 self.onmessage = async (e: MessageEvent) => {
   const { id, code, filename = 'Component.svelte', options = {} } = e.data;
   try {
-    // Chargement dynamique (assume que svelte/compiler est exposé globalement ou via importScripts)
-    // @ts-ignore
-    const svelte = self.svelte || (await import('svelte/compiler'));
     const compiled = svelte.compile(code, {
       generate: 'dom',
       css: true,
