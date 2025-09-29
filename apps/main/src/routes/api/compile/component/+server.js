@@ -13,7 +13,8 @@ export async function POST(event) {
   try {
     const { request, fetch } = event;
     const body = await request.json();
-  const { code, dependencies = {}, debug = false, strict = false, allowAutoRepair = true, _autoRepairAttempt = false } = body || {};
+  const { code, dependencies = {}, debug = false, strict = false, allowAutoRepair = true, _autoRepairAttempt = false, enableRendererNormalization = false, allowJQueryTransform = true, pure = false } = body || {};
+  const effectiveRendererNormalization = !!enableRendererNormalization; // désactivé par défaut
     if(!code || !code.trim()) return json({ success:false, error:'Code requis' }, { status:400 });
     // Précheck jQuery ($) si mode strict
     if(strict){
@@ -43,6 +44,20 @@ export async function POST(event) {
   const meta = { missingComponents: [], libStubs: [], depProvided: Object.keys(dependencies).length };
   const heuristics = [];
     const debugStages = debug ? { original: originalSource } : null;
+
+    // Détection jQuery précoce et injection stub minimal (opt-out via allowJQueryTransform)
+    if(/(\$\([^)]*\))|(\$\.[a-zA-Z]+)/.test(source)){
+      if(!allowJQueryTransform){
+        return json({ success:false, error:'Usage jQuery détecté (allowJQueryTransform=false)', stage:'jquery-detected' }, { status:400 });
+      }
+      if(!/\b(const|let|var|function)\s+\$\b/.test(source)){
+        const stub = `<!-- jquery-lite stub -->\n<script>\nconst $ = (sel)=>{\n  const nodes = typeof document!=='undefined'? Array.from(document.querySelectorAll(sel)) : [];\n  const api = { on:(ev,h)=>{nodes.forEach(n=>n.addEventListener(ev,h));return api;}, addClass:(c)=>{nodes.forEach(n=>n.classList.add(c));return api;}, removeClass:(c)=>{nodes.forEach(n=>n.classList.remove(c));return api;}, toggleClass:(c)=>{nodes.forEach(n=>n.classList.toggle(c));return api;}, css:(p,v)=>{nodes.forEach(n=>{try{n.style[p]=v;}catch{}});return api;}, attr:(k,v)=>{ if(v===undefined) return nodes[0]?.getAttribute(k); nodes.forEach(n=>n.setAttribute(k,v)); return api;} };\n  return api;\n};\n</script>\n`;
+        source = stub + source;
+        heuristics.push('jquery-stub');
+      } else {
+        heuristics.push('jquery-present');
+      }
+    }
 
     // --- Helpers ---
     function injectUnknownComponentPlaceholders(src, metaObj){
@@ -153,6 +168,7 @@ export async function POST(event) {
               const repairedAfterUnknown = injectUnknownComponentPlaceholders(repairedAfterLib, meta);
               source = repairedAfterUnknown;
               compiled = compile(source, { generate:'ssr', hydratable:true, filename:'Component.svelte' });
+              try { autoRepairMeta.diff = { beforeHash: codeHash, changes: (repairJson.fixedCode !== originalSource ? '1+' : '0'), patchPreview: (repairJson.fixedCode.split('\n').slice(0,8).join('\n')) }; } catch {}
             } catch(reComp2){
               autoRepairMeta.compileError = reComp2.message;
               return json({ success:false, error:'Erreur compilation après auto-réparation: '+reComp2.message, position:loc, stage:'ssr-compile-repair', autoRepair:autoRepairMeta, debugStages }, { status:400 });
@@ -240,8 +256,8 @@ export async function POST(event) {
   if(!Component) throw new Error('export default manquant');
   heuristics.push('base-export-type=' + (typeof Component));
 
-        // Normalisation large spectre des formes SSR possibles avant toute logique fallback
-        if(typeof Component === 'function' && !Component.render){
+        // Normalisation large spectre des formes SSR possibles avant toute logique fallback (désactivée par défaut)
+        if(effectiveRendererNormalization && typeof Component === 'function' && !Component.render){
           const fnSrc = Function.prototype.toString.call(Component);
           const looksLikeAritySSR = Component.length >= 3 || /\$\$result/.test(fnSrc);
           const usesRendererPush = /\$\$renderer\.push\(/.test(fnSrc);
@@ -279,6 +295,8 @@ export async function POST(event) {
               }
             }
           } catch(_e){ /* ignore heuristic error */ }
+        } else if(!effectiveRendererNormalization) {
+          heuristics.push('renderer-normalization-disabled');
         }
 
         function wrapFromBase(base){ fallbackUsed=true; return { render:(p)=>{ try { return { html: base.$$render({}, p||{}, {}, {}) }; } catch(e){ return { html:`<pre data-render-error>$$render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; } } }; }
@@ -301,8 +319,8 @@ export async function POST(event) {
           }
         }
 
-        // Phase fallback (non-strict) seulement si après normalisation aucune méthode render
-        if(typeof Component.render !== 'function'){
+  // Phase fallback (non-strict) seulement si après normalisation aucune méthode render (désactivée en mode pure)
+  if(!pure && typeof Component.render !== 'function'){
           if(Component.$$render){ Component = wrapFromBase(Component); }
           else if(Component.prototype && Component.prototype.$$render){ const proto = Component.prototype; fallbackUsed=true; Component = { render:(p)=>{ try { return { html: proto.$$render({}, p||{}, {}, {}) }; } catch(e){ return { html:`<pre data-render-error>proto $$render error: ${e.message.replace(/</g,'&lt;')}</pre>` }; } } }; }
           else if(typeof Component === 'function'){
@@ -398,6 +416,7 @@ export async function POST(event) {
                   if(out2){
                     rendered.html = out2 + `<div data-auto-repair-note class=\"hidden\">auto-repair applied</div>`;
                     heuristics.push('auto-repair-success');
+                    try { autoRepairMeta.diff = { patchPreview: repairedSource.split('\n').slice(0,8).join('\n') }; } catch {}
                   } else {
                     heuristics.push('auto-repair-empty-output');
                   }
@@ -426,7 +445,9 @@ export async function POST(event) {
         globalThis.__LAST_SSR_TRANSFORM__ = transformCaptured;
         globalThis.__LAST_SSR_HEURISTICS__ = heuristics;
       } catch(e){
-        return json({ success:false, error:'Évaluation impossible: '+e.message }, { status:500 });
+        const msg = e.message||'';
+        const suggestion = /\$ is not defined/.test(msg) ? 'Possible code jQuery non stub – activer allowJQueryTransform ou retirer usages.' : null;
+        return json({ success:false, error:'Évaluation impossible: '+msg, stage:'ssr-eval', suggestion, heuristics }, { status:/export default manquant/.test(msg)?422:500 });
       }
     }
 
@@ -464,9 +485,9 @@ export async function POST(event) {
     if(canRequire && domJsCode){
       const b64 = Buffer.from(domJsCode,'utf-8').toString('base64');
       const propsB64 = Buffer.from(JSON.stringify(globalThis.__LAST_COMPONENT_PROPS__||{}),'utf-8').toString('base64');
-  hydrationScript = `<script>(function(){const ROOT_ID='__component_root';function surface(err,label){console.error(label,err);var r=document.getElementById(ROOT_ID);if(r){r.setAttribute('data-hydration-error', err.message||String(err));r.innerHTML='<pre style=\"color:#b91c1c;font:11px/1.4 monospace;white-space:pre-wrap;padding:8px;border:1px solid #fca5a5;background:#fef2f2;border-radius:4px;\">Hydration error: '+(err.message||String(err)).replace(/</g,'&lt;')+'</pre>';}}
+  hydrationScript = `<script>(function(){const ROOT_ID='__component_root';function surface(err,label){console.error(label,err);var r=document.getElementById(ROOT_ID);if(r){r.setAttribute('data-hydration-error', err.message||String(err));r.setAttribute('data-hydration-status','error');r.innerHTML='<pre style=\"color:#b91c1c;font:11px/1.4 monospace;white-space:pre-wrap;padding:8px;border:1px solid #fca5a5;background:#fef2f2;border-radius:4px;\">Hydration error: '+(err.message||String(err)).replace(/</g,'&lt;')+'</pre>';document.dispatchEvent(new CustomEvent('component-hydration-error',{detail:{message:err.message,label}}));}}
 try{const js=atob('${b64}');const blob=new Blob([js],{type:'text/javascript'});const u=URL.createObjectURL(blob);const props=JSON.parse(atob('${propsB64}'));
-import(u).then(m=>{try{const C=m.default||m;const root=document.getElementById(ROOT_ID);if(!C){throw new Error('Aucun export default trouvé');} if(root){new C({target:root, hydrate:true, props});}}catch(e){surface(e,'Hydration construct error');}}).catch(e=>surface(e,'Hydration import fail'));
+import(u).then(m=>{try{const C=m.default||m;const root=document.getElementById(ROOT_ID);if(!C){throw new Error('Aucun export default trouvé');} if(typeof C!=='function'){throw new Error('Export default invalide (type '+(typeof C)+')');} if(root){new C({target:root, hydrate:true, props});root.setAttribute('data-hydration-status','ok');}}catch(e){surface(e,'Hydration construct error');}}).catch(e=>surface(e,'Hydration import fail'));
 window.addEventListener('unhandledrejection',ev=>surface(ev.reason||ev,'Unhandled promise rejection'));
 }catch(e){surface(e,'Hydration bootstrap error');}})();</script>`;
     } else if(!canRequire && domCompileError){

@@ -19,12 +19,23 @@
   let previewLoading = false;
   let previewError = '';
   let previewStrict = false;
+  let previewDiagnostic = false; // déclenche raw compile avant SSR
+  let rawError = '';
+  let rawJsPreview = '';
   let previewHeuristics = [];
   let iframeKey = 0; // force reload iframe
   async function runPreview(){
-    previewLoading = true; previewError=''; previewHeuristics=[];
+    previewLoading = true; previewError=''; previewHeuristics=[]; rawError=''; rawJsPreview='';
     try {
-      const r = await fetch('/api/compile/component?ts=' + Date.now(), { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ code: previewCode, debug:true, strict: previewStrict }) });
+      if(previewDiagnostic){
+        const rRaw = await fetch('/api/compile/raw?ts=' + Date.now(), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: previewCode, generate:'ssr' }) });
+        if(!rRaw.ok){
+          try { const j = await rRaw.json(); rawError = '[raw] '+(j.error||'Erreur inconnue'); } catch { rawError='[raw] Erreur compilation'; }
+        } else {
+          const jRaw = await rRaw.json(); rawJsPreview = (jRaw.js||'').slice(0,3000);
+        }
+      }
+      const r = await fetch('/api/compile/component?ts=' + Date.now(), { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ code: previewCode, debug:true, strict: previewStrict, enableRendererNormalization:false }) });
       if(!r.ok){
         let txt = await r.text();
         try { const j = JSON.parse(txt); previewError = j.error || ('HTTP '+r.status); } catch { previewError = txt.slice(0,400); }
@@ -464,12 +475,22 @@
               <h3 class="text-sm font-semibold text-gray-700">Code Svelte</h3>
               <div class="flex items-center gap-3 text-xs">
                 <label class="inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" bind:checked={previewStrict}> <span>Strict</span></label>
+                <label class="inline-flex items-center gap-1 cursor-pointer" title="Diagnostic brut compiler"><input type="checkbox" bind:checked={previewDiagnostic}> <span>Diag</span></label>
                 <button class="px-2 py-1 rounded bg-blue-600 text-white disabled:opacity-40" on:click={runPreview} disabled={previewLoading}>{previewLoading ? 'Compilation...' : 'Compiler'}</button>
               </div>
             </div>
             <textarea class="w-full h-72 font-mono text-xs p-2 border rounded bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500" bind:value={previewCode}></textarea>
             {#if previewError}
               <div class="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 p-2 rounded">{previewError}</div>
+            {/if}
+            {#if rawError}
+              <div class="mt-2 text-[11px] text-orange-700 bg-orange-50 border border-orange-300 p-2 rounded">{rawError}</div>
+            {/if}
+            {#if rawJsPreview}
+              <details class="mt-2 text-[10px]">
+                <summary class="cursor-pointer text-gray-600">Voir JS SSR brut (tronc.)</summary>
+                <pre class="mt-1 max-h-40 overflow-auto bg-gray-900 text-[10px] text-gray-100 p-2 rounded">{rawJsPreview}</pre>
+              </details>
             {/if}
             {#if previewHeuristics.length}
               <div class="mt-3 text-[11px] text-gray-600 flex flex-wrap gap-1">{#each previewHeuristics as h}<span class="px-1.5 py-0.5 bg-gray-200 rounded">{h}</span>{/each}</div>
