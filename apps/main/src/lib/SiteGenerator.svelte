@@ -1,5 +1,4 @@
 <script>
-  import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   export let provider = 'openai';
   export let generationProfile = 'safe';
@@ -12,6 +11,13 @@
   let siteSelectedFile = null;
   let siteCapabilities = [];
   let siteError = '';
+  let toast = null; let toastTimer;
+
+  function showToast(message, kind='error', ttl=5000){
+    toast = { message, kind };
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(()=> toast = null, ttl);
+  }
 
   async function generateSite() {
     if (!sitePrompt.trim() || siteGenerating) return;
@@ -34,7 +40,17 @@
         body: JSON.stringify({ query: sitePrompt.trim(), simpleMode, generationProfile, provider })
       });
       const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || 'Erreur génération site');
+      if (!res.ok || !data.success){
+        // Messages clés manquantes / provider
+        if(data?.missingKey){
+          showToast(`Clé ${data.missingKey} absente – aucune génération possible. Configure la clé et réessaie.`, 'warn', 8000);
+        } else if(data?.stage === 'precheck-jquery'){
+          showToast('Code rejeté: usage jQuery détecté en mode strict.', 'warn');
+        } else {
+          showToast(data.error || 'Erreur génération site');
+        }
+        throw new Error(data.error || 'Erreur génération site');
+      }
       siteBlueprint = data.blueprint;
       siteFiles = data.files;
       siteCapabilities = data.capabilities || [];
@@ -59,6 +75,19 @@
   {#if siteError}
     <div class="text-sm text-red-600 mb-2">{siteError}</div>
   {/if}
+    {#if toast}
+      <div class="fixed bottom-4 right-4 max-w-sm p-3 rounded shadow text-sm"
+        class:bg-red-600={toast.kind==='error'}
+        class:bg-yellow-600={toast.kind==='warn'}
+        class:bg-green-600={toast.kind==='success'}
+        style="color:white;">
+        <div class="flex items-start gap-2">
+          <span class="mt-0.5"><i class="fas {toast.kind==='success' ? 'fa-check-circle' : toast.kind==='warn' ? 'fa-triangle-exclamation' : 'fa-circle-exclamation'}"></i></span>
+          <span class="leading-snug">{toast.message}</span>
+    <button class="ml-auto text-white/70 hover:text-white" on:click={() => toast=null} aria-label="Fermer la notification"><i class="fas fa-times"></i></button>
+        </div>
+      </div>
+    {/if}
   {#if siteBlueprint}
     <div class="mb-4">
       <h3 class="text-sm font-semibold mb-1">Blueprint</h3>
