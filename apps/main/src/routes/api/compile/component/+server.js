@@ -2,6 +2,7 @@ import { createRequire } from 'module';
 
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
+import { rewriteImports } from '$lib/imports/rewrite';
 
 // Forcer runtime Node (Vercel) pour ce handler lourd (compilation SSR)
 // Node 18 rejeté par Vercel (message "invalid runtime"), on passe à Node 20.
@@ -13,7 +14,7 @@ export async function POST(event) {
   try {
     const { request, fetch } = event;
     const body = await request.json();
-  const { code, dependencies = {}, debug = false, strict = false, allowAutoRepair = true, _autoRepairAttempt = false, enableRendererNormalization = false, allowJQueryTransform = true, pure = false } = body || {};
+  const { code, dependencies = {}, debug = false, strict = false, allowAutoRepair = true, _autoRepairAttempt = false, enableRendererNormalization = false, allowJQueryTransform = true, pure = false, autofix = true } = body || {};
   const effectiveRendererNormalization = !!enableRendererNormalization; // désactivé par défaut
     if(!code || !code.trim()) return json({ success:false, error:'Code requis' }, { status:400 });
     // Précheck jQuery ($) si mode strict
@@ -33,6 +34,14 @@ export async function POST(event) {
   const originalSource = code;
   let autoRepairMeta = null; // stocke résultat éventuel de la tentative AI
     let source = code;
+    let importRewrite = null;
+    if(autofix){
+      try {
+        const index = { has:(p)=> !!dependencies[p], resolveLocal:(base,spec)=>{ const out=[]; for(const k of Object.keys(dependencies)){ if(k.endsWith('/'+spec+'.svelte')) out.push(k); } return out; } };
+        importRewrite = await rewriteImports('Component.svelte', source, index);
+        source = importRewrite.code;
+      } catch(_e){ /* ignore rewrite errors */ }
+    }
 
     // Heuristique: ajouter un <script> minimal si contenu simple sans script pour permettre export de props.
   // Détection heuristique très simple de syntaxe Svelte; on évite les accolades brutes non échappées dans la RegExp.
@@ -138,7 +147,7 @@ export async function POST(event) {
     }
 
     // Appliquer réécritures pré-compilation (placeholders & lib)
-    const afterLib = rewriteLibImports(source, meta, dependencies); if(debugStages) debugStages.afterLib = afterLib;
+  const afterLib = rewriteLibImports(source, meta, dependencies); if(debugStages) debugStages.afterLib = afterLib;
     const afterUnknown = injectUnknownComponentPlaceholders(afterLib, meta); if(debugStages) debugStages.afterUnknown = afterUnknown;
     source = afterUnknown;
 
