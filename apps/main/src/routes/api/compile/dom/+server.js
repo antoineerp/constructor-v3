@@ -21,12 +21,24 @@ export async function POST(event) {
   const rid = reqId();
   const t0 = Date.now();
   const { request, fetch } = event;
-  let logCtx = { rid };
+  let logCtx = { rid, env: process.env.VERCEL ? 'vercel' : 'local' };
+  
   try {
+    // Vérification rapide de la disponibilité de Svelte
+    if (!compile || typeof compile !== 'function') {
+      console.error('[compile/dom] Svelte compiler not available');
+      return json({ 
+        success: false, 
+        error: 'Svelte compiler not available in serverless environment', 
+        rid 
+      }, { status: 500 });
+    }
+    
     const body = await request.json();
     const { code, allowAutoRepair = true, strict = false, _autoRepairAttempt = false } = body || {};
     logCtx.len = code ? code.length : 0;
     logCtx.strict = !!strict;
+    
     if(!code || !code.trim()) {
       const resp = json({ success:false, error:'Code requis', rid }, { status:400 });
       resp.headers.set('X-Request-Id', rid);
@@ -44,7 +56,18 @@ export async function POST(event) {
     let autoRepairMeta = null;
     let compiled;
     try {
-      compiled = compile(source, { generate:'dom', css:'injected', dev:false, hydratable:true });
+      // Configuration adaptée pour l'environnement serverless
+      const compileOptions = { 
+        generate: 'dom', 
+        css: 'injected', 
+        dev: false, 
+        hydratable: true,
+        // Désactiver les optimisations qui peuvent poser problème en serverless
+        immutable: false,
+        accessors: false
+      };
+      
+      compiled = compile(source, compileOptions);
     } catch(e){
       const msg = e.message||'';
       const isSyntax = /Unexpected token|Expected token|end of input|Unexpected EOF|Expected /.test(msg);

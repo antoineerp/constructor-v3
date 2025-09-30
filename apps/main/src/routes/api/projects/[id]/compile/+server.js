@@ -6,6 +6,9 @@ import path from 'path';
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 
+// Force runtime Node pour la compilation en environnement serverless
+export const config = { runtime: 'nodejs20.x' };
+
 import { computeProjectHash, getCached, setCached } from '$lib/preview/compileCache.js';
 import { fixRouteImports } from '$lib/fix/routeImports.js';
 import { supabase as clientSupabase, isSupabaseEnabled } from '$lib/supabase.js';
@@ -17,9 +20,25 @@ export async function POST(event){
   const t0 = Date.now();
   const { params, request, locals } = event;
   const projectId = params.id;
+  
+  // Vérification de base
   if(!projectId) return json({ success:false, error:'projectId manquant' }, { status:400 });
+  
+  // Vérification rapide de la disponibilité de Svelte
+  if (!compile || typeof compile !== 'function') {
+    console.error('[compile/project] Svelte compiler not available');
+    return json({ 
+      success: false, 
+      error: 'Svelte compiler not available in serverless environment' 
+    }, { status: 500 });
+  }
+  
   let body = {};
-  try { body = await request.json(); } catch(_e) {}
+  try { 
+    body = await request.json(); 
+  } catch(_e) {
+    return json({ success:false, error:'Invalid JSON body' }, { status:400 });
+  }
   const { entries = [], files: injectedFiles, file, autoFix } = body;
   try {
     let projectFiles = injectedFiles;

@@ -66,10 +66,24 @@
 
   let lastFastBlob = null;
   async function runFastPreview(){
-    fastStatus = 'compiling'; importWarnings = []; rewritesMeta=null;
+    fastStatus = 'compiling'; importWarnings = []; rewritesMeta=null; fastError='';
     try {
+      // En production, utiliser l'API standard au lieu du rapid compiler
+      if(typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+        // Fallback vers l'API standard pour production Vercel
+        await runPreview();
+        fastStatus = 'ok';
+        return;
+      }
+      
       const rapid = await ensureRapid();
-      if(!rapid) throw new Error('compileRapid non chargé');
+      if(!rapid) {
+        // Fallback vers l'API standard si rapid non disponible
+        await runPreview();
+        fastStatus = 'ok';
+        return;
+      }
+      
       const res = await rapid(previewCode, 'Component.svelte');
       if(!res.ok) throw new Error(res.error||'Erreur compileRapid');
       let jsCode = res.js || '';
@@ -77,12 +91,32 @@
   // Réécriture basique des imports relatifs -> /runtime/fast/<path>
   jsCode = jsCode.replace(/import\s+([^;]+?)from\s+['"](\.\.\/|\.\/)([^'"\n]+)['"];?/g, (m, what, pre, p)=> `import ${what}from '/runtime/fast/${p.replace(/^\.\//,'')}'`);
   const bootstrap = `\n;(()=>{function pickExport(mod){let C=mod.Component||mod.default||mod.App||mod; if(C&&C.default) C=C.default; return C;} try{const C=pickExport(globalThis); if(typeof C!=='function') throw new Error('Export composant introuvable'); const target = document.getElementById('app'); if(!target) throw new Error('Target element not found'); if(!(target instanceof Element)) throw new Error('Target is not a DOM element'); new C({ target, props:{ label:'Fast'} });}catch(e){ try{ const pre=document.createElement('pre'); pre.style.cssText='color:#b91c1c;font:12px monospace;white-space:pre-wrap;padding:8px'; pre.textContent='Fast preview error: '+(e.message||e); if(document && document.body && typeof document.body.appendChild==='function'){ document.body.innerHTML=''; document.body.appendChild(pre); } else { console.error('DOM manipulation failed:', e); } }catch(fallbackError){ console.error('Complete preview failure:', e, fallbackError); } }} )();`;
+      
+      // En production, éviter les blobs qui ne fonctionnent pas bien avec la CSP
+      if(typeof window !== 'undefined' && (window.location.hostname.includes('vercel.app') || window.location.protocol === 'https:')) {
+        // Fallback: utiliser l'API standard pour l'affichage
+        await runPreview();
+        fastStatus = 'ok';
+        return;
+      }
+      
       if(lastFastBlob){ try { URL.revokeObjectURL(lastFastBlob); } catch{} }
       const html = ['<!DOCTYPE html><html><head><meta charset="utf-8"><style>', cssCode, '</style></head><body>','<div id="app"></div>','<scr'+'ipt type="module">',jsCode,bootstrap,'</scr'+'ipt></body></html>'].join('');
       const blobHtml = new Blob([html], { type:'text/html' });
       lastFastBlob = URL.createObjectURL(blobHtml);
       fastIframeSrc = lastFastBlob; fastStatus='ok';
-    } catch(e){ fastStatus='error'; fastError=e.message; }
+    } catch(e){ 
+      fastStatus='error'; 
+      fastError=e.message; 
+      console.error('Fast preview error:', e);
+      // Fallback vers preview standard en cas d'erreur
+      try {
+        await runPreview();
+        if(!previewError) fastStatus = 'ok';
+      } catch(fallbackError) {
+        console.error('Fallback preview also failed:', fallbackError);
+      }
+    }
   }
 
   let fastIframeSrc = '';
@@ -90,33 +124,90 @@
   let fastError = '';
   async function runPreview(){
     previewLoading = true; previewError=''; previewHeuristics=[]; rawError=''; rawJsPreview='';
+    
+    // Timeout pour éviter les boucles infinies
+    const timeoutId = setTimeout(() => {
+      previewLoading = false;
+      previewError = 'Timeout: La compilation a pris trop de temps (>30s)';
+    }, 30000);
+    
     try {
       if(previewDiagnostic){
-  const rRaw = await fetch('/api/compile/raw', { method:'POST', headers:{'Content-Type':'application/json','Cache-Control':'no-store'}, body: JSON.stringify({ code: previewCode, generate:'ssr' }) });
-        if(!rRaw.ok){
-          try { const j = await rRaw.json(); rawError = '[raw] '+(j.error||'Erreur inconnue'); } catch { rawError='[raw] Erreur compilation'; }
-        } else {
-          const jRaw = await rRaw.json(); rawJsPreview = (jRaw.js||'').slice(0,3000);
-          if(jRaw.rewrites){ rewritesMeta = jRaw.rewrites; importWarnings = jRaw.rewrites.warnings||[]; }
+        try {
+          const rRaw = await fetch('/api/compile/raw', { 
+            method:'POST', 
+            headers:{'Content-Type':'application/json','Cache-Control':'no-store'}, 
+            body: JSON.stringify({ code: previewCode, generate:'ssr' }) 
+          });
+          if(!rRaw.ok){
+            try { 
+              const j = await rRaw.json(); 
+              rawError = '[raw] '+(j.error||`HTTP ${rRaw.status}`); 
+            } catch { 
+              rawError=`[raw] Erreur HTTP ${rRaw.status}`; 
+            }
+          } else {
+            const jRaw = await rRaw.json(); 
+            rawJsPreview = (jRaw.js||'').slice(0,3000);
+            if(jRaw.rewrites){ 
+              rewritesMeta = jRaw.rewrites; 
+              importWarnings = jRaw.rewrites.warnings||[]; 
+            }
+          }
+        } catch(diagError) {
+          rawError = '[raw] ' + diagError.message;
         }
       }
-  const r = await fetch('/api/compile/component', { method:'POST', headers:{ 'Content-Type':'application/json','Cache-Control':'no-store' }, body: JSON.stringify({ code: previewCode, debug:true, strict: previewStrict, enableRendererNormalization:false }) });
+
+      const r = await fetch('/api/compile/component', { 
+        method:'POST', 
+        headers:{ 'Content-Type':'application/json','Cache-Control':'no-store' }, 
+        body: JSON.stringify({ 
+          code: previewCode, 
+          debug:true, 
+          strict: previewStrict, 
+          enableRendererNormalization:false 
+        }) 
+      });
+      
+      clearTimeout(timeoutId);
+      
       if(!r.ok){
-        let txt = await r.text();
-        try { const j = JSON.parse(txt); previewError = j.error || ('HTTP '+r.status); } catch { previewError = txt.slice(0,400); }
+        let errorMsg = `HTTP ${r.status}`;
+        try { 
+          const txt = await r.text();
+          try { 
+            const j = JSON.parse(txt); 
+            errorMsg = j.error || j.message || errorMsg; 
+          } catch { 
+            errorMsg = txt.slice(0,200) || errorMsg; 
+          }
+        } catch { 
+          errorMsg = `Erreur réseau: ${r.status} ${r.statusText}`; 
+        }
+        previewError = errorMsg;
         return;
       }
+      
       const j = await r.json();
+      if(!j.success) {
+        previewError = j.error || 'Compilation échoué';
+        return;
+      }
+      
       // Inject listener pour relayer les erreurs d'hydratation vers parent
-  const inject = `<scr` + `ipt>(function(){try{if(window.__HYDRATION_BRIDGE)return;window.__HYDRATION_BRIDGE=1;window.addEventListener('component-hydration-error',function(e){try{parent&&parent.postMessage&&parent.postMessage({type:'hydration-error',message:(e.detail&&e.detail.message)||e.detail||'Hydration error'},'*');}catch(_e){}});}catch(_e){}})();</scr` + `ipt>`;
+      const inject = `<scr` + `ipt>(function(){try{if(window.__HYDRATION_BRIDGE)return;window.__HYDRATION_BRIDGE=1;window.addEventListener('component-hydration-error',function(e){try{parent&&parent.postMessage&&parent.postMessage({type:'hydration-error',message:(e.detail&&e.detail.message)||e.detail||'Hydration error'},'*');}catch(_e){}});}catch(_e){}})();</scr` + `ipt>`;
       previewHtml = (j.html || '') + inject;
       previewHeuristics = j.meta?.heuristics || [];
       previewSsrJs = j.ssrJs || '';
       previewDomJs = j.domJs || '';
       iframeKey++; // changer clé pour recharger
     } catch(e){
-      previewError = e.message;
+      clearTimeout(timeoutId);
+      previewError = `Erreur: ${e.message}`;
+      console.error('Preview compilation error:', e);
     } finally {
+      clearTimeout(timeoutId);
       previewLoading = false;
     }
   }
