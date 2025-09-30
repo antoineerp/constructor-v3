@@ -146,6 +146,7 @@
     if(previewAbort){ try { previewAbort.abort(); } catch{} }
     previewAbort = new AbortController();
     const signal = previewAbort.signal;
+    autoRepairPasses = 0; lastFailedHash = null;
     currentRunId = 'run_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7);
     timeline = [];
     compileStartT = performance.now();
@@ -167,6 +168,8 @@
         let msg = 'HTTP '+r.status;
         try { const txt = await r.text(); try { const j=JSON.parse(txt); msg = j.error||j.message||msg; } catch { msg = txt.slice(0,180)||msg; } } catch{}
         previewError = msg; pushToast('Erreur: '+msg,'error');
+        // Tentative auto-réparation côté client
+        await attemptClientAutoRepair(msg);
         return;
       }
       const j = await r.json();
@@ -351,6 +354,42 @@
       if(!r.ok || !j.success){ pushToast('Échec blob: '+(j.error||r.status),'error'); return; }
       lastBlobUrl = j.url; pushToast('Preview sauvegardée','success');
     } catch(e){ pushToast('Blob err: '+e.message,'error'); }
+  }
+
+  // ===== Auto-repair côté client (complément) =====
+  let autoRepairPasses = 0;
+  let lastFailedHash = null;
+  function simpleHash(str){ let h=0, i=0, len=str.length; for(; i<len; i++){ h = (h*31 + str.charCodeAt(i))|0; } return (h>>>0).toString(16); }
+  async function attemptClientAutoRepair(errMsg){
+    if(autoRepairPasses >= 2) return false; // limite sécurité
+    const syntaxPattern = /Unexpected token|Expected token|end of input|EOF|js_parse_error|js_parse_erro/i;
+    if(!syntaxPattern.test(errMsg||'')) return false;
+    const h = simpleHash(previewCode);
+    if(lastFailedHash && lastFailedHash === h) return false; // ne pas boucler sur même code
+    lastFailedHash = h;
+    autoRepairPasses++;
+    pushToast('Auto-réparation IA… (pass '+autoRepairPasses+')','info', 6000);
+    try {
+      const r = await fetch('/api/repair/auto', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ filename:'Component.svelte', code: previewCode, maxPasses:2, allowCatalog:true }) });
+      const j = await r.json();
+      if(!r.ok || !j.success || !j.fixedCode || !j.fixedCode.trim()){
+        pushToast('Auto-réparation échouée','error');
+        return false;
+      }
+      if(j.fixedCode.trim() === previewCode.trim()){
+        pushToast('Auto-réparation: aucun changement','warning');
+        return false;
+      }
+      previewCode = j.fixedCode; // applique correction
+      pushToast('Code réparé – recompilation','success');
+      // Relancer compilation (sans reset de autoRepairPasses pour éviter cascade infinie)
+      await new Promise(rq=> setTimeout(rq, 100));
+      await runPreview();
+      return true;
+    } catch(e){
+      pushToast('Auto-réparation exception: '+e.message,'error');
+      return false;
+    }
   }
 </script>
 
