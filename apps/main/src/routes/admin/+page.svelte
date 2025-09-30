@@ -53,6 +53,15 @@
   let fastStatus = 'idle'; // idle|compiling|error|ok
   let importWarnings = [];
   let rewritesMeta = null;
+  // Infos stack / squelette UI (placeholder: à relier à une source côté serveur si dispo)
+  let uiStackChoice = null; // sera potentiellement récupéré via un endpoint futur
+  let uiBlueprintRef = null;
+  async function loadUiStackMeta(){
+    try {
+      const r = await fetch('/api/ui/stack', { headers:{'Cache-Control':'no-store'} });
+      if(r.ok){ const j = await r.json(); uiStackChoice = j.stack||j.choice||null; uiBlueprintRef = j.blueprint_ref||null; }
+    } catch {}
+  }
   // Forensic timeline
   let currentRunId = null; // string
   let timeline = []; // {runId, stage, t, extra}
@@ -522,6 +531,12 @@
         on:loadMoreDiff={loadMoreDiff}
         on:setSimpleExample={(e) => previewCode = e.detail}
       />
+      {#if uiStackChoice || uiBlueprintRef}
+        <div class="mt-4 text-[11px] text-gray-600 flex items-center gap-2">
+          <span class="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-semibold">Squelette: {uiStackChoice||'—'}</span>
+          {#if uiBlueprintRef}<span class="px-1 py-0.5 rounded bg-indigo-100 text-indigo-700">Blueprint {uiBlueprintRef}</span>{/if}
+        </div>
+      {/if}
     {/if}
 
     {#if activeTab === 'prompts'}
@@ -552,16 +567,18 @@
     <!-- Gestion des Templates -->
     {#if activeTab === 'templates'}
       <TemplatesTab 
-        {templates} 
-        on:newTemplate={() => showNewTemplateModal = true}
+            {templates}
+            onCreateTemplate={() => showNewTemplateModal = true}
+            onPreviewTemplate={(tpl) => { try { if(tpl && tpl.structure){ const code = `<script>\nexport let data=${JSON.stringify(tpl.structure)};\n<\/script>\n<div class=\"p-4 text-xs font-mono\">Template: ${tpl.name}</div>`; previewCode = code; activeTab='preview'; pushToast('Template chargé dans Preview','info'); } } catch(e){ pushToast('Preview template impossible: '+e.message,'error'); } }}
       />
     {/if}
     
     <!-- Gestion des Composants -->
     {#if activeTab === 'components'}
       <ComponentsTab 
-        {components} 
-        on:newComponent={() => showNewComponentModal = true}
+            {components}
+            onCreateComponent={() => showNewComponentModal = true}
+            onViewComponent={(c) => { if(c && c.code){ previewCode = c.code; activeTab='preview'; pushToast('Composant chargé dans Preview','info'); } }}
       />
     {/if}
   </div>
