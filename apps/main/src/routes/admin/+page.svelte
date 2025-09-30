@@ -471,8 +471,67 @@
 		<!-- Providers Tab -->
 		{#if activeTab === 'providers'}
 			<div class="space-y-6">
+				<!-- Stack UI Information -->
 				<div class="bg-white rounded-lg shadow p-6">
-					<h3 class="text-lg font-semibold mb-4">Configuration des Providers</h3>
+					<h3 class="text-lg font-semibold mb-4">Sélection Automatique des Stacks UI</h3>
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+						<div class="p-4 border rounded-lg">
+							<h4 class="font-medium mb-2 flex items-center gap-2">
+								<span class="w-3 h-3 rounded-full bg-blue-500"></span>
+								Flowbite + Flowbite-Svelte
+							</h4>
+							<p class="text-sm text-gray-600 mb-2">Framework UI complet basé sur Tailwind CSS</p>
+							<div class="text-xs text-gray-500 space-y-1">
+								<div><strong>Cas d'usage:</strong> Applications business, dashboards, blogs professionnels</div>
+								<div><strong>Points forts:</strong> Composants riches, accessibilité, documentation complète</div>
+								<div><strong>Poids:</strong> +2 pour projets nécessitant rapidité de développement</div>
+							</div>
+						</div>
+						
+						<div class="p-4 border rounded-lg">
+							<h4 class="font-medium mb-2 flex items-center gap-2">
+								<span class="w-3 h-3 rounded-full bg-purple-500"></span>
+								Skeleton UI
+							</h4>
+							<p class="text-sm text-gray-600 mb-2">Framework léger et moderne pour Svelte</p>
+							<div class="text-xs text-gray-500 space-y-1">
+								<div><strong>Cas d'usage:</strong> Applications créatives, portfolios, sites vitrines</div>
+								<div><strong>Points forts:</strong> Léger, theming avancé, animations fluides</div>
+								<div><strong>Poids:</strong> +1 pour projets axés design et performance</div>
+							</div>
+						</div>
+						
+						<div class="p-4 border rounded-lg">
+							<h4 class="font-medium mb-2 flex items-center gap-2">
+								<span class="w-3 h-3 rounded-full bg-green-500"></span>
+								Tailwind CSS Pur
+							</h4>
+							<p class="text-sm text-gray-600 mb-2">Classes utilitaires sans framework additionnel</p>
+							<div class="text-xs text-gray-500 space-y-1">
+								<div><strong>Cas d'usage:</strong> Projets sur mesure, prototypes, composants uniques</div>
+								<div><strong>Points forts:</strong> Flexibilité totale, contrôle fin, poids minimal</div>
+								<div><strong>Poids:</strong> Par défaut si aucune préférence détectée</div>
+							</div>
+						</div>
+						
+						<div class="p-4 border rounded-lg">
+							<h4 class="font-medium mb-2 flex items-center gap-2">
+								<span class="w-3 h-3 rounded-full bg-yellow-500"></span>
+								Méthode de Sélection
+							</h4>
+							<p class="text-sm text-gray-600 mb-2">IA analyse le prompt et calcule des scores</p>
+							<div class="text-xs text-gray-500 space-y-1">
+								<div><strong>Mots-clés:</strong> "blog rapide" → +2 Flowbite</div>
+								<div><strong>Complexité:</strong> "dashboard entreprise" → +2 Flowbite</div>
+								<div><strong>Design:</strong> "créatif, moderne" → +1 Skeleton</div>
+								<div><strong>Résultat:</strong> Stack avec le score le plus élevé</div>
+							</div>
+						</div>
+					</div>
+				</div>
+				
+				<div class="bg-white rounded-lg shadow p-6">
+					<h3 class="text-lg font-semibold mb-4">Configuration des Providers IA</h3>
 					
 					<div class="space-y-4">
 						<!-- OpenAI -->

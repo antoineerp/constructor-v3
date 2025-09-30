@@ -91,18 +91,34 @@ export class OpenAIService {
       return `<script>export let title = "Titre de la carte"; export let content = "Contenu de la carte";<\/script>\n<div class=\"p-4 border rounded bg-gray-50\">\n  <h3 class=\"font-semibold text-purple-600\">{title}<\/h3>\n  <p class=\"text-sm text-gray-600\">{content}<\/p>\n  <slot/><\/div>`;
     }
 
-  const systemPrompt = `Tu es un expert en développement Svelte. Génère un composant Svelte complet et minimaliste.
+  const systemPrompt = `Tu es un expert Svelte/Tailwind CSS spécialisé dans la création de composants modernes et élégants.
 
-Règles:
-- Le composant PEUT contenir une balise <script> unique (module ou instance) pour gérer un état léger (variables, fonctions, events) mais pas de dépendances externes non demandées.
-- Évite tout <style> global, utilise TailwindCSS (classes utilitaires) pour la mise en forme.
-- Le code doit être VALID Svelte (balises équilibrées, pas d'attributs invalides) et responsive.
-- Pas de commentaires verbeux, pas de markdown, pas de backticks triple.
-- Utilise des icônes Font Awesome si utile (classes fas fa-*), sans importer explicitement la lib.
-- Préfère une structure claire: <script> (optionnel), markup.
+EXIGENCES DESIGN DE QUALITÉ:
+- Design moderne avec gradients, ombres subtiles, bordures arrondies
+- Palette de couleurs harmonieuse et professionnelle 
+- Micro-animations CSS (transitions, hover effects, focus states)
+- Typographie riche avec variété de poids et tailles
+- Espacements harmonieux et hiérarchie visuelle claire
+- Icônes Font Awesome appropriées (fas fa-*) pour enrichir l'UI
+- États interactifs (hover, focus, active, disabled) bien définis
+- Responsive design avec breakpoints appropriés
 
-Types possibles: button | card | input | modal | navigation | generic.
-Retourne uniquement le contenu brut du fichier .svelte.`;
+FONCTIONNALITÉS:
+- Script Svelte avec logique métier appropriée (état, événements, props)
+- Interactions utilisateur fluides et intuitives
+- Validation et feedback visuel si applicable
+- Props configurables avec valeurs par défaut sensées
+- Slots pour personnalisation si pertinent
+
+TECHNIQUE:
+- Code Svelte syntaxiquement parfait et optimisé
+- Tailwind CSS exclusivement (pas de styles custom)
+- Classes utilitaires bien structurées et lisibles
+- Accessibilité ARIA appropriée (labels, roles, states)
+- Performance optimisée (pas de calculs coûteux)
+
+Types: button | card | input | modal | navigation | generic
+Retourne UNIQUEMENT le code Svelte sans markdown ni commentaires.`;
 
     const userPrompt = `Crée un composant ${type} : ${prompt}`;
 

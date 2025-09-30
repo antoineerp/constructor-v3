@@ -31,7 +31,7 @@
       </div>
       <div class="flex gap-3">
         <a href="/" class="px-4 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors text-sm font-medium">
-          💬 Chat Principal
+          🏠 Accueil
         </a>
         <a href="/sandbox" class="px-4 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors text-sm font-medium">
           🛠️ Sandbox
@@ -99,7 +99,11 @@
   </div>
 
   <!-- Générateur principal -->
-  <SiteGenerator {provider} {generationProfile} {simpleMode} />
+  {#if activeMode === 'site'}
+    <SiteGenerator {provider} {generationProfile} {simpleMode} />
+  {:else}
+    <ChatGenerator {provider} />
+  {/if}
 </div>
 
 <style>

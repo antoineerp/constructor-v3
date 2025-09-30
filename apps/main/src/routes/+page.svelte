@@ -5,7 +5,7 @@
   let provider = 'openai';
   let generationProfile = 'safe';
   let simpleMode = false;
-  let activeTab = 'site';
+  let activeTab = 'chat';
   let availableProviders = [
     { id:'openai', label:'OpenAI' },
     { id:'claude', label:'Claude' }
@@ -34,8 +34,8 @@
     </div>
   </div>
   <div class="flex gap-4 mb-6">
-  <button class="px-4 py-2 rounded border bg-white text-sm font-medium" class:border-indigo-600={activeTab==='site'} class:text-indigo-700={activeTab==='site'} class:border-gray-300={activeTab!=='site'} on:click={()=>activeTab='site'}>Génération de site</button>
-  <button class="px-4 py-2 rounded border bg-white text-sm font-medium" class:border-indigo-600={activeTab==='chat'} class:text-indigo-700={activeTab==='chat'} class:border-gray-300={activeTab!=='chat'} on:click={()=>activeTab='chat'}>Génération de composants</button>
+  <button class="px-4 py-2 rounded border bg-white text-sm font-medium" class:border-indigo-600={activeTab==='chat'} class:text-indigo-700={activeTab==='chat'} class:border-gray-300={activeTab!=='chat'} on:click={()=>activeTab='chat'}>💬 Chat IA Avancé</button>
+  <button class="px-4 py-2 rounded border bg-white text-sm font-medium" class:border-indigo-600={activeTab==='site'} class:text-indigo-700={activeTab==='site'} class:border-gray-300={activeTab!=='site'} on:click={()=>activeTab='site'}>🏗️ Génération de site</button>
   </div>
   <div class="flex items-center gap-4 mb-6 flex-wrap">
     <div class="flex items-center gap-2">
@@ -60,9 +60,9 @@
     </div>
   </div>
 
-  {#if activeTab==='site'}
-    <SiteGenerator {provider} {generationProfile} {simpleMode} />
-  {:else}
+  {#if activeTab==='chat'}
     <ChatGenerator {provider} />
+  {:else}
+    <SiteGenerator {provider} {generationProfile} {simpleMode} />
   {/if}
 </div>

@@ -25,18 +25,42 @@ Retourne JSON: { "${filename}": "CONTENU" } sans texte additionnel.`,
 
   intentExpansion: ({ query }) => `Enrichis intention utilisateur: ${query}. JSON strict { original_query,enriched_query,style_keywords,feature_hints,tone_keywords }`
   ,
-  applicationBase: ({ query, maxFiles=20 }) => `Génère une application SvelteKit basée sur: "${query}".
+  applicationBase: ({ query, maxFiles=20 }) => `Génère une application SvelteKit moderne et professionnelle basée sur: "${query}".
 Retourne STRICTEMENT un objet JSON { "filename":"CONTENU", ... } (aucun texte hors JSON).
-Contraintes:
-- Max ${maxFiles} fichiers
-- Doit inclure: package.json, src/routes/+page.svelte
-- Utiliser Tailwind (si config absente, inclure tailwind.config.cjs, postcss.config.cjs, src/app.css)
-- Pas de commentaires verbeux ni markdown
-- Pas d'import externe non nécessaire
-- Chaque composant Svelte valide (<script> optionnel si purement statique)
-- Préférer réutilisation de composants (src/lib/components)
-- Pas de placeholder TODO
-`,
+
+QUALITÉ NIVEAU PRODUCTION:
+- Design moderne avec gradients, ombres, espacements harmonieux
+- Couleurs cohérentes et palette attrayante
+- Icônes Font Awesome partout où pertinent (fas fa-*)
+- Images d'illustration (via Unsplash URLs dans <img src="https://images.unsplash.com/...">)
+- Micro-interactions et états hover/focus
+- Typography riche avec variété de tailles/poids de fonts
+- Layouts responsive et professional
+
+CONTENU RICHE:
+- Données réalistes et pertinentes (pas de Lorem Ipsum)
+- Textes spécifiques au domaine demandé
+- Call-to-actions engageants
+- Navigation multi-pages avec liens fonctionnels
+- Sections complètes (hero, features, testimonials, footer)
+
+TECHNIQUE:
+- Max ${maxFiles} fichiers optimaux
+- Package.json avec scripts complets
+- Tailwind configuré (config + CSS de base)
+- Composants réutilisables dans src/lib/components/
+- Routing SvelteKit multi-pages
+- États et interactions JavaScript fonctionnels
+- Validation de formulaires si applicable
+- Responsive design complet (sm/md/lg/xl)
+
+STRUCTURE ATTENDUE:
+- src/routes/+layout.svelte (navigation commune)
+- src/routes/+page.svelte (accueil attrayant)
+- src/routes/about/+page.svelte, src/routes/contact/+page.svelte (pages secondaires)
+- src/lib/components/ (composants UI)
+- src/app.css (styles Tailwind + personnalisés)
+- tailwind.config.js (configuration couleurs)`,
   applicationStrict: ({ query, maxFiles=20 }) => `Tu es un générateur SvelteKit senior.
 Objectif: produire une base IMMÉDIATEMENT compilable pour: "${query}".
 Sortie: UNIQUE objet JSON strict.
