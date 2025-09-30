@@ -284,82 +284,79 @@ export async function POST(event){
         });
         rewritten.set(m.path, code);
       }
-      // Construction d'un bundle inline plus fiable (évite import maps + CSP issues)
+      // -------- Mini loader dynamique (support basique des imports entre modules) --------
       const entryModule = rewritten.has(entry) ? entry : (rewritten.keys().next().value);
       if(!entryModule) throw new Error('Aucun module d\'entrée trouvé');
-      
-      // Créer un bundle inline avec tous les modules
-      const bundleLines = [];
-      
-      // Ajouter tous les modules comme des exports globaux
-      const moduleVars = new Map();
-      let moduleCounter = 0;
-      
-      for(const [path, code] of rewritten.entries()){
-        const varName = `__mod_${moduleCounter++}`;
-        moduleVars.set(path, varName);
-        // Transformer export default en variable globale
-        const transformedCode = code
-          .replace(/export\s+default\s+/, `window.${varName} = `)
-          .replace(/import\s+([^;]+?)\s+from\s+['"]([^'"]+)['"];?/g, (match, imports, importPath) => {
-            // Gérer les imports $lib/* en les stubant avec des objets par défaut
-            if(importPath.startsWith('$lib/')){
-              if(importPath === '$lib/supabase.js' || importPath === '$lib/supabase'){
-                return `const ${imports.trim()} = { from: () => ({ select: () => Promise.resolve({ data: [], error: null }), eq: () => ({ select: () => Promise.resolve({ data: [], error: null }) }) }), auth: { getUser: () => Promise.resolve({ data: { user: null }, error: null }) } };`;
+      // Construire des définitions modulaires: analyse rapide des import/export
+      const moduleDefs = [];
+      const importLineRe = /import\s+([^;]+?)\s+from\s+['"]([^'"\n]+)['"];?|import\s+['"]([^'"\n]+)['"];?/g;
+      const exportDefaultRe = /export\s+default\s+/;
+      for(const [modPath, codeOrig] of rewritten.entries()){
+        let code = codeOrig;
+        const deps = [];
+        const paramNames = [];
+        const replacements = [];
+        importLineRe.lastIndex = 0;
+        let mI;
+        while((mI = importLineRe.exec(codeOrig))){
+          const full = mI[0];
+            const clause = mI[1];
+            const spec = mI[2] || mI[3];
+            if(!spec) continue;
+            const resolved = toAbsolute(spec, modPath);
+            deps.push(resolved);
+            const paramVar = `__d${paramNames.length}`;
+            paramNames.push(paramVar);
+            if(!clause){ // import 'polyfill'
+              replacements.push({ from: full, to: `/* side-effect import ${spec} */` });
+            } else {
+              // Simpliste: on ignore destructuring complexe -> on remappe tout sur valeur importée
+              let decl = '';
+              if(/^\*/.test(clause.trim())){
+                // import * as ns
+                const ns = clause.split(/\s+as\s+/i)[1] || 'ns';
+                decl = `const ${ns.trim()} = ${paramVar};`;
+              } else if(clause.includes('{')){
+                // import { a as b, c }
+                // laisser tel quel: on ne connaît pas l'export shape -> assignation naïve
+                decl = clause
+                  .replace(/\{([^}]+)\}/, (mm, inner)=> {
+                    return inner.split(',').map(p=>{
+                      const seg = p.trim();
+                      if(!seg) return '';
+                      if(seg.includes(' as ')){
+                        const [orig, alias] = seg.split(/\s+as\s+/i).map(s=> s.trim());
+                        return `const ${alias} = ${paramVar}.${orig};`;
+                      }
+                      return `const ${seg} = ${paramVar}.${seg};`;
+                    }).join(' ');
+                  });
+              } else {
+                // import DefaultName
+                decl = `const ${clause.trim()} = ${paramVar}.default || ${paramVar};`;
               }
-              // Autres imports $lib (componentGenerator, etc.)
-              return `const ${imports.trim()} = {}; // $lib stub`;
+              replacements.push({ from: full, to: decl });
             }
-            
-            const depVar = moduleVars.get(importPath);
-            if(depVar){
-              // Simple default import
-              if(/^\w+$/.test(imports.trim())){
-                return `const ${imports.trim()} = window.${depVar};`;
-              }
-            }
-            return `// Import non résolu: ${match}`;
-          });
-        bundleLines.push(`// Module: ${path}`);
-        bundleLines.push(transformedCode);
-        bundleLines.push('');
+        }
+        // Appliquer remplacements
+        for(const r of replacements){ code = code.replace(r.from, r.to); }
+        // Transformer export default
+        if(exportDefaultRe.test(code)){
+          code = code.replace(exportDefaultRe, 'module.exports = ');
+        }
+        moduleDefs.push({ path: modPath, deps, params: paramNames, body: code });
       }
-      
-      // Script de démarrage
-      const entryVar = moduleVars.get(entryModule);
-      bundleLines.push(`// Démarrage`);
-      bundleLines.push(`try{`);
-      bundleLines.push(`  const App = window.${entryVar};`);
-      bundleLines.push(`  if(App && typeof App === 'function'){`);
-      bundleLines.push(`    new App({target: document.getElementById('app')});`);
-      bundleLines.push(`  } else {`);
-      bundleLines.push(`    throw new Error('Module d\\'entrée invalide: ' + typeof App);`);
-      bundleLines.push(`  }`);
-      bundleLines.push(`}catch(e){`);
-      bundleLines.push(`  document.getElementById('app').innerHTML = '<pre style="color:#b91c1c;font:12px monospace;padding:8px;border:1px solid #fca5a5;border-radius:4px;background:#fef2f2">Erreur runtime: ' + (e.message || e) + '</pre>';`);
-      bundleLines.push(`  console.error('Runtime error:', e);`);
-      bundleLines.push(`}`);
-      
-      const bundleScript = bundleLines.join('\n');
-      
-      result.runtimeHtml = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset='utf-8'>
-  <title>Sandbox Runtime</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    body { padding: 16px; font-family: system-ui; }
-    #app { min-height: 200px; }
-  </style>
-</head>
-<body>
-  <div id='app'>Initialisation...</div>
-  <script>
-${bundleScript}
-  </script>
-</body>
-</html>`;
+      // Génération du loader + enregistrement des modules
+      const loaderLines = [];
+      loaderLines.push(`const __reg = new Map();`);
+      loaderLines.push(`function __define(id,deps,factory){ __reg.set(id,{deps,factory,instance:null}); }`);
+      loaderLines.push(`async function __require(id){ const rec = __reg.get(id); if(!rec) { if(id.startsWith('svelte/')) return {}; throw new Error('Module '+id+' introuvable'); } if(rec.instance) return rec.instance; const depVals = []; for(const d of rec.deps){ if(__reg.has(d)) depVals.push(await __require(d)); else if(d.startsWith('svelte/')) { depVals.push({}); } else { try { depVals.push(await import(d)); } catch{ depVals.push({}); } } } const module = { exports:{} }; const res = await rec.factory(...depVals, module.exports, module); rec.instance = module.exports || res; return rec.instance; }`);
+      for(const def of moduleDefs){
+        loaderLines.push(`__define(${JSON.stringify(def.path)}, ${JSON.stringify(def.deps)}, async function(${[...def.params,'exports','module'].join(',')}){\n${def.body}\n});`);
+      }
+      loaderLines.push(`(async()=>{ try { const App = await __require(${JSON.stringify(entryModule)}); const C = App.default || App; if(typeof C === 'function'){ new C({ target: document.getElementById('app') }); } else { throw new Error('Export défaut inexistant'); } } catch(e){ document.getElementById('app').innerHTML='<pre style="color:#b91c1c">'+(e.message||e)+'</pre>'; console.error(e); } })();`);
+      const loaderScript = loaderLines.join('\n');
+      result.runtimeHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Sandbox Runtime</title><script src="https://cdn.tailwindcss.com"></script><style>body{padding:16px;font-family:system-ui}</style></head><body><div id='app'>Chargement...</div><script type="module">${loaderScript}</script></body></html>`;
     }
   } catch(e){
     result.runtimeHtml = `<!DOCTYPE html><html><body><pre style='color:#b91c1c'>Runtime bundle error: ${String(e).replace(/</g,'&lt;')}</pre></body></html>`;
