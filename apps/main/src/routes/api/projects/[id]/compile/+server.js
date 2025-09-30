@@ -300,6 +300,12 @@ export async function POST(event){
         'node_modules/svelte/internal/index.js',
         'node_modules/svelte/internal.js'
       ]) || 'export const noop=()=>{};';
+      // Shim fallback si la version interne n'expose pas les helpers attendus (from_html etc.)
+      function ensureClientShim(src){
+        if(/from_html\s*\(/.test(src)) return src; // déjà présent
+        return src + `\n// --- injected shim ---\nexport function from_html(t){const tpl=document.createElement('template');tpl.innerHTML=t.trim();return ()=>tpl.content.firstElementChild?tpl.content.firstElementChild.cloneNode(true):tpl.content.cloneNode(true);}\nexport function child(n,text){if(!n) return null;return text? n.firstChild : (n.firstElementChild||n.firstChild);}\nexport function sibling(node, idx){if(!node||!node.parentNode) return null;let cur=node.parentNode.firstChild;let i=0;while(cur&&i<idx){cur=cur.nextSibling;i++;}return cur;}\nexport const index = Symbol('index');\nexport function each(container,_flag,listGetter,_indexSym,cb){const arr=listGetter()||[];for(let i=0;i<arr.length;i++){cb(container,{get value(){return arr[i];}});} }\nexport function reset(_n){}\nexport function template_effect(fn){try{fn();}catch(e){console.warn('template_effect error',e);} }\nexport function set_attribute(el,k,v){ if(el) try{el.setAttribute(k,v);}catch{} }\nexport function set_text(node,txt){ if(node) node.textContent = txt==null?'':String(txt);}\nexport function append(parent,n){ if(parent&&n) parent.appendChild(n);}\n`;
+      }
+      svelteClient = ensureClientShim(svelteClient);
       const importMap = { imports: { 'svelte/internal/client': 'data:application/javascript;base64,' + Buffer.from(svelteClient,'utf-8').toString('base64'), 'svelte/internal': 'data:application/javascript;base64,' + Buffer.from(svelteInternal,'utf-8').toString('base64') } };
       // Réécriture des imports internes en idMap + génération data URLs
       const importPattern = /import\s+[^;]+?from\s+['"]([^'"\n]+)['"];?|import\s+['"]([^'"\n]+)['"];?/g;
