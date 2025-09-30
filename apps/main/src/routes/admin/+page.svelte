@@ -86,6 +86,33 @@
   let fastStatus = 'idle'; // idle|compiling|error|ok
   let importWarnings = [];
   let rewritesMeta = null;
+  // Génération site multipage (Phase 1)
+  let siteGenLoading = false; let siteGenError=''; let siteRichness=null;
+  async function generateSite(){
+    siteGenLoading = true; siteGenError=''; siteRichness=null;
+    try {
+      const basePrompt = promptTemplates[0]?.content || 'Site SaaS moderne avec pricing, features, testimonials, contact';
+      const r = await fetch('/api/generate/site2pass', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ prompt: basePrompt, targetPages:4 }) });
+      const j = await r.json();
+      if(!r.ok || !j.success) throw new Error(j.error||('HTTP '+r.status));
+      siteRichness = j.richness;
+      // Injecter Router comme code principal + pages comme dependencies
+      if(j.files){
+        let rootCode = j.files['Router.svelte'];
+        const deps = { ...dependencies };
+        for(const [k,v] of Object.entries(j.files)){
+          if(k==='Router.svelte'){ rootCode = v; continue; }
+          const path = k.startsWith('pages/')? k : 'pages/'+k;
+          deps[path] = v;
+        }
+        dependencies = deps;
+        previewCode = rootCode;
+        activeTab='preview';
+        pushToast('Site multipage généré','success');
+      }
+    } catch(e){ siteGenError = e.message; pushToast('Gen site échec: '+e.message,'error'); }
+    finally { siteGenLoading=false; }
+  }
   // Infos stack / squelette UI (placeholder: à relier à une source côté serveur si dispo)
   let uiStackChoice = null; // sera potentiellement récupéré via un endpoint futur
   let uiBlueprintRef = null;
@@ -611,6 +638,16 @@
         on:updateDependency={(e)=> updateDependency(e.detail.path, e.detail.code)}
         on:removeDependency={(e)=> removeDependency(e.detail)}
       />
+      <div class="mt-4 flex items-center gap-3 text-[11px]">
+        <button class="px-3 py-1.5 rounded bg-emerald-600 text-white disabled:opacity-50" disabled={siteGenLoading} on:click={generateSite}>
+          {siteGenLoading? 'Génération…':'Générer site multipage'}
+        </button>
+        {#if siteGenError}<span class="text-red-600">{siteGenError}</span>{/if}
+        {#if siteRichness}
+          <span class="px-2 py-1 bg-gray-200 rounded">Richesse score: {siteRichness.score}</span>
+          <span class="text-gray-500">{siteRichness.metrics.pages}p / {siteRichness.metrics.sections}s / {siteRichness.metrics.images}img</span>
+        {/if}
+      </div>
       {#if uiStackChoice || uiBlueprintRef}
         <div class="mt-4 text-[11px] text-gray-600 flex items-center gap-2">
           <span class="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-semibold">Squelette: {uiStackChoice||'—'}</span>
