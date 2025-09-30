@@ -40,6 +40,38 @@ export class OpenAIService {
     this.claudeKey = env.ANTHROPIC_API_KEY || env.CLAUDE_API_KEY; // support deux noms
   }
 
+  // Méthode pour récupérer les clés dynamiquement (depuis admin ou env)
+  async getApiKeys() {
+    try {
+      // Essayer d'abord les clés admin
+      const response = await fetch('/api/admin/keys');
+      if (response.ok) {
+        const data = await response.json();
+        return data.keys || {};
+      }
+    } catch (e) {
+      console.warn('Impossible de récupérer les clés admin:', e.message);
+    }
+    
+    // Fallback sur les variables d'environnement
+    return {
+      openai: this.apiKey,
+      claude: this.claudeKey
+    };
+  }
+
+  // Obtenir la clé OpenAI actuelle
+  async getCurrentOpenAIKey() {
+    const keys = await this.getApiKeys();
+    return keys.openai || this.apiKey;
+  }
+
+  // Obtenir la clé Claude actuelle  
+  async getCurrentClaudeKey() {
+    const keys = await this.getApiKeys();
+    return keys.claude || this.claudeKey;
+  }
+
   async generateEmbedding(input, { model = 'text-embedding-3-small' } = {}) {
     if(!this.apiKey) throw new Error('Clé API OpenAI manquante');
     const cleaned = typeof input === 'string' ? input.slice(0,8000) : JSON.stringify(input).slice(0,8000);

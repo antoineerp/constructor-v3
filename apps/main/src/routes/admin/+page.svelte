@@ -61,6 +61,23 @@
 			connectionStatus.openai = 'error';
 		}
 
+		// Test Claude (nouveau)
+		try {
+			if (apiKeys.claude) {
+				const res = await fetch('/api/admin/keys', {
+					method: 'PUT',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ provider: 'claude', key: apiKeys.claude })
+				});
+				const data = await res.json();
+				connectionStatus.claude = data.success ? 'connected' : 'error';
+			} else {
+				connectionStatus.claude = 'error';
+			}
+		} catch {
+			connectionStatus.claude = 'error';
+		}
+
 		// Test Supabase (si activé)
 		try {
 			const res = await fetch('/api/library');
@@ -71,6 +88,58 @@
 		}
 
 		connectionStatus = { ...connectionStatus };
+	}
+
+	// Sauvegarder les clés API
+	async function saveApiKeys() {
+		try {
+			const response = await fetch('/api/admin/keys', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ keys: apiKeys })
+			});
+			
+			const data = await response.json();
+			if (data.success) {
+				alert('✅ Clés sauvegardées avec succès ! Rechargez la page pour appliquer les changements.');
+				await checkConnections(); // Retester les connexions
+			} else {
+				alert('❌ Erreur : ' + (data.error || 'Impossible de sauvegarder'));
+			}
+		} catch (e) {
+			alert('❌ Erreur réseau : ' + e.message);
+		}
+	}
+
+	// Tester une clé spécifique
+	async function testSingleKey(provider) {
+		try {
+			const key = apiKeys[provider];
+			if (!key) {
+				alert(`❌ Veuillez saisir une clé ${provider.toUpperCase()} d'abord`);
+				return;
+			}
+
+			const response = await fetch('/api/admin/keys', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ provider, key })
+			});
+			
+			const data = await response.json();
+			connectionStatus[provider] = data.success ? 'connected' : 'error';
+			connectionStatus = { ...connectionStatus };
+			
+			if (data.success) {
+				alert(`✅ Clé ${provider.toUpperCase()} valide !`);
+			} else {
+				alert(`❌ Clé ${provider.toUpperCase()} invalide : ${data.error || 'Erreur de connexion'}`);
+			}
+		} catch (e) {
+			alert(`❌ Erreur test ${provider} : ${e.message}`);
+			connectionStatus[provider] = 'error';
+			connectionStatus = { ...connectionStatus };
+		}
 	}
 
 	// Sauvegarde composant
@@ -308,7 +377,28 @@
 	let recentProjects = [];
 	let popularPrompts = [];
 
-	onMount(() => {
+	// Charger les clés existantes 
+	async function loadApiKeys() {
+		try {
+			const response = await fetch('/api/admin/keys');
+			if (response.ok) {
+				const data = await response.json();
+				if (data.success && data.keys) {
+					// Ne charger que les clés non vides (et démasquées partiellement)
+					Object.entries(data.keys).forEach(([key, value]) => {
+						if (value && !value.includes('***')) {
+							apiKeys[key] = value;
+						}
+					});
+				}
+			}
+		} catch (e) {
+			console.warn('Impossible de charger les clés existantes:', e.message);
+		}
+	}
+
+	onMount(async () => {
+		await loadApiKeys();
 		checkConnections();
 		loadTemplates();
 		
@@ -556,12 +646,18 @@
 										class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
 									/>
 								</div>
-								<div class="flex items-end">
+								<div class="flex items-end gap-2">
 									<button 
-										class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-										on:click={checkConnections}
+										class="px-3 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm"
+										on:click={() => testSingleKey('openai')}
 									>
-										Tester la connexion
+										Tester
+									</button>
+									<button 
+										class="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm"
+										on:click={saveApiKeys}
+									>
+										Sauver
 									</button>
 								</div>
 							</div>
@@ -589,15 +685,57 @@
 										class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
 									/>
 								</div>
-								<div class="flex items-end">
+								<div class="flex items-end gap-2">
 									<button 
-										class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"
-										on:click={checkConnections}
+										class="px-3 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 text-sm"
+										on:click={() => testSingleKey('claude')}
 									>
-										Tester la connexion
+										Tester
+									</button>
+									<button 
+										class="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm"
+										on:click={saveApiKeys}
+									>
+										Sauver
 									</button>
 								</div>
 							</div>
+						</div>
+
+						<!-- Informations de configuration -->
+						<div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+							<h4 class="font-medium text-blue-800 mb-2 flex items-center gap-2">
+								<i class="fas fa-info-circle"></i>
+								Configuration des Clés API
+							</h4>
+							<div class="text-sm text-blue-700 space-y-1">
+								<p><strong>Production :</strong> Les clés sont configurées via les variables d'environnement Vercel</p>
+								<p><strong>Développement :</strong> Utilisez les champs ci-dessus pour configurer temporairement</p>
+								<p><strong>Sécurité :</strong> Les clés sont masquées et stockées de manière sécurisée</p>
+								<p class="mt-2"><strong>Variables d'environnement à configurer :</strong></p>
+								<ul class="list-disc list-inside ml-4 text-xs">
+									<li><code>OPENAI_API_KEY</code> - Clé OpenAI</li>
+									<li><code>ANTHROPIC_API_KEY</code> - Clé Claude/Anthropic</li>
+								</ul>
+							</div>
+						</div>
+
+						<!-- Actions globales -->
+						<div class="flex justify-center gap-4 pt-4">
+							<button 
+								class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+								on:click={checkConnections}
+							>
+								<i class="fas fa-sync-alt"></i>
+								Tester toutes les connexions
+							</button>
+							<button 
+								class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
+								on:click={saveApiKeys}
+							>
+								<i class="fas fa-save"></i>
+								Sauvegarder toutes les clés
+							</button>
 						</div>
 
 						<!-- Supabase -->

@@ -70,7 +70,7 @@ export async function POST(event) {
         immutable: false,
         accessors: false,
         // Forcer la compatibilité
-        legacy: true
+        compatibility: { componentApi: 4 }
       };
       
       compiled = compile(source, compileOptions);
@@ -90,7 +90,7 @@ export async function POST(event) {
             logCtx.autoRepair = 'success';
             let repairedSource = repairJson.fixedCode;
             if(!/<script[\s>]/.test(repairedSource)) repairedSource = `<script>export let props={};</script>\n` + repairedSource;
-            compiled = compile(repairedSource, { generate:'dom', css:'injected', dev:false, hydratable:true, runes:false, legacy:true });
+            compiled = compile(repairedSource, { generate:'dom', css:'injected', dev:false, hydratable:true, runes:false, compatibility: { componentApi: 4 } });
           } else {
             autoRepairMeta = { attempted:true, success:false, mode:'dom-compile-syntax', reason: repairJson?.error || 'repair-no-change' };
             logCtx.autoRepair = 'failed';
