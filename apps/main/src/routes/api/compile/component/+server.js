@@ -12,6 +12,7 @@ export const config = { runtime: 'nodejs20.x' };
 // Body attendu: { code: string, dependencies?: { [path:string]: string }, debug?: boolean }
 export async function POST(event) {
   try {
+    const started = Date.now();
     const { request, fetch } = event;
     const body = await request.json();
   const { code, dependencies = {}, debug = false, strict = false, allowAutoRepair = true, _autoRepairAttempt = false, enableRendererNormalization = false, allowJQueryTransform = true, pure = false, autofix = true } = body || {};
@@ -447,6 +448,8 @@ export async function POST(event) {
           heuristics.push('auto-repair-skip-no-key');
         }
         htmlBody = rendered.html;
+        // Marquer explicitement fallback dans heuristics si utilisé
+        try { if(fallbackUsed && !heuristics.includes('fallback-used')) heuristics.push('fallback-used'); } catch {}
         globalThis.__LAST_COMPONENT_PROPS__ = initialProps;
         globalThis.__LAST_SSR_FALLBACK__ = fallbackUsed || (typeof Component.render !== 'function');
         globalThis.__LAST_SSR_EXPORT_PICK__ = exportPick;
@@ -499,9 +502,10 @@ export async function POST(event) {
     if(canRequire && domJsCode){
       const b64 = Buffer.from(domJsCode,'utf-8').toString('base64');
       const propsB64 = Buffer.from(JSON.stringify(globalThis.__LAST_COMPONENT_PROPS__||{}),'utf-8').toString('base64');
-  hydrationScript = `<script>(function(){const ROOT_ID='__component_root';function surface(err,label){console.error(label,err);var r=document.getElementById(ROOT_ID);if(r){r.setAttribute('data-hydration-error', err.message||String(err));r.setAttribute('data-hydration-status','error');r.innerHTML='<pre style=\"color:#b91c1c;font:11px/1.4 monospace;white-space:pre-wrap;padding:8px;border:1px solid #fca5a5;background:#fef2f2;border-radius:4px;\">Hydration error: '+(err.message||String(err)).replace(/</g,'&lt;')+'</pre>';document.dispatchEvent(new CustomEvent('component-hydration-error',{detail:{message:err.message,label}}));}}
+  hydrationScript = `<script>(function(){const ROOT_ID='__component_root';let __hydrationSignal=0;function post(type,msg){try{parent&&parent.postMessage&&parent.postMessage({type,message:msg},'*');}catch(_e){}}function surface(err,label){console.error(label,err);var r=document.getElementById(ROOT_ID);if(r){r.setAttribute('data-hydration-error', err.message||String(err));r.setAttribute('data-hydration-status','error');r.innerHTML='<pre style=\\"color:#b91c1c;font:11px/1.4 monospace;white-space:pre-wrap;padding:8px;border:1px solid #fca5a5;background:#fef2f2;border-radius:4px;\\">Hydration error: '+(err.message||String(err)).replace(/</g,'&lt;')+'</pre>';document.dispatchEvent(new CustomEvent('component-hydration-error',{detail:{message:err.message,label}}));post('hydration-error',err.message||String(err));}}
+setTimeout(function(){if(!__hydrationSignal){post('hydration-pending','Hydratation non confirmée');}},3000);
 try{const js=atob('${b64}');const blob=new Blob([js],{type:'text/javascript'});const u=URL.createObjectURL(blob);const props=JSON.parse(atob('${propsB64}'));
-import(u).then(m=>{try{const C=m.default||m;const root=document.getElementById(ROOT_ID);if(!C){throw new Error('Aucun export default trouvé');} if(typeof C!=='function'){throw new Error('Export default invalide (type '+(typeof C)+')');} if(root){new C({target:root, hydrate:true, props});root.setAttribute('data-hydration-status','ok');}}catch(e){surface(e,'Hydration construct error');}}).catch(e=>surface(e,'Hydration import fail'));
+import(u).then(m=>{try{const C=m.default||m;const root=document.getElementById(ROOT_ID);if(!C){throw new Error('Aucun export default trouvé');} if(typeof C!=='function'){throw new Error('Export default invalide (type '+(typeof C)+')');} if(root){new C({target:root, hydrate:true, props});root.setAttribute('data-hydration-status','ok');__hydrationSignal=1;post('hydration-ok','ok');}}catch(e){surface(e,'Hydration construct error');}}).catch(e=>surface(e,'Hydration import fail'));
 window.addEventListener('unhandledrejection',ev=>surface(ev.reason||ev,'Unhandled promise rejection'));
 }catch(e){surface(e,'Hydration bootstrap error');}})();</script>`;
     } else if(!canRequire && domCompileError){
@@ -514,9 +518,11 @@ window.addEventListener('unhandledrejection',ev=>surface(ev.reason||ev,'Unhandle
     if(debug){
       if(debugStages) debugStages.finalSource = source;
   const hs = globalThis.__LAST_SSR_HEURISTICS__||[];
-      const r = json({ success:true, html, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null, heuristics: hs, heuristicPath: hs.join(' > '), strict, autoRepair: autoRepairMeta }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages });
+      const durationMs = Date.now()-started;
+      const r = json({ success:true, html, durationMs, meta:{ missing:meta.missingComponents, libStubs:meta.libStubs, depCount:depRegistry.size, depErrors, depCssBlocks:depCssBlocks.length, mode: canRequire?'ssr':'edge', fallbackUsed: !!globalThis.__LAST_SSR_FALLBACK__, exportPick: globalThis.__LAST_SSR_EXPORT_PICK__||null, fallbackNote: globalThis.__LAST_SSR_FALLBACK_NOTE__||null, heuristics: hs, heuristicPath: hs.join(' > '), strict, autoRepair: autoRepairMeta }, ssrJs: js?.code || null, ssrTransformed: transformCaptured, domJs: domJsCode || null, css: css?.code || '', depCss: depCssBlocks, dependencies: Array.from(depRegistry.keys()), debugStages });
       r.headers.set('X-Compile-Mode','ssr');
       r.headers.set('X-Fallback-Used', (globalThis.__LAST_SSR_FALLBACK__? '1':'0'));
+      r.headers.set('X-Compile-Duration', String(durationMs));
       if(strict) r.headers.set('X-Strict','1');
       return r;
     }
@@ -530,7 +536,8 @@ window.addEventListener('unhandledrejection',ev=>surface(ev.reason||ev,'Unhandle
       "connect-src 'none'",
       "frame-ancestors 'none'"
     ].join('; ');
-  const res = new Response(html, { headers: { 'Content-Type':'text/html; charset=utf-8', 'X-Compile-Mode':'ssr', 'X-Fallback-Used': (globalThis.__LAST_SSR_FALLBACK__? '1':'0'), 'Cache-Control':'no-store', 'Content-Security-Policy': csp, ...(strict? { 'X-Strict':'1'} : {}) } });
+  const resDuration = Date.now()-started;
+  const res = new Response(html, { headers: { 'Content-Type':'text/html; charset=utf-8', 'X-Compile-Mode':'ssr', 'X-Fallback-Used': (globalThis.__LAST_SSR_FALLBACK__? '1':'0'), 'X-Compile-Duration': String(resDuration), 'Cache-Control':'no-store', 'Content-Security-Policy': csp, ...(strict? { 'X-Strict':'1'} : {}) } });
     return res;
   } catch(e){
     console.error('compile/component fatal', e);

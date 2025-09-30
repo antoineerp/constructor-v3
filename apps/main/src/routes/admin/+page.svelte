@@ -151,6 +151,12 @@
       previewHtml = (j.html||'') + inject;
       previewHeuristics = j.meta?.heuristics||[];
       previewSsrJs = j.ssrJs||''; previewDomJs = j.domJs||''; iframeKey++;
+      // Auto-activation diff si heuristique fallback ou auto-repair hint
+      try {
+        if(previewHeuristics.some(h=> /fallback|auto-repair-hint|fallback-used/.test(h))){
+          showDiff = true;
+        }
+      } catch {}
       const dur = Date.now()-started; if(dur>1500) pushToast('Compile '+dur+'ms','info');
     } catch(e){ if(!signal.aborted){ previewError = e.name==='AbortError' ? 'Annulé' : e.message; pushToast('Exception: '+previewError,'error'); } }
     finally { clearTimeout(timeout); if(!signal.aborted) previewLoading=false; }
@@ -190,7 +196,7 @@
     if(!hydrationBridgeFlag){
       hydrationBridgeFlag = true;
   // Correction typo: écouter correctement 'hydration-error' (ancienne faute 'hydrration-error' conservée pour compat retro)
-  messageHandler = (e)=>{ try { if(e.data && (e.data.type==='hydration-error' || e.data.type==='hydrration-error')){ showHydrationError(e.data.message); } } catch{} };
+  messageHandler = (e)=>{ try { if(!e.data) return; const t=e.data.type; if(t==='hydration-error' || t==='hydrration-error'){ showHydrationError(e.data.message); pushToast('Hydratation échouée','error'); } else if(t==='hydration-pending'){ pushToast('Hydratation non confirmée','warning'); } else if(t==='hydration-ok'){ pushToast('Hydratation OK','success'); } } catch{} };
       window.addEventListener('message', messageHandler);
     }
   });
