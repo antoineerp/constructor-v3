@@ -41,6 +41,39 @@
   let previewHtml = '';
   let previewDomJs = ''; // JS DOM hydratation renvoyé par endpoint (extraction base64)
   let previewSsrJs = ''; // JS SSR original (pour diff logique)
+  // Multi-fichiers (dépendances .svelte / .js) – A
+  let dependencies = {}; // { path:string : code }
+  function addDependency(path){
+    if(!path) return; if(!/\.svelte$/.test(path) && !/\.(js|ts)$/.test(path)) path = path + '.svelte';
+    if(!dependencies[path]){
+      const tpl = path.endsWith('.svelte') ? `<script>\n  export let name='${path.replace(/.*\//,'').replace(/\.svelte$/,'')}';\n<\/script>\n<div class=\"p-2 text-[10px] border rounded bg-gray-50\">${path}</div>` : `export function util(){ return '${path}'; }`;
+      dependencies = { ...dependencies, [path]: tpl };
+    }
+  }
+  function updateDependency(path, code){ if(dependencies[path] !== code){ dependencies = { ...dependencies, [path]: code }; } }
+  function removeDependency(path){ const c = { ...dependencies }; delete c[path]; dependencies = c; }
+  function listDependencyPaths(){ return Object.keys(dependencies); }
+  // Extraction automatique des imports relatifs pour suggérer / créer des dépendances vides
+  function autoDiscoverDependencies(){
+    try {
+      const importRe = /import\s+[^;]+?from\s+['"](\.\.?\/[^'";]+)['"];?/g; let m; const wanted=new Set();
+      while((m = importRe.exec(previewCode))){
+        let spec = m[1];
+        if(!/\.svelte$/.test(spec) && !/\.(js|ts)$/.test(spec)) spec += '.svelte';
+        // Normaliser chemin virtual: ./Comp.svelte -> deps/Comp.svelte
+        let normalized = spec.replace(/^\.\//,'');
+        if(!/\//.test(normalized)) normalized = 'deps/' + normalized; // ranger dans un sous-dossier virtuel
+        if(!dependencies[normalized]) wanted.add(normalized);
+      }
+      if(wanted.size){
+        const clone = { ...dependencies };
+        for(const w of wanted){
+          clone[w] = w.endsWith('.svelte') ? `<script>\n  // Dépendance auto-créée (stub)\n  export let value='${w}';\n<\/script>\n<div class=\"text-[10px] text-gray-500 border border-dashed p-1 rounded\">Stub: ${w}</div>` : `// stub module ${w}\nexport const stub='${w}';`;
+        }
+        dependencies = clone;
+      }
+    } catch{}
+  }
   let previewLoading = false;
   let previewError = '';
   let previewStrict = false;
@@ -162,7 +195,9 @@
         } catch(e){ if(!signal.aborted) rawError='[raw] '+e.message; }
       }
       if(signal.aborted) return;
-      const r = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Run-Id':currentRunId}, body: JSON.stringify({ code: previewCode, debug:true, strict: previewStrict, enableRendererNormalization:false }), signal });
+  // Découverte automatique des dépendances avant envoi
+  autoDiscoverDependencies();
+  const r = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Run-Id':currentRunId}, body: JSON.stringify({ code: previewCode, dependencies, debug:true, strict: previewStrict, enableRendererNormalization:false }), signal });
       if(signal.aborted) return;
       if(!r.ok){
         let msg = 'HTTP '+r.status;
@@ -564,11 +599,17 @@
         {previewSsrJs}
         {previewDomJs}
         {lineCount}
+        {currentRunId}
+        {timeline}
+        {dependencies}
         on:compile={runPreview}
         on:fastCompile={runFastPreview}
         on:toggleDiff={() => showDiff = !showDiff}
         on:loadMoreDiff={loadMoreDiff}
         on:setSimpleExample={(e) => previewCode = e.detail}
+        on:addDependency={(e)=> addDependency(e.detail)}
+        on:updateDependency={(e)=> updateDependency(e.detail.path, e.detail.code)}
+        on:removeDependency={(e)=> removeDependency(e.detail)}
       />
       {#if uiStackChoice || uiBlueprintRef}
         <div class="mt-4 text-[11px] text-gray-600 flex items-center gap-2">

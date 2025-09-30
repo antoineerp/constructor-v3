@@ -21,9 +21,13 @@
   export let showDiff = false;
   export let diffBlocks = [];
   export let diffBlocksAll = [];
+  // Multi-fichiers & timeline
+  export let dependencies = {}; // { path: code }
+  export let timeline = []; // [{runId,stage,t,extra}]
+  export let currentRunId = null;
   // === Instrumentation forensic ===
   export let onForensicEvent = (e)=>{}; // callback(parent) reçoit {runId, stage, t, extra?}
-  export let currentRunId = null; // fourni par parent lors d'un nouveau preview
+  // (déplacé plus haut)
   export let readyTimeoutMs = 5000; // après HELLO sans READY
   export let loadTimeoutMs = 3000;  // après IFRAME_SET sans load
   // compileT0 retiré (non utilisé) – timing géré côté parent
@@ -87,6 +91,12 @@
   export let onLoadMoreDiff = () => {};
   export let onCopyHtml = () => {};
   export let onSetExample = (code) => {};
+  // Events dépendances
+  import { createEventDispatcher } from 'svelte';
+  const dispatch = createEventDispatcher();
+  function addDep(){ const p = prompt('Chemin dépendance (ex: deps/MyComp.svelte)'); if(p){ dispatch('addDependency', p); } }
+  function editDep(p){ const cur = dependencies[p]; const nv = prompt('Code pour '+p, cur); if(nv!=null){ dispatch('updateDependency', { path:p, code:nv }); } }
+  function removeDep(p){ if(confirm('Supprimer '+p+' ?')) dispatch('removeDependency', p); }
   
   let lineCount = (previewCode.match(/\n/g)||[]).length + 1;
   $: lineCount = (previewCode.match(/\n/g)||[]).length + 1;
@@ -133,6 +143,23 @@
           {lineCount} l.
         </div>
       </div>
+
+      <!-- Dépendances -->
+      <details class="mt-3 text-[11px]" open>
+        <summary class="cursor-pointer font-semibold text-gray-700 flex items-center gap-2">Dépendances <span class="text-[10px] font-normal text-gray-500">({Object.keys(dependencies).length})</span> <button type="button" class="ml-auto px-2 py-0.5 rounded bg-indigo-600 text-white" on:click|stopPropagation={addDep}>+ Fichier</button></summary>
+        {#if Object.keys(dependencies).length===0}
+          <div class="mt-1 text-gray-500">Aucune dépendance. Les imports relatifs détectés seront auto-créés.</div>
+        {/if}
+        <ul class="mt-2 space-y-1">
+          {#each Object.keys(dependencies) as p}
+            <li class="group border rounded px-2 py-1 bg-white flex items-center gap-2">
+              <code class="text-[10px] text-gray-600 flex-1 truncate" title={p}>{p}</code>
+              <button class="text-[10px] underline" on:click={()=> editDep(p)}>éditer</button>
+              <button class="text-[10px] text-red-600 underline opacity-70 group-hover:opacity-100" on:click={()=> removeDep(p)}>x</button>
+            </li>
+          {/each}
+        </ul>
+      </details>
       
       {#if previewError}
         <div class="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 p-2 rounded">
@@ -175,6 +202,30 @@
           {/each}
         </div>
       {/if}
+
+      <!-- Timeline forensic -->
+      <details class="mt-4 text-[10px]" open>
+        <summary class="cursor-pointer text-gray-700 font-semibold flex items-center gap-2">Timeline <span class="text-gray-500 font-normal">run {currentRunId || '—'}</span></summary>
+        {#if !timeline.length}
+          <div class="mt-1 text-gray-500">Aucun événement.</div>
+        {:else}
+          {#key currentRunId}
+            <div class="mt-1 max-h-40 overflow-auto border rounded bg-gray-50 divide-y">
+              {#each timeline.filter(e=> e.runId===currentRunId) as ev, i (i)}
+                <div class="px-2 py-1 flex items-center gap-2">
+                  <span class="text-[9px] text-gray-400">{(ev.t/1000).toFixed(3)}s</span>
+                  <span class="text-[10px] font-mono">
+                    {ev.stage}
+                  </span>
+                  {#if ev.extra}
+                    <span class="text-[9px] text-gray-500 truncate" title={JSON.stringify(ev.extra)}>{JSON.stringify(ev.extra).slice(0,60)}</span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/key}
+        {/if}
+      </details>
       
       {#if importWarnings.length}
         <div class="mt-2 text-[10px] bg-amber-50 border border-amber-200 rounded p-2 text-amber-800">
