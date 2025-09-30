@@ -116,13 +116,13 @@ export async function POST(event){
     for(const [pathName, source] of svelteEntries){
       let css = ''; let jsCode = ''; let error = null;
       try {
-        const c = compile(source, { generate:'dom', filename: pathName, css:'injected' });
+        const c = compile(source, { generate:'dom', filename: pathName, css: false });
         jsCode = c.js.code;
-        // Inline CSS si présent (simple concat) — amélioration future: module séparé
-        if(c.css && c.css.code){
-          jsCode = `/* <style> inlined */\n` + jsCode + `\n/*# sourceMappingURL omitted */`;
+        // Inclure le CSS séparément si présent
+        if (c.css && c.css.code) {
+          css = c.css.code;
         }
-        // Collect imports relatifs
+        // Collecter les imports relatifs
         const importMap = [];
         let m;
         while((m = importStmtRegex.exec(jsCode))){
@@ -130,7 +130,7 @@ export async function POST(event){
             if(!spec) continue;
             const resolved = resolveImport(spec, pathName);
             if(resolved) importMap.push({ spec, target: resolved });
-            if(/^(\.\.\/)+routes\//.test(spec) || /^(\.\.?\/)?routes\//.test(spec) || /src\/routes\//.test(spec)){
+            if(/^(\.\.\/)+routes\//.test(spec) || /^(\.\.\/)?routes\//.test(spec) || /src\/routes\//.test(spec)){
               invalidImports.push({ from: pathName, spec });
             }
         }
@@ -144,7 +144,7 @@ export async function POST(event){
             }
           }
         } catch(_e){ /* ignore raw scan */ }
-        modules.push({ path: pathName, jsCode, imports: importMap });
+        modules.push({ path: pathName, jsCode, css, imports: importMap });
       } catch(e){
         modules.push({ path: pathName, error: e.message });
       }
@@ -369,4 +369,22 @@ ${bundleScript}
   } catch(e){
     return json({ success:false, error:e.message }, { status:500 });
   }
+}
+
+// Ajout d'une validation renforcée pour runtimeHtml et alternative aux blobs
+try {
+  if (data.runtimeHtml && typeof data.runtimeHtml === 'string') {
+    // Validation supplémentaire pour s'assurer que runtimeHtml contient un HTML valide
+    if (!data.runtimeHtml.startsWith('<!DOCTYPE html>')) {
+      throw new Error('runtimeHtml invalide : doit commencer par <!DOCTYPE html>');
+    }
+
+    // Alternative aux blobs : injection directe dans un iframe
+    const sanitizedHtml = data.runtimeHtml.replace(/<script/g, '<!--<script').replace(/<\/script>/g, '</script>-->');
+    result.runtimeHtml = sanitizedHtml;
+  } else {
+    console.warn('[compile] runtimeHtml absent ou invalide');
+  }
+} catch (e) {
+  result.runtimeHtml = `<!DOCTYPE html><html><body><pre style='color:#b91c1c'>Erreur runtimeHtml : ${String(e).replace(/</g, '&lt;')}</pre></body></html>`;
 }

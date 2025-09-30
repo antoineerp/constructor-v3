@@ -322,7 +322,7 @@
     while(i<m && j<n){
       if(aLines[i]===bLines[j]){ out.push({ type:'same', text:aLines[i] }); i++; j++; }
       else if(dp[i+1][j] >= dp[i][j+1]){ out.push({ type:'del', text:aLines[i] }); i++; }
-      else { out.push({ type:'add', text:bLines[j] }); j++; }
+      else { out.push({ type:'add', text:bLines[j++] }); }
     }
     while(i<m){ out.push({ type:'del', text:aLines[i++] }); }
     while(j<n){ out.push({ type:'add', text:bLines[j++] }); }
@@ -649,7 +649,7 @@
             try { URL.revokeObjectURL(runtimeUrl); } catch(e) {}
           }
           runtimeUrl = '';
-          if(data.runtimeHtml && typeof data.runtimeHtml === 'string'){
+          if(data.runtimeHtml && typeof data.runtimeHtml === 'string' && data.runtimeHtml.startsWith('<!DOCTYPE html>')){
             try { 
               const blobR = new Blob([data.runtimeHtml], { type:'text/html' }); 
               runtimeUrl = URL.createObjectURL(blobR);
@@ -661,7 +661,7 @@
               runtimeUrl = '';
             }
           } else {
-            console.warn('[compileSelected] pas de runtimeHtml valide dans la réponse');
+            console.warn('[compileSelected] pas de runtimeHtml valide ou contenu non conforme');
           }
           const html = data.modules ? '<!-- modules compiled -->' : '';
           if(data.modules){
