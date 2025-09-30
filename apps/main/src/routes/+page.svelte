@@ -19,7 +19,20 @@
 </script>
 
 <div class="max-w-4xl mx-auto py-8 px-4">
-  <h1 class="text-2xl font-bold mb-6 text-indigo-700">Constructor V3</h1>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-indigo-700">Constructor V3</h1>
+    <div class="flex gap-3">
+      <a href="/generator" class="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-medium">
+        🏗️ Générateur
+      </a>
+      <a href="/sandbox" class="px-4 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors text-sm font-medium">
+        🛠️ Sandbox
+      </a>
+      <a href="/admin" class="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-medium">
+        ⚙️ Admin
+      </a>
+    </div>
+  </div>
   <div class="flex gap-4 mb-6">
   <button class="px-4 py-2 rounded border bg-white text-sm font-medium" class:border-indigo-600={activeTab==='site'} class:text-indigo-700={activeTab==='site'} class:border-gray-300={activeTab!=='site'} on:click={()=>activeTab='site'}>Génération de site</button>
   <button class="px-4 py-2 rounded border bg-white text-sm font-medium" class:border-indigo-600={activeTab==='chat'} class:text-indigo-700={activeTab==='chat'} class:border-gray-300={activeTab!=='chat'} on:click={()=>activeTab='chat'}>Génération de composants</button>
