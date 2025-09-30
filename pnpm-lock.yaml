@@ -114,52 +114,6 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.17)(jsdom@25.0.1)
 
-  apps/admin:
-    dependencies:
-      '@supabase/supabase-js':
-        specifier: ^2.45.0
-        version: 2.57.4
-      chart.js:
-        specifier: ^4.4.0
-        version: 4.5.0
-      chartjs-adapter-date-fns:
-        specifier: ^3.0.0
-        version: 3.0.0(chart.js@4.5.0)(date-fns@4.1.0)
-    devDependencies:
-      '@sveltejs/adapter-auto':
-        specifier: ^3.0.0
-        version: 3.3.1(@sveltejs/kit@2.43.4(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17)))(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17)))
-      '@sveltejs/kit':
-        specifier: ^2.5.0
-        version: 2.43.4(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17)))(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17))
-      '@sveltejs/vite-plugin-svelte':
-        specifier: ^4.0.0
-        version: 4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17))
-      autoprefixer:
-        specifier: ^10.4.0
-        version: 10.4.21(postcss@8.4.31)
-      eslint:
-        specifier: ^9.0.0
-        version: 9.34.0(jiti@1.21.7)
-      postcss:
-        specifier: ^8.4.0
-        version: 8.4.31
-      svelte:
-        specifier: ^5.0.0
-        version: 5.39.6
-      svelte-check:
-        specifier: ^4.0.0
-        version: 4.3.2(picomatch@4.0.3)(svelte@5.39.6)(typescript@5.9.2)
-      tailwindcss:
-        specifier: ^3.4.0
-        version: 3.4.17
-      typescript:
-        specifier: ^5.0.0
-        version: 5.9.2
-      vite:
-        specifier: ^5.4.0
-        version: 5.4.20(@types/node@20.19.17)
-
   apps/main:
     dependencies:
       '@fortawesome/fontawesome-free':
@@ -226,46 +180,6 @@ importers:
       svelte-preprocess:
         specifier: ^5.1.4
         version: 5.1.4(postcss-load-config@4.0.2(postcss@8.5.6))(postcss@8.5.6)(svelte@5.39.6)(typescript@5.9.2)
-      typescript:
-        specifier: ^5.0.0
-        version: 5.9.2
-      vite:
-        specifier: ^5.4.0
-        version: 5.4.20(@types/node@20.19.17)
-
-  apps/preview:
-    dependencies:
-      socket.io:
-        specifier: ^4.8.0
-        version: 4.8.1
-    devDependencies:
-      '@sveltejs/adapter-auto':
-        specifier: ^3.0.0
-        version: 3.3.1(@sveltejs/kit@2.43.4(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17)))(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17)))
-      '@sveltejs/kit':
-        specifier: ^2.5.0
-        version: 2.43.4(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17)))(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17))
-      '@sveltejs/vite-plugin-svelte':
-        specifier: ^4.0.0
-        version: 4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17))
-      autoprefixer:
-        specifier: ^10.4.0
-        version: 10.4.21(postcss@8.4.31)
-      eslint:
-        specifier: ^9.0.0
-        version: 9.34.0(jiti@1.21.7)
-      postcss:
-        specifier: ^8.4.0
-        version: 8.4.31
-      svelte:
-        specifier: ^5.0.0
-        version: 5.39.6
-      svelte-check:
-        specifier: ^4.0.0
-        version: 4.3.2(picomatch@4.0.3)(svelte@5.39.6)(typescript@5.9.2)
-      tailwindcss:
-        specifier: ^3.4.0
-        version: 3.4.17
       typescript:
         specifier: ^5.0.0
         version: 5.9.2
@@ -1111,9 +1025,6 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@kurkle/color@0.3.4':
-    resolution: {integrity: sha512-M5UknZPHRu3DEDWoipU6sE8PdkZ6Z/S+v4dD+Ke8IaNlpdSQah50lz1KtcFBa2vsdOnwbbnxJwVM4wty6udA5w==}
-
   '@langchain/core@0.3.77':
     resolution: {integrity: sha512-aqXHea9xfpVn6VoCq9pjujwFqrh3vw3Fgm9KFUZJ1cF7Bx5HI62DvQPw8LlRB3NB4dhwBBA1ldAVkkkd1du8nA==}
     engines: {node: '>=18'}
@@ -1496,11 +1407,6 @@ packages:
     resolution: {integrity: sha512-IwQk4yfwLdibDlrXVE04jTZYlLnwsTT2PIOQQGNLWfjavGifnk1JD1LcZjZaBTRcxZu2FfPfNLOE04DSu9lqtQ==}
     peerDependencies:
       acorn: ^8.9.0
-
-  '@sveltejs/adapter-auto@3.3.1':
-    resolution: {integrity: sha512-5Sc7WAxYdL6q9j/+D0jJKjGREGlfIevDyHSQ2eNETHcB1TKlQWHcAo8AS8H1QdjNvSXpvOwNjykDUHPEAyGgdQ==}
-    peerDependencies:
-      '@sveltejs/kit': ^2.0.0
 
   '@sveltejs/adapter-vercel@5.10.2':
     resolution: {integrity: sha512-uWm0jtXbwvXxmELiIXSQ7tcPjlG8roadujxImIxqbKKZ64itZDwTbUsVXYEfUX59LvLjolW9jaODhL6sBTh5NQ==}
@@ -2042,16 +1948,6 @@ packages:
     resolution: {integrity: sha512-7NzBL0rN6fMUW+f7A6Io4h40qQlG+xGmtMxfbnH/K7TAtt8JQWVQK+6g0UXKMeVJoyV5EkkNsErQ8pVD3bLHbA==}
     engines: {node: ^12.17.0 || ^14.13 || >=16.0.0}
 
-  chart.js@4.5.0:
-    resolution: {integrity: sha512-aYeC/jDgSEx8SHWZvANYMioYMZ2KX02W6f6uVfyteuCGcadDLcYVHdfdygsTQkQ4TKn5lghoojAsPj5pu0SnvQ==}
-    engines: {pnpm: '>=8'}
-
-  chartjs-adapter-date-fns@3.0.0:
-    resolution: {integrity: sha512-Rs3iEB3Q5pJ973J93OBTpnP7qoGwvq3nUnoMdtxO+9aoJof7UFcRbWcIDteXuYd1fgAvct/32T9qaLyLuZVwCg==}
-    peerDependencies:
-      chart.js: '>=2.8.0'
-      date-fns: '>=2.0.0'
-
   check-error@2.1.1:
     resolution: {integrity: sha512-OAlb+T7V4Op9OwdkjmguYRqncdlx5JiofwOAUkmTF+jNdHwzTaTs4sRAGpzLF3oOz5xAyDGrPgeIDFQmDOTiJw==}
     engines: {node: '>= 16'}
@@ -2181,9 +2077,6 @@ packages:
   data-view-byte-offset@1.0.1:
     resolution: {integrity: sha512-BS8PfmtDGnrgYdOonGZQdLZslWIeCGFP9tpan0hi1Co2Zr2NKADsvGYA8XxuG/4UWgJ6Cjtv+YJnB6MM69QGlQ==}
     engines: {node: '>= 0.4'}
-
-  date-fns@4.1.0:
-    resolution: {integrity: sha512-Ukq0owbQXxa/U3EGtsdVBkR1w7KOQ5gIBqdH2hkvknzZPYvBxb/aa6E8L7tmjFtkwZBu3UXBbjIgPo/Ez4xaNg==}
 
   debug@3.2.7:
     resolution: {integrity: sha512-CFjzYYAi4ThfiQvizrFQevTTXHtnCqWfe7x1AhgEscTz6ZbLbfoLRLPugTQyBth6f8ZERVUSyWHFD/7Wu4t1XQ==}
@@ -2960,9 +2853,6 @@ packages:
   import-fresh@3.3.1:
     resolution: {integrity: sha512-TR3KfrTZTYLPB6jUjfx6MF9WcWrHL9su5TObK4ZkYgBdWKPOFoSoQIdEuTuR82pmtxH2spWG9h6etwfr1pLBqQ==}
     engines: {node: '>=6'}
-
-  import-meta-resolve@4.2.0:
-    resolution: {integrity: sha512-Iqv2fzaTQN28s/FwZAoFq0ZSs/7hMAHJVX+w8PZl3cY19Pxk6jFFalxQoIfW2826i/fDLXv8IiEZRIT0lDuWcg==}
 
   imurmurhash@0.1.4:
     resolution: {integrity: sha512-JmXMZ6wuvDmLiHEml9ykzqO6lwFbof0GG4IkcGaENdCRDDmMVnny7s5HsIgHCbaq0w2MyPhDqkhTUgS2LU2PHA==}
@@ -3815,10 +3705,6 @@ packages:
 
   postcss-value-parser@4.2.0:
     resolution: {integrity: sha512-1NNCs6uurfkVbeXG4S8JFT9t19m45ICnif8zWLd5oPSZ50QnwMfK+H3jv408d4jw/7Bttv5axS5IiHoLaVNHeQ==}
-
-  postcss@8.4.31:
-    resolution: {integrity: sha512-PS08Iboia9mts/2ygV3eLpY5ghnUcfLV/EXTOW1E2qYxJKGGBUtNjN76FYHnMs36RmARn41bC0AZmn+rR0OVpQ==}
-    engines: {node: ^10 || ^12 || >=14}
 
   postcss@8.5.6:
     resolution: {integrity: sha512-3Ybi1tAuwAP9s0r1UQ2J4n5Y0G05bJkpUIO0/bI9MhwmD70S5aTWbXGBwxHrelT+XM1k6dM0pk+SwNkpTRN7Pg==}
@@ -5340,8 +5226,6 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@kurkle/color@0.3.4': {}
-
   '@langchain/core@0.3.77(openai@4.104.0(ws@8.18.3)(zod@3.25.76))':
     dependencies:
       '@cfworker/json-schema': 4.1.1
@@ -5809,11 +5693,6 @@ snapshots:
   '@sveltejs/acorn-typescript@1.0.5(acorn@8.15.0)':
     dependencies:
       acorn: 8.15.0
-
-  '@sveltejs/adapter-auto@3.3.1(@sveltejs/kit@2.43.4(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17)))(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17)))':
-    dependencies:
-      '@sveltejs/kit': 2.43.4(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17)))(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17))
-      import-meta-resolve: 4.2.0
 
   '@sveltejs/adapter-vercel@5.10.2(@sveltejs/kit@2.43.4(@sveltejs/vite-plugin-svelte@4.0.4(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17)))(svelte@5.39.6)(vite@5.4.20(@types/node@20.19.17)))(rollup@4.52.2)':
     dependencies:
@@ -6341,16 +6220,6 @@ snapshots:
 
   asynckit@0.4.0: {}
 
-  autoprefixer@10.4.21(postcss@8.4.31):
-    dependencies:
-      browserslist: 4.26.2
-      caniuse-lite: 1.0.30001736
-      fraction.js: 4.3.7
-      normalize-range: 0.1.2
-      picocolors: 1.1.1
-      postcss: 8.4.31
-      postcss-value-parser: 4.2.0
-
   autoprefixer@10.4.21(postcss@8.5.6):
     dependencies:
       browserslist: 4.26.2
@@ -6485,15 +6354,6 @@ snapshots:
 
   chalk@5.6.2: {}
 
-  chart.js@4.5.0:
-    dependencies:
-      '@kurkle/color': 0.3.4
-
-  chartjs-adapter-date-fns@3.0.0(chart.js@4.5.0)(date-fns@4.1.0):
-    dependencies:
-      chart.js: 4.5.0
-      date-fns: 4.1.0
-
   check-error@2.1.1: {}
 
   chokidar@3.6.0:
@@ -6611,8 +6471,6 @@ snapshots:
       call-bound: 1.0.4
       es-errors: 1.3.0
       is-data-view: 1.0.2
-
-  date-fns@4.1.0: {}
 
   debug@3.2.7:
     dependencies:
@@ -7553,8 +7411,6 @@ snapshots:
       parent-module: 1.0.1
       resolve-from: 4.0.0
 
-  import-meta-resolve@4.2.0: {}
-
   imurmurhash@0.1.4: {}
 
   indent-string@4.0.0: {}
@@ -8320,12 +8176,6 @@ snapshots:
       util-deprecate: 1.0.2
 
   postcss-value-parser@4.2.0: {}
-
-  postcss@8.4.31:
-    dependencies:
-      nanoid: 3.3.11
-      picocolors: 1.1.1
-      source-map-js: 1.2.1
 
   postcss@8.5.6:
     dependencies:

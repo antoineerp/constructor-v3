@@ -380,8 +380,7 @@ Turborepo gère intelligemment le cache des builds :
 {
   "builds": [
     { "src": "apps/main/package.json", "use": "@vercel/node" },
-    { "src": "apps/preview/package.json", "use": "@vercel/node" },
-    { "src": "apps/admin/package.json", "use": "@vercel/node" }
+
   ]
 }
 ```
@@ -458,7 +457,7 @@ pnpm test:collab    # Tests collaboration temps réel
    - Composants UI → `packages/ui/`
    - Logique IA → `packages/ai/`  
    - Interface utilisateur → `apps/main/`
-   - Administration → `apps/admin/`
+
 
 3. **Tests** : Ajouter tests unitaires et E2E
 

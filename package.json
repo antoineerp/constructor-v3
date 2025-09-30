@@ -16,8 +16,6 @@
     "quality": "pnpm format:check && pnpm lint && pnpm --filter=main check",
     "refresh-lock": "rm -f pnpm-lock.yaml && pnpm install",
     "dev:main": "turbo run dev --filter=main",
-    "dev:preview": "turbo run dev --filter=preview",
-    "dev:admin": "turbo run dev --filter=admin",
     "storybook": "turbo run storybook --filter=main",
     "build:storybook": "turbo run build:storybook --filter=main",
     "init-templates": "./scripts/init-templates.sh",
@@ -27,7 +25,7 @@
     "dev:temp-app": "node ./scripts/dev-temp-app.js",
     "ci": "pnpm lint && pnpm --filter=main check && pnpm --filter=main test && pnpm --filter=main build",
     "ci:storybook": "pnpm --filter=main build:storybook",
-    "lint:staged": "eslint --fix --ext .js,.ts,.svelte apps/main/src apps/admin/src apps/preview/src packages/ui/src || true"
+    "lint:staged": "eslint --fix --ext .js,.ts,.svelte apps/main/src packages/ui/src || true"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
