@@ -11,7 +11,7 @@
   async function loadExternalLibs(){
     externalLoading = true; externalError='';
     try {
-      const r = await fetch('/api/external/list?ts='+Date.now());
+  const r = await fetch('/api/external/list', { headers:{'Cache-Control':'no-store','X-Req-Id':'admin-ext-'+Date.now()} });
       if(!r.ok){ throw new Error('HTTP '+r.status); }
       const j = await r.json(); externalLibs = j.libraries || [];
     } catch(e){ externalError = e.message; externalLibs = []; }
@@ -61,9 +61,9 @@
       if(!res.ok) throw new Error(res.error||'Erreur compileRapid');
       let jsCode = res.js || '';
       const cssCode = res.css || '';
-      // Neutralise imports relatifs pour éviter erreurs de résolution en sandbox rapide
-      jsCode = jsCode.replace(/import\s+[^;]+?from\s+['"](\.\.\/|\.\/)[^'"\n]+['"];?/g, '// [fast-rewrite] relative import supprimé');
-      const bootstrap = `\n;(()=>{function pickExport(mod){let C=mod.Component||mod.default||mod.App||mod; if(C&&C.default) C=C.default; return C;} try{const C=pickExport(globalThis); if(typeof C!=='function') throw new Error('Export composant introuvable'); new C({ target: document.getElementById('app'), props:{ label:'Fast'} });}catch(e){ const pre=document.createElement('pre'); pre.style.cssText='color:#b91c1c;font:12px monospace;white-space:pre-wrap;padding:8px'; pre.textContent='Fast preview error: '+(e.message||e); document.body.innerHTML=''; document.body.appendChild(pre);} })();`;
+  // Réécriture basique des imports relatifs -> /runtime/fast/<path>
+  jsCode = jsCode.replace(/import\s+([^;]+?)from\s+['"](\.\.\/|\.\/)([^'"\n]+)['"];?/g, (m, what, pre, p)=> `import ${what}from '/runtime/fast/${p.replace(/^\.\//,'')}'`);
+  const bootstrap = `\n;(()=>{function pickExport(mod){let C=mod.Component||mod.default||mod.App||mod; if(C&&C.default) C=C.default; return C;} try{const C=pickExport(globalThis); if(typeof C!=='function') throw new Error('Export composant introuvable'); new C({ target: document.getElementById('app'), props:{ label:'Fast'} });}catch(e){ try{ const pre=document.createElement('pre'); pre.style.cssText='color:#b91c1c;font:12px monospace;white-space:pre-wrap;padding:8px'; pre.textContent='Fast preview error: '+(e.message||e); if(document && document.body && typeof document.body.appendChild==='function'){ document.body.innerHTML=''; document.body.appendChild(pre); } }catch{} }} )();`;
       if(lastFastBlob){ try { URL.revokeObjectURL(lastFastBlob); } catch{} }
       const html = ['<!DOCTYPE html><html><head><meta charset="utf-8"><style>', cssCode, '</style></head><body>','<div id="app"></div>','<scr'+'ipt type="module">',jsCode,bootstrap,'</scr'+'ipt></body></html>'].join('');
       const blobHtml = new Blob([html], { type:'text/html' });
@@ -73,12 +73,13 @@
   }
 
   let fastIframeSrc = '';
+  let lineCount = (previewCode.match(/\n/g)||[]).length + 1;
   let fastError = '';
   async function runPreview(){
     previewLoading = true; previewError=''; previewHeuristics=[]; rawError=''; rawJsPreview='';
     try {
       if(previewDiagnostic){
-        const rRaw = await fetch('/api/compile/raw?ts=' + Date.now(), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: previewCode, generate:'ssr' }) });
+  const rRaw = await fetch('/api/compile/raw', { method:'POST', headers:{'Content-Type':'application/json','Cache-Control':'no-store'}, body: JSON.stringify({ code: previewCode, generate:'ssr' }) });
         if(!rRaw.ok){
           try { const j = await rRaw.json(); rawError = '[raw] '+(j.error||'Erreur inconnue'); } catch { rawError='[raw] Erreur compilation'; }
         } else {
@@ -86,7 +87,7 @@
           if(jRaw.rewrites){ rewritesMeta = jRaw.rewrites; importWarnings = jRaw.rewrites.warnings||[]; }
         }
       }
-      const r = await fetch('/api/compile/component?ts=' + Date.now(), { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ code: previewCode, debug:true, strict: previewStrict, enableRendererNormalization:false }) });
+  const r = await fetch('/api/compile/component', { method:'POST', headers:{ 'Content-Type':'application/json','Cache-Control':'no-store' }, body: JSON.stringify({ code: previewCode, debug:true, strict: previewStrict, enableRendererNormalization:false }) });
       if(!r.ok){
         let txt = await r.text();
         try { const j = JSON.parse(txt); previewError = j.error || ('HTTP '+r.status); } catch { previewError = txt.slice(0,400); }
@@ -107,9 +108,11 @@
     }
   }
 
-  // Diff SSR vs Fast (DOM) très simple (ligne à ligne) – affiché sur demande
+  // Diff SSR vs Fast (DOM) – pagination
   let showDiff = false;
-  $: diffBlocks = showDiff ? computeDiff(previewSsrJs, previewDomJs) : [];
+  let diffLimit = 200;
+  $: diffBlocksAll = showDiff ? computeDiff(previewSsrJs, previewDomJs) : [];
+  $: diffBlocks = diffBlocksAll.slice(0, diffLimit);
   function computeDiff(a, b){
     if(!a || !b) return [];
     const al = a.split(/\n/); const bl = b.split(/\n/);
@@ -118,20 +121,40 @@
       const L = al[i]||''; const R = bl[i]||'';
       if(L!==R) out.push({ i:i+1, left:L, right:R });
     }
-    return out.slice(0,200); // limite
+    return out;
   }
+  function loadMoreDiff(){ diffLimit += 200; }
 
   // ===== Overlay Hydration =====
   let hydrationMessage = '';
   let overlayVisible = false;
-  function showHydrationError(msg){ hydrationMessage = msg; overlayVisible = true; const el = document.getElementById('hydration-overlay'); const msgEl = document.getElementById('hydration-overlay-msg'); if(el&&msgEl){ msgEl.textContent = msg; el.classList.remove('hidden'); } }
+  let hydrationBridgeFlag = false;
+  function showHydrationError(msg){
+    hydrationMessage = msg;
+    overlayVisible = true;
+    const el = document.getElementById('hydration-overlay');
+    const msgEl = document.getElementById('hydration-overlay-msg');
+    if(el&&msgEl){ msgEl.textContent = msg; el.classList.remove('hidden'); }
+  }
   function hideOverlay(){ overlayVisible=false; const el = document.getElementById('hydration-overlay'); if(el){ el.classList.add('hidden'); } }
   let messageHandler;
   onMount(()=>{
-    messageHandler = (e)=>{ try { if(e.data && e.data.type==='hydration-error'){ showHydrationError(e.data.message); } } catch{} };
-    window.addEventListener('message', messageHandler);
+    if(!hydrationBridgeFlag){
+      hydrationBridgeFlag = true;
+  // Correction typo: écouter correctement 'hydration-error' (ancienne faute 'hydrration-error' conservée pour compat retro)
+  messageHandler = (e)=>{ try { if(e.data && (e.data.type==='hydration-error' || e.data.type==='hydrration-error')){ showHydrationError(e.data.message); } } catch{} };
+      window.addEventListener('message', messageHandler);
+    }
   });
   onDestroy(()=>{ if(messageHandler) window.removeEventListener('message', messageHandler); if(lastFastBlob){ try{ URL.revokeObjectURL(lastFastBlob);}catch{} } });
+
+  // Toast system
+  let toasts = [];
+  function pushToast(msg, type='info', ttl=4000){
+    const id = Math.random().toString(36).slice(2);
+    toasts = [...toasts, { id, msg, type }];
+    setTimeout(()=>{ toasts = toasts.filter(t=> t.id!==id); }, ttl);
+  }
 
   // ====== IA ======
   import AiStatusBadge from '$lib/AiStatusBadge.svelte';
@@ -139,7 +162,7 @@
   async function loadAIStatus() {
     aiLoading = true;
     try {
-      const r = await fetch('/api/ai/status?ts='+Date.now());
+  const r = await fetch('/api/ai/status', { headers:{'Cache-Control':'no-store','X-Req-Id':'admin-ai-'+Date.now()} });
       const j = await r.json();
       if(j.list){ aiList = j.list; }
       aiMap = j.providers || {}; aiAny = !!j.any; aiDetail = j.detail||{};
@@ -160,6 +183,18 @@
   let usageStats = [];
   let catalogLoading = false; let catalogError='';
 
+  // ====== DIAGNOSTIC ======
+  let diagnosticData = null; let diagnosticLoading = false; let diagnosticError = '';
+  async function loadDiagnostic(){
+    diagnosticLoading = true; diagnosticError = '';
+    try {
+      const r = await fetch('/api/diagnostic/compile', { headers:{'Cache-Control':'no-store','X-Req-Id':'admin-diag-'+Date.now()} });
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      diagnosticData = await r.json();
+    } catch(e){ diagnosticError = e.message; diagnosticData = null; }
+    finally { diagnosticLoading = false; }
+  }
+
   // ====== MODALES ======
   let showNewTemplateModal = false;
   let showNewComponentModal = false;
@@ -174,7 +209,7 @@
   async function refreshCatalog(){
     catalogLoading = true; catalogError='';
     try {
-      const r = await fetch('/api/catalog?ts='+Date.now());
+  const r = await fetch('/api/catalog', { headers:{'Cache-Control':'no-store','X-Req-Id':'admin-catalog-'+Date.now()} });
       if(!r.ok) throw new Error('HTTP '+r.status);
       const j = await r.json();
       if(!j.success) throw new Error(j.error||'Échec catalog');
@@ -203,7 +238,7 @@
       newTemplate = { name: '', type: 'e-commerce', description: '', structure: '' };
       showNewTemplateModal = false;
       await refreshCatalog();
-    } catch (error) { alert('Erreur lors de la création du template: ' + error.message); }
+  } catch (error) { pushToast('Erreur création template: '+ error.message, 'error'); }
   }
 
   async function createComponent() {
@@ -215,7 +250,7 @@
       stats.totalComponents = components.length;
       newComponent = { name: '', type: 'button', category: 'ui', code: '' };
       showNewComponentModal = false;
-    } catch (error) { alert('Erreur lors de la création du composant: ' + error.message); }
+  } catch (error) { pushToast('Erreur création composant: '+ error.message, 'error'); }
   }
 
   function formatDate(dateString) { return new Date(dateString).toLocaleDateString('fr-FR'); }
@@ -223,6 +258,8 @@
     const badges = { draft: 'bg-yellow-100 text-yellow-800', completed: 'bg-green-100 text-green-800', published: 'bg-blue-100 text-blue-800' };
     return badges[status] || 'bg-gray-100 text-gray-800';
   }
+  function shortId(id){ return id ? String(id).slice(0,8) : ''; }
+  function formatBytes(n){ if(!n && n!==0) return ''; const u=['B','KB','MB','GB']; let i=0, v=n; while(v>=1024 && i<u.length-1){ v/=1024; i++; } return (i? v.toFixed(1): v)+' '+u[i]; }
 </script>
 
 <svelte:head>
@@ -251,6 +288,20 @@
           </Button>
         </div>
       </div>
+
+        {#if toasts.length}
+          <div class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 w-64">
+            {#each toasts as t}
+              <div class="px-3 py-2 rounded text-xs shadow bg-white border animate-fade-in"
+                class:border-red-300={t.type==='error'} class:text-red-700={t.type==='error'}
+                class:border-green-300={t.type==='success'} class:text-green-700={t.type==='success'}
+                class:border-gray-200={t.type!=='error' && t.type!=='success'} class:text-gray-700={t.type!=='error' && t.type!=='success'}
+                role="status">
+                {t.msg}
+              </div>
+            {/each}
+          </div>
+        {/if}
     </div>
   </div>
   
@@ -313,6 +364,13 @@
         >
           <i class="fas fa-boxes-stacked mr-2"></i>
           Librairies
+        </button>
+        <button
+          class="py-4 px-1 border-b-2 font-medium text-sm {activeTab === 'diagnostic' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+          on:click={() => { activeTab = 'diagnostic'; loadDiagnostic(); }}
+        >
+          <i class="fas fa-stethoscope mr-2"></i>
+          Diagnostic
         </button>
       </nav>
     </div>
@@ -379,7 +437,7 @@
             {#each projects.slice(0, 5) as project}
               <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                 <div>
-                  <p class="font-medium text-gray-900">{project.name}</p>
+                  <p class="font-medium text-gray-900 flex items-center gap-2">{project.name}{#if project.id}<button class="text-[10px] px-1 py-0.5 rounded bg-gray-200 hover:bg-gray-300" title={project.id} on:click={() => { navigator.clipboard.writeText(project.id); pushToast('ID copié'); }}>{shortId(project.id)}</button>{/if}</p>
                   <p class="text-sm text-gray-600">{project.description || 'Pas de description'}</p>
                 </div>
                 <span class="px-2 py-1 text-xs font-medium rounded-full {getStatusBadge(project.status)}">
@@ -442,7 +500,7 @@
                       <div class="border rounded p-3 bg-gray-50 relative">
                         <div class="flex items-center justify-between mb-2">
                           <h4 class="text-sm font-semibold text-gray-800">{c.name}</h4>
-                          <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-700">{Math.round(c.size/10)/100} KB • {c.lines} l.</span>
+                          <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-700">{formatBytes(c.size)} • {c.lines} l.</span>
                         </div>
                         <pre class="text-[10px] leading-4 max-h-40 overflow-auto bg-gray-800 text-gray-100 p-2 rounded">{c.snippet}</pre>
                         <div class="mt-2 flex gap-2">
@@ -497,7 +555,10 @@
                 <button class="px-2 py-1 rounded bg-blue-600 text-white disabled:opacity-40" on:click={runPreview} disabled={previewLoading}>{previewLoading ? 'Compilation...' : 'Compiler'}</button>
               </div>
             </div>
-            <textarea class="w-full h-72 font-mono text-xs p-2 border rounded bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500" bind:value={previewCode}></textarea>
+            <div class="relative">
+              <textarea class="w-full h-72 font-mono text-xs p-2 border rounded bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10" bind:value={previewCode} on:input={(e)=> lineCount = (e.target.value.match(/\n/g)||[]).length + 1}></textarea>
+              <div class="absolute bottom-1 right-2 text-[10px] text-gray-500 bg-white/70 px-1 rounded">{lineCount} l.</div>
+            </div>
             {#if previewError}
               <div class="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 p-2 rounded">{previewError}</div>
             {/if}
@@ -517,6 +578,20 @@
             {#if previewHeuristics.length}
               <div class="mt-3 text-[11px] text-gray-600 flex flex-wrap gap-1">{#each previewHeuristics as h}<span class="px-1.5 py-0.5 bg-gray-200 rounded">{h}</span>{/each}</div>
             {/if}
+            {#if importWarnings.length}
+              <div class="mt-2 text-[10px] bg-amber-50 border border-amber-200 rounded p-2 text-amber-800">
+                <div class="font-semibold mb-1">Import Warnings ({importWarnings.length})</div>
+                <ul class="space-y-0.5 max-h-32 overflow-auto">
+                  {#each importWarnings as w}<li class="truncate" title={w}>{w}</li>{/each}
+                </ul>
+              </div>
+            {/if}
+            {#if rewritesMeta}
+              <details class="mt-2 text-[10px]">
+                <summary class="cursor-pointer text-gray-600">Réécritures Imports</summary>
+                <pre class="mt-1 max-h-40 overflow-auto bg-gray-900 text-gray-100 p-2 rounded">{JSON.stringify(rewritesMeta, null, 2)}</pre>
+              </details>
+            {/if}
           </div>
           <div>
             <h3 class="text-sm font-semibold text-gray-700 mb-2">Résultat</h3>
@@ -535,7 +610,10 @@
             </div>
             {#if showDiff}
               <div class="mt-3 border rounded bg-gray-900 text-gray-100 max-h-64 overflow-auto text-[10px] p-2">
-                <div class="mb-1 text-xs text-blue-300">Diff (max 200 lignes divergentes) – gauche=SSR, droite=DOM</div>
+                <div class="mb-1 text-xs text-blue-300 flex items-center justify-between">
+                  <span>Diff (lignes divergentes) – gauche=SSR, droite=DOM</span>
+                  <span class="text-gray-400">{diffBlocks.length}/{diffBlocksAll.length}</span>
+                </div>
                 {#each diffBlocks as d}
                   <div class="grid grid-cols-2 gap-2 mb-1">
                     <div>
@@ -547,6 +625,9 @@
                   </div>
                 {/each}
                 {#if !diffBlocks.length}<div class="text-gray-400">Aucune différence détectée.</div>{/if}
+                {#if diffBlocksAll.length > diffBlocks.length}
+                  <div class="mt-2"><button class="px-2 py-1 rounded bg-indigo-600 text-white" on:click={loadMoreDiff}>Charger plus</button></div>
+                {/if}
               </div>
             {/if}
           </div>
@@ -564,6 +645,169 @@
               <li><code class="px-1.5 py-0.5 bg-gray-100 rounded text-[11px]">{p}</code></li>
             {/each}
           </ul>
+        {/if}
+      </Card>
+    {/if}
+
+    {#if activeTab === 'diagnostic'}
+      <Card title="Diagnostic Compilation" subtitle="État des systèmes de compilation Svelte">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            {#if diagnosticLoading}
+              <div class="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+              <span class="text-sm text-gray-600">Diagnostic en cours...</span>
+            {:else if diagnosticData}
+              <div class="flex items-center gap-2">
+                <div class="w-3 h-3 rounded-full {diagnosticData.status === 'healthy' ? 'bg-green-500' : diagnosticData.status === 'issues_detected' ? 'bg-yellow-500' : 'bg-red-500'}"></div>
+                <span class="text-sm font-medium {diagnosticData.status === 'healthy' ? 'text-green-700' : diagnosticData.status === 'issues_detected' ? 'text-yellow-700' : 'text-red-700'}">{diagnosticData.status === 'healthy' ? 'Système opérationnel' : diagnosticData.status === 'issues_detected' ? 'Problèmes détectés' : 'Erreur système'}</span>
+              </div>
+            {/if}
+          </div>
+          <button class="text-xs px-3 py-1 rounded bg-blue-600 text-white disabled:opacity-40" on:click={loadDiagnostic} disabled={diagnosticLoading}>
+            {diagnosticLoading ? 'Test...' : 'Tester'}
+          </button>
+        </div>
+
+        {#if diagnosticError}
+          <div class="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+            <strong>Erreur:</strong> {diagnosticError}
+          </div>
+        {/if}
+
+        {#if diagnosticData}
+          <div class="grid md:grid-cols-2 gap-6">
+            <!-- Svelte Info -->
+            <div class="space-y-4">
+              <h3 class="font-semibold text-gray-800 flex items-center gap-2">
+                <i class="fas fa-code-branch text-purple-600"></i>
+                Svelte Runtime
+              </h3>
+              <div class="bg-gray-50 p-3 rounded text-sm">
+                <div class="grid grid-cols-2 gap-2">
+                  <span class="text-gray-600">Version:</span>
+                  <code class="bg-white px-2 py-1 rounded text-xs">{diagnosticData.svelte?.version || 'N/A'}</code>
+                </div>
+              </div>
+
+              <!-- Modules disponibles -->
+              <div>
+                <h4 class="text-sm font-medium text-gray-700 mb-2">Modules Internes</h4>
+                <div class="space-y-1 text-xs">
+                  {#each Object.entries(diagnosticData.modules?.available || {}) as [path, info]}
+                    <div class="flex items-center justify-between p-2 bg-gray-50 rounded">
+                      <code class="text-gray-700 flex-1 mr-2">{path.replace('node_modules/svelte/', '')}</code>
+                      <div class="flex items-center gap-1">
+                        <div class="w-2 h-2 rounded-full {info.exists ? 'bg-green-500' : 'bg-red-500'}"></div>
+                        {#if info.exists && info.size}
+                          <span class="text-gray-500">{formatBytes(info.size)}</span>
+                        {/if}
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            </div>
+
+            <!-- Tests Compilation -->
+            <div class="space-y-4">
+              <h3 class="font-semibold text-gray-800 flex items-center gap-2">
+                <i class="fas fa-cogs text-blue-600"></i>
+                Tests Compilation
+              </h3>
+              
+              <div class="space-y-3">
+                <div class="p-3 bg-gray-50 rounded">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium">DOM Compiler</span>
+                    <div class="w-2 h-2 rounded-full {diagnosticData.runtime?.simpleCompile?.success ? 'bg-green-500' : 'bg-red-500'}"></div>
+                  </div>
+                  {#if diagnosticData.runtime?.simpleCompile?.success}
+                    <div class="text-xs text-gray-600">
+                      JS: {formatBytes(diagnosticData.runtime.simpleCompile.jsSize)} | 
+                      CSS: {formatBytes(diagnosticData.runtime.simpleCompile.cssSize)} |
+                      Imports: {diagnosticData.runtime.simpleCompile.hasImports ? 'Oui' : 'Non'}
+                    </div>
+                  {:else}
+                    <div class="text-xs text-red-600">{diagnosticData.runtime?.simpleCompile?.error || 'Échec'}</div>
+                  {/if}
+                </div>
+
+                <div class="p-3 bg-gray-50 rounded">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium">SSR Compiler</span>
+                    <div class="w-2 h-2 rounded-full {diagnosticData.runtime?.ssrCompile?.success ? 'bg-green-500' : 'bg-red-500'}"></div>
+                  </div>
+                  {#if diagnosticData.runtime?.ssrCompile?.success}
+                    <div class="text-xs text-gray-600">JS: {formatBytes(diagnosticData.runtime.ssrCompile.jsSize)}</div>
+                  {:else}
+                    <div class="text-xs text-red-600">{diagnosticData.runtime?.ssrCompile?.error || 'Échec'}</div>
+                  {/if}
+                </div>
+              </div>
+
+              <!-- Imports détectés -->
+              {#if diagnosticData.runtime?.detectedImports?.length}
+                <div>
+                  <h4 class="text-sm font-medium text-gray-700 mb-2">Imports Générés</h4>
+                  <div class="max-h-32 overflow-auto">
+                    {#each diagnosticData.runtime.detectedImports as imp}
+                      <code class="block text-xs bg-gray-900 text-gray-100 p-1 rounded mb-1">{imp}</code>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            </div>
+          </div>
+
+          <!-- État Global -->
+          <div class="mt-6 pt-4 border-t border-gray-200">
+            <h3 class="font-semibold text-gray-800 mb-3">État Runtime</h3>
+            <div class="grid grid-cols-3 gap-4 text-sm">
+              <div class="bg-blue-50 p-3 rounded text-center">
+                <div class="text-lg font-bold text-blue-600">{diagnosticData.runtime?.globalState?.compileRequests || 0}</div>
+                <div class="text-xs text-blue-700">Requêtes Compile</div>
+              </div>
+              <div class="bg-green-50 p-3 rounded text-center">
+                <div class="text-lg font-bold text-green-600">{diagnosticData.runtime?.globalState?.runtimeBundles || 0}</div>
+                <div class="text-xs text-green-700">Bundles Cache</div>
+              </div>
+              <div class="bg-purple-50 p-3 rounded text-center">
+                <div class="text-lg font-bold text-purple-600">{diagnosticData.runtime?.globalState?.tailwindCache || 0}</div>
+                <div class="text-xs text-purple-700">CSS Cache</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Problèmes détectés -->
+          {#if diagnosticData.issues?.length}
+            <div class="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded">
+              <h4 class="font-medium text-yellow-800 mb-2 flex items-center gap-2">
+                <i class="fas fa-exclamation-triangle"></i>
+                Problèmes Détectés ({diagnosticData.issues.length})
+              </h4>
+              <ul class="text-sm text-yellow-700 space-y-1">
+                {#each diagnosticData.issues as issue}
+                  <li class="flex items-start gap-2">
+                    <i class="fas fa-circle text-xs mt-1.5 text-yellow-500"></i>
+                    {issue}
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
+
+          <div class="mt-4 text-xs text-gray-500 flex justify-between">
+            <span>Diagnostic: {diagnosticData.timestamp}</span>
+            <span>Runtime Node.js: {diagnosticData.runtime?.nodeVersion || 'N/A'}</span>
+          </div>
+        {:else if !diagnosticLoading}
+          <div class="text-center py-8">
+            <i class="fas fa-stethoscope text-gray-400 text-4xl mb-4"></i>
+            <p class="text-gray-500 mb-4">Cliquez sur "Tester" pour diagnostiquer les systèmes de compilation</p>
+            <button class="px-4 py-2 bg-blue-600 text-white rounded" on:click={loadDiagnostic}>
+              Lancer Diagnostic
+            </button>
+          </div>
         {/if}
       </Card>
     {/if}
@@ -586,7 +830,7 @@
               {#each projects as project}
                 <tr class="hover:bg-gray-50">
                   <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm font-medium text-gray-900">{project.name}</div>
+                    <div class="text-sm font-medium text-gray-900 flex items-center gap-2">{project.name}{#if project.id}<button class="text-[10px] px-1 py-0.5 rounded bg-gray-200 hover:bg-gray-300" title={project.id} on:click={() => { navigator.clipboard.writeText(project.id); pushToast('ID copié'); }}>{shortId(project.id)}</button>{/if}</div>
                   </td>
                   <td class="px-6 py-4">
                     <div class="text-sm text-gray-600 max-w-xs truncate">{project.description || 'Pas de description'}</div>
