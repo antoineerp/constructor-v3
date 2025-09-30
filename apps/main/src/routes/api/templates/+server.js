@@ -4,8 +4,8 @@ import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/publi
 
 function getAuthSupabase(request){
   const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
-  // Supabase retiré
-  return { client, authHeader };
+  // Supabase retiré - retourne null pour client
+  return { client: null, authHeader };
 }
 
 export async function GET({ url, request }){

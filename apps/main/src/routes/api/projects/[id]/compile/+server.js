@@ -135,7 +135,7 @@ export async function POST(event){
     for(const [pathName, source] of svelteEntries){
       let css = ''; let jsCode = ''; let error = null;
       try {
-  const c = compile(source, { generate:'dom', filename: pathName, css: 'injected' });
+  const c = compile(source, { generate:'dom', filename: pathName, css: 'injected', runes: false, legacy: true });
         jsCode = c.js.code;
         // Inclure le CSS séparément si présent
         if (c.css && c.css.code) {
@@ -216,7 +216,7 @@ export async function POST(event){
   const openTags = layouts.map((_,i)=> `<L${i} {params} {data}>`).join('');
   const closeTags = layouts.map((_,i)=> `</L${layouts.length-1 - i}>`).join('');
   const wrapperSource = `<script>\n${imports.join('\n')}\nexport let params;\nexport let data;\n</script>\n${openTags}<Page {params} {data}/> ${closeTags}`;
-  const cWrap = compile(wrapperSource, { generate:'dom', filename:`__wrapper__${pattern}.svelte`, css: 'injected' });
+  const cWrap = compile(wrapperSource, { generate:'dom', filename:`__wrapper__${pattern}.svelte`, css: 'injected', runes: false, legacy: true });
       const codes = layouts.map(l=> projectFiles[l]||'').concat(projectFiles[pagePath]||'');
       const hash = hashStr(codes.join('\u0000'));
       wrappers.push({ pattern, dynamic: hasDynamic, paramNames, hash, jsCode: cWrap.js.code });
@@ -229,7 +229,7 @@ export async function POST(event){
     try {
       const entryMod = entry;
       const wrapperSource = `<script>import Page from '${entryMod}'; export let params; export let data;</script><Page {params} {data}/>`;
-  const cWrap = compile(wrapperSource, { generate:'dom', filename:`__wrapper__/.svelte`, css: 'injected' });
+  const cWrap = compile(wrapperSource, { generate:'dom', filename:`__wrapper__/.svelte`, css: 'injected', runes: false, legacy: true });
       wrappers.push({ pattern:'/', dynamic:false, paramNames:[], hash: 'w0', jsCode: cWrap.js.code });
     } catch(_e){ /* ignore fallback failure */ }
   }
@@ -366,7 +366,7 @@ export async function POST(event){
       try {
         const entrySource = projectFiles[entryModule];
         if(entrySource){
-          const ssrCompiled = compile(entrySource, { generate:'ssr', filename: entryModule });
+          const ssrCompiled = compile(entrySource, { generate:'ssr', filename: entryModule, runes: false, legacy: true });
           const ssrCode = ssrCompiled.js.code;
           const module = { exports:{} };
           new Function('module','exports', ssrCode)(module, module.exports);

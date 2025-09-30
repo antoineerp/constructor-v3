@@ -76,7 +76,7 @@ export async function GET(event){
     try {
       // Compile chaque layout + page en SSR pour résoudre dépendances
       for(const lay of [...layouts, match]){
-        const c = compile(files[lay], { generate:'ssr', format:'esm', filename: lay });
+        const c = compile(files[lay], { generate:'ssr', format:'esm', filename: lay, runes: false, legacy: true });
         compiledLayouts.push({ file: lay, js: c.js.code });
       }
     } catch(e){
@@ -85,7 +85,7 @@ export async function GET(event){
     // Compile wrapper SSR
     let wrapperJs, wrapperCss='';
     try {
-      const w = compile(wrapperSource, { generate:'ssr', format:'esm', filename:'__wrapper_ssr.svelte' });
+      const w = compile(wrapperSource, { generate:'ssr', format:'esm', filename:'__wrapper_ssr.svelte', runes: false, legacy: true });
       wrapperJs = w.js.code;
       if(w.css && w.css.code) wrapperCss += w.css.code;
     } catch(e){
@@ -216,7 +216,7 @@ export async function GET(event){
     // Hydratation: compiler version DOM du wrapper pour montée client
     let domWrapperJs=null; let domCompileErr=null;
     try {
-      const wDom = compile(wrapperSource, { generate:'dom', format:'esm', filename:'__wrapper_dom.svelte', hydratable:true });
+      const wDom = compile(wrapperSource, { generate:'dom', format:'esm', filename:'__wrapper_dom.svelte', hydratable:true, runes: false, legacy: true });
       domWrapperJs = wDom.js.code;
     } catch(e){ domCompileErr = e.message; }
 

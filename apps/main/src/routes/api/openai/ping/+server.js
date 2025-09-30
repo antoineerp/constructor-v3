@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 
 import { openaiService } from '$lib/openaiService.js';
 
-export async function GET(){
+export async function POST(){
   try {
     // Envoie une mini requête de test très peu coûteuse
     const prompt = 'Réponds par le mot OK';

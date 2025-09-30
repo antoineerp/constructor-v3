@@ -1,5 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
+// Import conditionnel pour Svelte 5
+let svelteCompile = compile;
 import crypto from 'crypto';
 
 // Simple util interne pour id requête
@@ -56,15 +58,19 @@ export async function POST(event) {
     let autoRepairMeta = null;
     let compiled;
     try {
-      // Configuration adaptée pour l'environnement serverless
+      // Configuration adaptée pour Svelte 5 et environnement serverless
       const compileOptions = { 
         generate: 'dom', 
         css: 'injected', 
         dev: false, 
         hydratable: true,
+        // Options Svelte 5
+        runes: false,
         // Désactiver les optimisations qui peuvent poser problème en serverless
         immutable: false,
-        accessors: false
+        accessors: false,
+        // Forcer la compatibilité
+        legacy: true
       };
       
       compiled = compile(source, compileOptions);
@@ -84,7 +90,7 @@ export async function POST(event) {
             logCtx.autoRepair = 'success';
             let repairedSource = repairJson.fixedCode;
             if(!/<script[\s>]/.test(repairedSource)) repairedSource = `<script>export let props={};</script>\n` + repairedSource;
-            compiled = compile(repairedSource, { generate:'dom', css:'injected', dev:false, hydratable:true });
+            compiled = compile(repairedSource, { generate:'dom', css:'injected', dev:false, hydratable:true, runes:false, legacy:true });
           } else {
             autoRepairMeta = { attempted:true, success:false, mode:'dom-compile-syntax', reason: repairJson?.error || 'repair-no-change' };
             logCtx.autoRepair = 'failed';

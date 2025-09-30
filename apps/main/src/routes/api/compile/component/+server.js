@@ -154,7 +154,7 @@ export async function POST(event) {
 
     // Compiler composant principal (SSR) – avec tentative d'auto-réparation si erreur syntaxe
     let compiled;
-    try { compiled = compile(source, { generate:'ssr', hydratable:true, filename:'Component.svelte' }); }
+    try { compiled = compile(source, { generate:'ssr', hydratable:true, filename:'Component.svelte', runes:false, legacy:true }); }
     catch(e){
       const loc = e.start ? { line:e.start.line, column:e.start.column } : null;
       const compileErrMsg = e.message || '';
@@ -177,7 +177,7 @@ export async function POST(event) {
               const repairedAfterLib = rewriteLibImports(repairedSource, meta, dependencies);
               const repairedAfterUnknown = injectUnknownComponentPlaceholders(repairedAfterLib, meta);
               source = repairedAfterUnknown;
-              compiled = compile(source, { generate:'ssr', hydratable:true, filename:'Component.svelte' });
+              compiled = compile(source, { generate:'ssr', hydratable:true, filename:'Component.svelte', runes:false, legacy:true });
               try { autoRepairMeta.diff = { beforeHash: codeHash, changes: (repairJson.fixedCode !== originalSource ? '1+' : '0'), patchPreview: (repairJson.fixedCode.split('\n').slice(0,8).join('\n')) }; } catch {}
             } catch(reComp2){
               autoRepairMeta.compileError = reComp2.message;
@@ -212,7 +212,7 @@ export async function POST(event) {
 
     // Build DOM version pour hydratation
     let domJsCode=null, domCssCode='', domCompileError=null;
-    try { const domCompiled = compile(source, { generate:'dom', hydratable:true, filename:'Component.svelte' }); domJsCode = domCompiled.js.code; domCssCode = domCompiled.css?.code || ''; }
+    try { const domCompiled = compile(source, { generate:'dom', hydratable:true, filename:'Component.svelte', runes:false, legacy:true }); domJsCode = domCompiled.js.code; domCssCode = domCompiled.css?.code || ''; }
     catch(e){ domCompileError = e.message; }
 
     // Require environment
