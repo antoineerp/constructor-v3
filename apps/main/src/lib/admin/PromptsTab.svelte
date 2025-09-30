@@ -43,6 +43,7 @@
                 class="text-xs px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700"
                 on:click={() => navigator.clipboard.writeText(p)}
                 title="Copier le nom du template"
+                aria-label="Copier le template {p}"
               >
                 <i class="fas fa-copy"></i>
               </button>

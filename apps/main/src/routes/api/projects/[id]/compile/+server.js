@@ -39,7 +39,7 @@ export async function POST(event){
   } catch(_e) {
     return json({ success:false, error:'Invalid JSON body' }, { status:400 });
   }
-  const { entries = [], files: injectedFiles, file, autoFix, external } = body;
+  const { entries = [], files: injectedFiles, file, autoFix, external = false } = body;
   try {
     let projectFiles = injectedFiles;
     if(!projectFiles){
@@ -382,7 +382,15 @@ export async function POST(event){
       if(external){
         // Mode CDN externe: ne pas injecter les data:URL internes pour svelte/internal, utiliser esm.sh
         const cdnImportMap = { imports: { 'svelte': 'https://esm.sh/svelte@5', 'svelte/': 'https://esm.sh/svelte@5/' } };
-        const cdnMapJson = JSON.stringify(cdnImportMap);
+        // Récrire les modules pour utiliser les modules locaux mais pas les internals
+        for(const [modPath, codeIn] of rewritten.entries()){
+          let code = codeIn.replace(/from\s+['"]svelte\/internal[^'"]*['"]/g, match => {
+            const internalPath = match.match(/from\s+['"](svelte\/internal[^'"]*)['"]/) || [];
+            return internalPath[1] ? `from 'https://esm.sh/${internalPath[1]}'` : match;
+          });
+          cdnImportMap.imports[idMap.get(modPath)] = 'data:application/javascript;base64,' + Buffer.from(code,'utf-8').toString('base64');
+        }
+        const cdnMapJson = JSON.stringify(cdnImportMap, null, 2);
         result.runtimeHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Sandbox Runtime ESM External</title><link rel="stylesheet" href="/tailwind.css" />${cssTag}<script type='importmap'>${cdnMapJson}</script></head><body><div id='app'>${ssrHtml || ''}</div><script type='module'>import AppMod from '${entryId}';\nconst mountEl = document.getElementById('app');\nfunction mount(mod){ if(!mod) throw new Error('Export composant introuvable'); const isClass = typeof mod==='function' && mod.prototype && (mod.prototype.$destroy||mod.prototype.$set); if(isClass){ new mod({ target: mountEl, hydrate: ${ssrHtml? 'true':'false'} }); } else if(typeof mod==='function'){ mod(mountEl); } else { throw new Error('Type export inattendu'); } }\ntry { mount((AppMod && AppMod.default) ? AppMod.default : AppMod); } catch(e){ console.error('[runtime mount error]', e); if(mountEl) mountEl.innerHTML='<pre style=\\"color:#b91c1c;white-space:pre-wrap;font:12px monospace\\">'+(e.stack||e.message||e)+'</pre>'; }</script></body></html>`;
       } else {
         result.runtimeHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Sandbox Runtime ESM</title><link rel="stylesheet" href="/tailwind.css" />${cssTag}<script type='importmap'>${importMapJson}</script></head><body><div id='app'>${ssrHtml || 'Initialisation…'}</div><script type='module'>import AppMod from '${entryId}';\nconst mountEl = document.getElementById('app');\ntry {\n  const mod = (AppMod && AppMod.default) ? AppMod.default : AppMod;\n  if(!mod) throw new Error('Export composant introuvable');\n  const looksLikeClass = typeof mod === 'function' && mod.prototype && (mod.prototype.$destroy || mod.prototype.$set);\n  if(looksLikeClass){\n    new mod({ target: mountEl, hydrate: ${ssrHtml? 'true':'false'} });\n  } else if (typeof mod === 'function') {\n    mod(mountEl);\n  } else {\n    throw new Error('Type export inattendu');\n  }\n} catch(e){ console.error('[runtime mount error]', e); if(mountEl) mountEl.innerHTML='<pre style=\\"color:#b91c1c;white-space:pre-wrap;font:12px monospace\\">'+(e.stack||e.message||e)+'</pre>'; }</script></body></html>`;
