@@ -2,6 +2,11 @@ import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+// ESM compatibility pour __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // GET /api/diagnostic/compile
 // Endpoint diagnostic pour identifier les problèmes de compilation Svelte
@@ -24,7 +29,8 @@ export async function GET() {
         path.resolve(process.cwd(), 'node_modules/svelte/package.json'),
         path.resolve(process.cwd(), 'apps/main/node_modules/.ignored/svelte/package.json'),
         path.resolve('/var/task/node_modules/svelte/package.json'), // Vercel serverless
-        path.resolve(__dirname, '../../../node_modules/svelte/package.json') // Relative fallback
+        path.resolve(__dirname, '../../../node_modules/svelte/package.json'), // Relative fallback
+        path.resolve(__dirname, '../../../../node_modules/svelte/package.json') // Deeper fallback
       ];
       
       diagnostics.svelte.attemptedPaths = [];
@@ -46,12 +52,27 @@ export async function GET() {
       }
       
       if (!pkg) {
-        diagnostics.issues.push('Svelte package not found in production environment - move svelte from devDependencies to dependencies');
+        // Tentative d'obtenir la version depuis le compiler importé
+        try {
+          // Essayer d'obtenir la version depuis le module compiler lui-même
+          if (compile && compile.VERSION) {
+            diagnostics.svelte.version = compile.VERSION;
+            diagnostics.svelte.detectionMethod = 'compiler.VERSION';
+          } else if (compile && typeof compile === 'function') {
+            // Le compiler est disponible même si on ne peut pas lire le package.json
+            diagnostics.svelte.version = 'Available (package.json not accessible)';
+            diagnostics.svelte.detectionMethod = 'compiler-function-available';
+          }
+        } catch(e) {
+          diagnostics.issues.push('Svelte package not found in production environment - move svelte from devDependencies to dependencies');
+        }
+        
         diagnostics.svelte.environment = {
           cwd: process.cwd(),
           __dirname: __dirname || 'not available',
           nodeVersion: process.version,
-          platform: process.platform
+          platform: process.platform,
+          isVercelServerless: process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || false
         };
       }
     } catch(e) {
