@@ -21,6 +21,66 @@
   export let showDiff = false;
   export let diffBlocks = [];
   export let diffBlocksAll = [];
+  // === Instrumentation forensic ===
+  export let onForensicEvent = (e)=>{}; // callback(parent) reçoit {runId, stage, t, extra?}
+  export let currentRunId = null; // fourni par parent lors d'un nouveau preview
+  export let readyTimeoutMs = 5000; // après HELLO sans READY
+  export let loadTimeoutMs = 3000;  // après IFRAME_SET sans load
+  // compileT0 retiré (non utilisé) – timing géré côté parent
+  let iframeEl;
+  let loadTimer; let readyTimer;
+  let localRunId = null; // snapshot du runId pour annuler si mismatch
+
+  function clearTimers(){ if(loadTimer){ clearTimeout(loadTimer); loadTimer=null;} if(readyTimer){ clearTimeout(readyTimer); readyTimer=null;} }
+
+  $: if(currentRunId && currentRunId!==localRunId){
+      // Nouveau run: réinitialise timers
+      clearTimers();
+      localRunId = currentRunId;
+  }
+
+  function stage(evt, extra){
+    try { onForensicEvent && onForensicEvent({ runId: localRunId, stage: evt, t: performance.now(), extra }); } catch {}
+  }
+
+  function setupIframeInstrumentation(){
+    if(!iframeEl) return;
+    const myRun = localRunId;
+    stage('IFRAME_SET');
+    // Load timeout
+    if(loadTimeoutMs>0){
+      loadTimer = setTimeout(()=>{ if(myRun===localRunId) stage('IFRAME_LOAD_TIMEOUT'); }, loadTimeoutMs);
+    }
+    iframeEl.addEventListener('load', ()=>{
+      if(myRun!==localRunId) return;
+      stage('IFRAME_LOAD');
+      if(loadTimer){ clearTimeout(loadTimer); loadTimer=null; }
+      // Démarre timer READY (après HELLO)
+      if(readyTimeoutMs>0){
+        readyTimer = setTimeout(()=>{ if(myRun===localRunId) stage('READY_TIMEOUT'); }, readyTimeoutMs);
+      }
+    }, { once:true });
+  }
+
+  // Ecoute globale des messages HELLO/READY provenant de l'iframe
+  function handleMessage(e){
+    if(!e || !e.data || typeof e.data!== 'object') return;
+    const d = e.data;
+    if(!d.__previewSandbox) return; // signature
+    if(d.runId !== localRunId) return; // ignorer anciens runs
+    if(d.type==='HELLO'){
+      stage('CHILD_HELLO');
+    } else if(d.type==='READY'){
+      stage('CHILD_READY'); if(readyTimer){ clearTimeout(readyTimer); readyTimer=null; }
+    } else if(d.type==='ERROR'){
+      stage('CHILD_ERROR', d.message);
+    }
+  }
+  if(typeof window!=='undefined'){
+    window.addEventListener('message', handleMessage);
+  }
+  import { onDestroy } from 'svelte';
+  onDestroy(()=>{ clearTimers(); if(typeof window!=='undefined'){ window.removeEventListener('message', handleMessage);} });
   
   export let onRunPreview = () => {};
   export let onRunFastPreview = () => {};
@@ -140,14 +200,24 @@
     <div>
       <h3 class="text-sm font-semibold text-gray-700 mb-2">Résultat</h3>
       {#if previewHtml}
-        <iframe 
-          key={iframeKey} 
-          title="Preview composant" 
-          class="w-full h-72 border rounded bg-white" 
-          srcdoc={previewHtml} 
-          sandbox="allow-scripts allow-same-origin" 
+        <iframe
+          bind:this={iframeEl}
+          key={iframeKey}
+          title="Preview composant"
+          class="w-full h-72 border rounded bg-white"
+          srcdoc={previewHtml}
+          sandbox="allow-scripts allow-same-origin"
           referrerpolicy="no-referrer"
+          on:load={() => { /* load capturé via addEventListener */ }}
         ></iframe>
+        {@html '' /* Force Svelte à considérer changement pour runId */}
+        {#key iframeKey}
+          {#await (async()=>{ setupIframeInstrumentation(); return true; })()}
+            <span class="hidden"></span>
+          {:then}
+            <span class="hidden"></span>
+          {/await}
+        {/key}
       {:else}
         <div class="w-full h-72 border rounded bg-gray-50 grid place-items-center text-xs text-gray-500">
           Aucun rendu (compiler pour voir)

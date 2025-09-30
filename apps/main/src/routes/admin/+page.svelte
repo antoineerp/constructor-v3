@@ -53,6 +53,17 @@
   let fastStatus = 'idle'; // idle|compiling|error|ok
   let importWarnings = [];
   let rewritesMeta = null;
+  // Forensic timeline
+  let currentRunId = null; // string
+  let timeline = []; // {runId, stage, t, extra}
+  function addStage(stage, extra){
+    const ev = { runId: currentRunId, stage, t: performance.now(), extra };
+    timeline = [...timeline, ev];
+    // Conserver taille raisonnable
+    if(timeline.length>400){ timeline = timeline.slice(timeline.length-400); }
+  }
+  function onForensicEvent(ev){ if(!ev || ev.runId!==currentRunId) return; timeline = [...timeline, ev]; }
+  let compileStartT = 0;
 
   // Chargement du worker compileRapid dynamiquement (évite bundling si non utilisé)
   let compileRapidFn;
@@ -126,6 +137,10 @@
     if(previewAbort){ try { previewAbort.abort(); } catch{} }
     previewAbort = new AbortController();
     const signal = previewAbort.signal;
+    currentRunId = 'run_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7);
+    timeline = [];
+    compileStartT = performance.now();
+    addStage('REQ_START');
     previewLoading = true; previewError=''; previewHeuristics=[]; rawError=''; rawJsPreview='';
     const started = Date.now();
     const timeout = setTimeout(()=>{ if(!signal.aborted){ previewError = 'Timeout (>20s)'; previewLoading=false; pushToast('Timeout compilation','error'); } }, 20000);
@@ -137,7 +152,7 @@
         } catch(e){ if(!signal.aborted) rawError='[raw] '+e.message; }
       }
       if(signal.aborted) return;
-      const r = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json','Cache-Control':'no-store'}, body: JSON.stringify({ code: previewCode, debug:true, strict: previewStrict, enableRendererNormalization:false }), signal });
+      const r = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Run-Id':currentRunId}, body: JSON.stringify({ code: previewCode, debug:true, strict: previewStrict, enableRendererNormalization:false }), signal });
       if(signal.aborted) return;
       if(!r.ok){
         let msg = 'HTTP '+r.status;
@@ -146,9 +161,12 @@
         return;
       }
       const j = await r.json();
+      addStage('REQ_DONE', { sizeHtml: (j.html||'').length, sizeDomJs: (j.domJs||'').length });
       if(!j.success){ previewError = j.error||'Compilation échouée'; pushToast('Compilation échouée','error'); return; }
-      const inject = `<scr`+`ipt>(function(){try{if(window.__HYDRATION_BRIDGE)return;window.__HYDRATION_BRIDGE=1;document.addEventListener('component-hydration-error',function(e){try{parent&&parent.postMessage&&parent.postMessage({type:'hydration-error',message:(e.detail&&e.detail.message)||e.detail||'Hydration error'},'*');}catch(_e){}});}catch(_e){}})();</scr`+`ipt>`;
-      previewHtml = (j.html||'') + inject;
+      // Handshake sandbox HELLO/READY injection + bridge hydration
+      const handshake = `\n<scr`+`ipt>(function(){try{const RUN='${'"+currentRunId+"'}'; if(window.__SANDBOX_RUN_ID===RUN)return; window.__SANDBOX_RUN_ID=RUN; function post(type,msg){ parent&&parent.postMessage&&parent.postMessage({__previewSandbox:true,runId:RUN,type,message:msg},'*'); } document.addEventListener('DOMContentLoaded',()=>{post('HELLO'); setTimeout(()=>{ try { if(!window.__COMPONENT_MOUNTED){ post('ERROR','Component did not mount'); } }catch(e){} },4500); }); document.addEventListener('component-hydration-error',function(e){post('ERROR',(e.detail&&e.detail.message)||e.detail||'Hydration error');}); try { const orig = (window.__mountComponent||(()=>{})); window.__mountComponent = function(){ try { const r = orig.apply(this,arguments); window.__COMPONENT_MOUNTED=true; post('READY'); return r; }catch(e){ post('ERROR', e.message||String(e)); throw e; } }; } catch(e){} }catch(e){} })();</scr`+`ipt>`;
+      const hydrationBridge = `<scr`+`ipt>(function(){try{if(window.__HYDRATION_BRIDGE)return;window.__HYDRATION_BRIDGE=1;document.addEventListener('component-hydration-error',function(e){try{parent&&parent.postMessage&&parent.postMessage({type:'hydration-error',message:(e.detail&&e.detail.message)||e.detail||'Hydration error'},'*');}catch(_e){}});}catch(_e){}})();</scr`+`ipt>`;
+      previewHtml = (j.html||'') + hydrationBridge + handshake;
       previewHeuristics = j.meta?.heuristics||[];
       previewSsrJs = j.ssrJs||''; previewDomJs = j.domJs||''; iframeKey++;
       // Auto-activation diff si heuristique fallback ou auto-repair hint
