@@ -370,21 +370,3 @@ ${bundleScript}
     return json({ success:false, error:e.message }, { status:500 });
   }
 }
-
-// Ajout d'une validation renforcée pour runtimeHtml et alternative aux blobs
-try {
-  if (data.runtimeHtml && typeof data.runtimeHtml === 'string') {
-    // Validation supplémentaire pour s'assurer que runtimeHtml contient un HTML valide
-    if (!data.runtimeHtml.startsWith('<!DOCTYPE html>')) {
-      throw new Error('runtimeHtml invalide : doit commencer par <!DOCTYPE html>');
-    }
-
-    // Alternative aux blobs : injection directe dans un iframe
-    const sanitizedHtml = data.runtimeHtml.replace(/<script/g, '<!--<script').replace(/<\/script>/g, '</script>-->');
-    result.runtimeHtml = sanitizedHtml;
-  } else {
-    console.warn('[compile] runtimeHtml absent ou invalide');
-  }
-} catch (e) {
-  result.runtimeHtml = `<!DOCTYPE html><html><body><pre style='color:#b91c1c'>Erreur runtimeHtml : ${String(e).replace(/</g, '&lt;')}</pre></body></html>`;
-}
