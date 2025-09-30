@@ -15,22 +15,43 @@ export async function GET() {
   };
 
   try {
-    // 1. Vérifier la version Svelte
+    // 1. Vérifier la version Svelte - essayer plusieurs emplacements
     try {
-      const pkg = JSON.parse(fs.readFileSync(path.resolve('node_modules/svelte/package.json'), 'utf-8'));
-      diagnostics.svelte.version = pkg.version;
-      diagnostics.svelte.name = pkg.name;
+      let pkg;
+      const possiblePaths = [
+        'node_modules/svelte/package.json',
+        'node_modules/.ignored/svelte/package.json',
+        path.resolve(process.cwd(), 'node_modules/svelte/package.json'),
+        path.resolve(process.cwd(), 'apps/main/node_modules/.ignored/svelte/package.json')
+      ];
+      
+      for (const pkgPath of possiblePaths) {
+        try {
+          pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+          diagnostics.svelte.version = pkg.version;
+          diagnostics.svelte.name = pkg.name;
+          diagnostics.svelte.resolvedPath = pkgPath;
+          break;
+        } catch(e) {
+          continue;
+        }
+      }
+      
+      if (!pkg) {
+        diagnostics.issues.push('Cannot find svelte package.json in any known location');
+      }
     } catch(e) {
       diagnostics.issues.push('Cannot read svelte package.json: ' + e.message);
     }
 
-    // 2. Vérifier les modules internes disponibles
+    // 2. Vérifier les modules internes disponibles - avec les bons chemins
     const internalPaths = [
+      'node_modules/.ignored/svelte/src/internal/client/index.js',
+      'node_modules/.ignored/svelte/src/internal/index.js', 
+      'node_modules/.ignored/svelte/src/internal/disclose-version.js',
       'node_modules/svelte/src/internal/client/index.js',
-      'node_modules/svelte/src/internal/index.js', 
-      'node_modules/svelte/src/internal/disclose-version.js',
-      'node_modules/svelte/internal/client.js',
-      'node_modules/svelte/internal/index.js'
+      'node_modules/svelte/src/internal/index.js',
+      'node_modules/svelte/src/internal/disclose-version.js'
     ];
 
     diagnostics.modules.available = {};

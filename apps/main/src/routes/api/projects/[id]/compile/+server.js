@@ -293,11 +293,13 @@ export async function POST(event){
       // Lecture du runtime client svelte interne (best-effort) - MISE À JOUR SVELTE 5
       function readFirst(paths){ for(const pth of paths){ try { return fs.readFileSync(path.resolve(pth), 'utf-8'); } catch(_e){} } return null; }
       let svelteClient = readFirst([
+        'node_modules/.ignored/svelte/src/internal/client/index.js', // Svelte 5 correct path
         'node_modules/svelte/src/internal/client/index.js', // Svelte 5
         'node_modules/svelte/internal/client.js',           // Svelte 4 fallback
         'node_modules/svelte/internal/client/index.js'      // Svelte 4 fallback
       ]) || 'export const noop=()=>{};';
       let svelteInternal = readFirst([
+        'node_modules/.ignored/svelte/src/internal/index.js', // Svelte 5 correct path
         'node_modules/svelte/src/internal/index.js',        // Svelte 5
         'node_modules/svelte/internal/index.js',            // Svelte 4 fallback
         'node_modules/svelte/internal.js'
@@ -305,7 +307,7 @@ export async function POST(event){
       // Shim fallback si la version interne n'expose pas les helpers attendus (from_html etc.)
       function ensureClientShim(src){
         if(/from_html\s*\(/.test(src)) return src; // déjà présent
-        return src + `\n// --- injected shim ---\nexport function from_html(t){const tpl=document.createElement('template');tpl.innerHTML=t.trim();return ()=>tpl.content.firstElementChild?tpl.content.firstElementChild.cloneNode(true):tpl.content.cloneNode(true);}\nexport function child(n,text){if(!n) return null;return text? n.firstChild : (n.firstElementChild||n.firstChild);}\nexport function sibling(node, idx){if(!node||!node.parentNode) return null;let cur=node.parentNode.firstChild;let i=0;while(cur&&i<idx){cur=cur.nextSibling;i++;}return cur;}\nexport const index = Symbol('index');\nexport function each(container,_flag,listGetter,_indexSym,cb){const arr=listGetter()||[];for(let i=0;i<arr.length;i++){cb(container,{get value(){return arr[i];}});} }\nexport function reset(_n){}\nexport function template_effect(fn){try{fn();}catch(e){console.warn('template_effect error',e);} }\nexport function set_attribute(el,k,v){ if(el) try{el.setAttribute(k,v);}catch{} }\nexport function set_text(node,txt){ if(node) node.textContent = txt==null?'':String(txt);}\nexport function append(parent,n){ if(parent&&n) parent.appendChild(n);}\n`;
+        return src + `\n// --- injected shim ---\nexport function from_html(t){const tpl=document.createElement('template');tpl.innerHTML=t.trim();return ()=>tpl.content.firstElementChild?tpl.content.firstElementChild.cloneNode(true):tpl.content.cloneNode(true);}\nexport function child(n,text){if(!n) return null;return text? n.firstChild : (n.firstElementChild||n.firstChild);}\nexport function sibling(node, idx){if(!node||!node.parentNode) return null;let cur=node.parentNode.firstChild;let i=0;while(cur&&i<idx){cur=cur.nextSibling;i++;}return cur;}\nexport const index = Symbol('index');\nexport function each(container,_flag,listGetter,_indexSym,cb){const arr=listGetter()||[];for(let i=0;i<arr.length;i++){cb(container,{get value(){return arr[i];}});} }\nexport function reset(_n){}\nexport function template_effect(fn){try{fn();}catch(e){console.warn('template_effect error',e);} }\nexport function set_attribute(el,k,v){ if(el) try{el.setAttribute(k,v);}catch{} }\nexport function set_text(node,txt){ if(node) node.textContent = txt==null?'':String(txt);}\nexport function append(parent,n){ if(parent&&n&&typeof parent.appendChild==='function') try{parent.appendChild(n);}catch(e){console.warn('appendChild failed:',e);} }\n`;
       }
       svelteClient = ensureClientShim(svelteClient);
       const importMap = { imports: { 
