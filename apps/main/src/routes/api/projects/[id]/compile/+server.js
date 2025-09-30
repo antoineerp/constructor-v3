@@ -284,98 +284,67 @@ export async function POST(event){
         });
         rewritten.set(m.path, code);
       }
-      // -------- Mini loader dynamique (support basique des imports entre modules) --------
+      // -------- Nouveau: ESM pur avec import map + SSR/hydratation --------
       const entryModule = rewritten.has(entry) ? entry : (rewritten.keys().next().value);
       if(!entryModule) throw new Error('Aucun module d\'entrée trouvé');
-      // Construire des définitions modulaires: analyse rapide des import/export
-      const moduleDefs = [];
-      const importLineRe = /import\s+([^;]+?)\s+from\s+['"]([^'"\n]+)['"];?|import\s+['"]([^'"\n]+)['"];?/g;
-      const exportDefaultRe = /export\s+default\s+/;
-      for(const [modPath, codeOrig] of rewritten.entries()){
-        let code = codeOrig;
-        // Remplacer les imports internes Svelte par des références au mini runtime global
-        code = code.replace(/import\s+\*\s+as\s+\$\s+from\s+['"]svelte\/internal\/client['"];?/g, 'const $ = window.__SvelteMiniRuntime;')
-                   .replace(/import\s+['"]svelte\/internal\/disclose-version['"];?/g,'')
-                   .replace(/import\s+['"]svelte\/internal\/flags\/legacy['"];?/g,'');
-        const deps = [];
-        const paramNames = [];
-        const replacements = [];
-        importLineRe.lastIndex = 0;
-        let mI;
-        while((mI = importLineRe.exec(codeOrig))){
-          const full = mI[0];
-            const clause = mI[1];
-            const spec = mI[2] || mI[3];
-            if(!spec) continue;
-            const resolved = toAbsolute(spec, modPath);
-            deps.push(resolved);
-            const paramVar = `__d${paramNames.length}`;
-            paramNames.push(paramVar);
-            if(!clause){ // import 'polyfill'
-              replacements.push({ from: full, to: `/* side-effect import ${spec} */` });
-            } else {
-              // Simpliste: on ignore destructuring complexe -> on remappe tout sur valeur importée
-              let decl = '';
-              if(/^\*/.test(clause.trim())){
-                // import * as ns
-                const ns = clause.split(/\s+as\s+/i)[1] || 'ns';
-                decl = `const ${ns.trim()} = ${paramVar};`;
-              } else if(clause.includes('{')){
-                // import { a as b, c }
-                // laisser tel quel: on ne connaît pas l'export shape -> assignation naïve
-                decl = clause
-                  .replace(/\{([^}]+)\}/, (mm, inner)=> {
-                    return inner.split(',').map(p=>{
-                      const seg = p.trim();
-                      if(!seg) return '';
-                      if(seg.includes(' as ')){
-                        const [orig, alias] = seg.split(/\s+as\s+/i).map(s=> s.trim());
-                        return `const ${alias} = ${paramVar}.${orig};`;
-                      }
-                      return `const ${seg} = ${paramVar}.${seg};`;
-                    }).join(' ');
-                  });
-              } else {
-                // import DefaultName
-                decl = `const ${clause.trim()} = ${paramVar}.default || ${paramVar};`;
+      // Attribution identifiants courts (bare specifiers)
+      const idMap = new Map(); let iMod = 0;
+      for(const k of rewritten.keys()) idMap.set(k, `@m${iMod++}`);
+      // Lecture du runtime client svelte interne (best-effort)
+      function readFirst(paths){ for(const pth of paths){ try { return fs.readFileSync(path.resolve(pth), 'utf-8'); } catch(_e){} } return null; }
+      let svelteClient = readFirst([
+        'node_modules/svelte/internal/client.js',
+        'node_modules/svelte/internal/client/index.js'
+      ]) || 'export const noop=()=>{};';
+      let svelteInternal = readFirst([
+        'node_modules/svelte/internal/index.js',
+        'node_modules/svelte/internal.js'
+      ]) || 'export const noop=()=>{};';
+      const importMap = { imports: { 'svelte/internal/client': 'data:application/javascript;base64,' + Buffer.from(svelteClient,'utf-8').toString('base64'), 'svelte/internal': 'data:application/javascript;base64,' + Buffer.from(svelteInternal,'utf-8').toString('base64') } };
+      // Réécriture des imports internes en idMap + génération data URLs
+      const importPattern = /import\s+[^;]+?from\s+['"]([^'"\n]+)['"];?|import\s+['"]([^'"\n]+)['"];?/g;
+      for(const [modPath, codeIn] of rewritten.entries()){
+        let code = codeIn
+          .replace(/import\s+['"]svelte\/internal\/disclose-version['"];?/g,'')
+          .replace(/import\s+['"]svelte\/internal\/flags\/legacy['"];?/g,'');
+        code = code.replace(importPattern, (full,g1,g2)=>{
+          const spec = g1||g2; if(!spec) return full;
+            if(spec.startsWith('.') || spec.startsWith('src/')){
+              let abs = spec.startsWith('src/') ? spec : path.posix.normalize(path.posix.join(path.posix.dirname(modPath), spec));
+              if(!/\.svelte$|\.js$/.test(abs)){
+                if(rewritten.has(abs + '.svelte')) abs += '.svelte'; else if(rewritten.has(abs + '.js')) abs += '.js';
               }
-              replacements.push({ from: full, to: decl });
+              if(rewritten.has(abs)) return full.replace(spec, idMap.get(abs));
             }
-        }
-        // Appliquer remplacements
-        for(const r of replacements){ code = code.replace(r.from, r.to); }
-        // Transformer export default
-        if(exportDefaultRe.test(code)){
-          code = code.replace(exportDefaultRe, 'module.exports = ');
-        }
-        moduleDefs.push({ path: modPath, deps, params: paramNames, body: code });
+            return full;
+        });
+        importMap.imports[idMap.get(modPath)] = 'data:application/javascript;base64,' + Buffer.from(code,'utf-8').toString('base64');
       }
-      // Génération du loader + enregistrement des modules
-      const loaderLines = [];
-      loaderLines.push(`const __reg = new Map();`);
-      loaderLines.push(`function __define(id,deps,factory){ __reg.set(id,{deps,factory,instance:null}); }`);
-      loaderLines.push(`async function __require(id){ const rec = __reg.get(id); if(!rec) { if(id.startsWith('svelte/')) return {}; throw new Error('Module '+id+' introuvable'); } if(rec.instance) return rec.instance; const depVals = []; for(const d of rec.deps){ if(__reg.has(d)) depVals.push(await __require(d)); else if(d.startsWith('svelte/')) { depVals.push({}); } else { try { depVals.push(await import(d)); } catch{ depVals.push({}); } } } const module = { exports:{} }; const res = await rec.factory(...depVals, module.exports, module); rec.instance = module.exports || res; return rec.instance; }`);
-      // Mini runtime DOM (très simplifié) pour supporter le code généré Svelte 5 dans sandbox
-      loaderLines.push(`if(!window.__SvelteMiniRuntime){
-  window.__SvelteMiniRuntime = {
-    from_html(tpl){ const t=document.createElement('template'); t.innerHTML=tpl.trim(); return ()=> t.content.firstElementChild.cloneNode(true); },
-    child(node, text){ if(!node) return null; if(text) return node.firstChild; return node.firstElementChild||node.firstChild; },
-    sibling(node, idx){ if(!node||!node.parentNode) return null; let cur=node.parentNode.firstChild; let i=0; while(cur && i<idx){ cur=cur.nextSibling; i++; } return cur; },
-    index: Symbol('index'),
-    each(container, _flag, listGetter, _indexSym, callback){ const arr=listGetter()||[]; for(let i=0;i<arr.length;i++){ callback(container, { get value(){return arr[i];} }); } },
-    reset(_n){ /* noop in simplified runtime */ },
-    template_effect(fn){ try { fn(); } catch(e){ console.warn('template_effect error', e); } },
-    set_attribute(el, k, v){ if(el) try{ el.setAttribute(k, v); }catch{} },
-    set_text(node, txt){ if(node) node.textContent = txt==null?'':String(txt); },
-    append(parent, n){ if(parent && n) parent.appendChild(n); }
-  };
-}`);
-      for(const def of moduleDefs){
-        loaderLines.push(`__define(${JSON.stringify(def.path)}, ${JSON.stringify(def.deps)}, async function(${[...def.params,'exports','module'].join(',')}){\n${def.body}\n});`);
-      }
-      loaderLines.push(`(async()=>{ try { const App = await __require(${JSON.stringify(entryModule)}); const C = App.default || App; if(typeof C === 'function'){ new C({ target: document.getElementById('app') }); } else { throw new Error('Export défaut inexistant'); } } catch(e){ document.getElementById('app').innerHTML='<pre style="color:#b91c1c">'+(e.message||e)+'</pre>'; console.error(e); } })();`);
-      const loaderScript = loaderLines.join('\n');
-      result.runtimeHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Sandbox Runtime</title><script src="https://cdn.tailwindcss.com"></script><style>body{padding:16px;font-family:system-ui}</style></head><body><div id='app'>Chargement...</div><script type="module">${loaderScript}</script></body></html>`;
+      // Agrégation CSS: global (tailwind) + modules
+      const moduleCss = [...new Set(modules.map(m=> m.css).filter(Boolean))].join('\n');
+      const cssParts = [];
+      if(globalCss) cssParts.push(globalCss);
+      if(moduleCss) cssParts.push(moduleCss);
+      const cssTag = cssParts.length ? `<style id="preview-styles">${cssParts.join('\n')}</style>` : '';
+      // SSR initial (best-effort) sur l'entrée pour hydratation
+      let ssrHtml = '';
+      try {
+        const entrySource = projectFiles[entryModule];
+        if(entrySource){
+          const ssrCompiled = compile(entrySource, { generate:'ssr', filename: entryModule });
+          const ssrCode = ssrCompiled.js.code;
+          const module = { exports:{} };
+          new Function('module','exports', ssrCode)(module, module.exports);
+          const Comp = module.exports.default || module.exports;
+          if(Comp && typeof Comp.render === 'function'){
+            const r = Comp.render({});
+            ssrHtml = r.html || '';
+          }
+        }
+      } catch(_e){ /* SSR failure tolérée */ }
+      const importMapJson = JSON.stringify(importMap, null, 2);
+      const entryId = idMap.get(entryModule);
+      result.runtimeHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Sandbox Runtime ESM</title><script src="https://cdn.tailwindcss.com"></script>${cssTag}<script type='importmap'>${importMapJson}</script></head><body><div id='app'>${ssrHtml || 'Initialisation…'}</div><script type='module'>import App from '${entryId}';\ntry { const C = App.default || App; new C({ target: document.getElementById('app'), hydrate: ${ssrHtml? 'true':'false'} }); } catch(e){ console.error(e); document.getElementById('app').innerHTML='<pre style=\\"color:#b91c1c\\">'+(e.message||e)+'</pre>'; }</script></body></html>`;
     }
   } catch(e){
     result.runtimeHtml = `<!DOCTYPE html><html><body><pre style='color:#b91c1c'>Runtime bundle error: ${String(e).replace(/</g,'&lt;')}</pre></body></html>`;

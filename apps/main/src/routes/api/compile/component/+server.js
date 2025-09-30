@@ -482,12 +482,17 @@ export async function POST(event) {
     // Import map: certaines CDN jsdelivr renvoient 404 sur sous chemins internal/flags/legacy.
     // On bascule vers unpkg (plus tolérant) et on ajoute un fallback dynamique si le fetch échoue côté client.
     const needsInternal = domJsCode && /svelte\/internal/.test(domJsCode);
-      const importMap = needsInternal ? `\n<script type="importmap">${JSON.stringify({
-      imports: {
-        'svelte/internal': 'https://unpkg.com/svelte@4.2.0/internal/index.js',
-        'svelte/internal/': 'https://unpkg.com/svelte@4.2.0/internal/'
-      }
-    })}</script>\n<script>/* importmap-fallback */(async()=>{try{const r=await fetch('https://unpkg.com/svelte@4.2.0/internal/index.js',{method:'HEAD'});if(!r.ok) console.warn('svelte/internal unreachable');}catch(e){console.warn('svelte/internal check failed',e);}})();</script>`: '';
+    let importMap = '';
+    if(needsInternal){
+      let internalClient=''; let internalCore='';
+      try { internalClient = (await import('node:fs')).readFileSync('node_modules/svelte/internal/client.js','utf-8'); } catch{ internalClient='export const noop=()=>{};'; }
+      try { internalCore = (await import('node:fs')).readFileSync('node_modules/svelte/internal/index.js','utf-8'); } catch{ internalCore='export const noop=()=>{};'; }
+      const map = { imports: {
+        'svelte/internal/client': 'data:application/javascript;base64,'+Buffer.from(internalClient,'utf-8').toString('base64'),
+        'svelte/internal': 'data:application/javascript;base64,'+Buffer.from(internalCore,'utf-8').toString('base64')
+      }};
+      importMap = `\n<script type="importmap">${JSON.stringify(map)}</script>`;
+    }
     const wrapStart = canRequire ? '<div id="__component_root">' : '<div id="__component_root" data-no-ssr="1">';
     const depCssTag = depCssBlocks.length ? `\n<style data-deps-css="1">${depCssBlocks.join('\n/* --- */\n')}</style>` : '';
     let hydrationScript='';

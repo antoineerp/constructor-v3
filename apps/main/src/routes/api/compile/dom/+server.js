@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
+import crypto from 'crypto';
 
 // Simple heuristique jQuery
 function detectJQueryUsage(code){
@@ -54,17 +55,37 @@ export async function POST(event) {
           return json({ success:false, stage:'compile', error:msg, autoRepair:autoRepairMeta });
         }
       } else {
-        return json({ success:false, stage:'compile', error:msg });
+        // Retour enrichi (dev): message + stack minimale
+        return json({ success:false, stage:'compile', error:msg, stack: (e.stack||'').split('\n').slice(0,6).join('\n') });
       }
     }
     const { js, css } = compiled;
-    // Sécurité: ajouter quelques headers passifs (ex: pour debug future instrumentation)
-    const resp = json({ success:true, js: js.code, css: css.code, autoRepair: autoRepairMeta });
+    // Post-traitement: transformation imports relatifs -> absolus /runtime/<hash>/...
+    const runtimeId = crypto.createHash('sha1').update(js.code).digest('hex').slice(0,12);
+    // Cache global en mémoire
+    if(typeof globalThis.__RUNTIME_BUNDLES === 'undefined') globalThis.__RUNTIME_BUNDLES = new Map();
+    // Réécriture (playground: pas de graphe persisté encore, mais on prépare la structure)
+    const relImportRe = /import\s+[^;]*?from\s+['"](\.?\.\/[^'"\n]+)['"];?|import\s+['"](\.?\.\/[^'"\n]+)['"];?/g;
+    let transformed = js.code.replace(relImportRe, (full, g1, g2)=>{
+      const spec = g1||g2; if(!spec) return full;
+      // Normalisation simple: retirer ./ prefix
+      const clean = spec.replace(/^\.\//,'');
+      const abs = `/runtime/${runtimeId}/${clean}`;
+      return full.replace(spec, abs);
+    });
+    // Enregistrer le bundle principal (point d'entrée) sous /runtime/<id>/entry.js
+    const entryPath = `/runtime/${runtimeId}/entry.js`;
+  globalThis.__RUNTIME_BUNDLES.set(entryPath, transformed);
+  if(typeof globalThis.__RUNTIME_BUNDLES_META === 'undefined') globalThis.__RUNTIME_BUNDLES_META = new Map();
+  globalThis.__RUNTIME_BUNDLES_META.set(entryPath, { t: Date.now() });
+    const record = { js: transformed, css: css.code, id: runtimeId, entry: entryPath };
+    const resp = json({ success:true, ...record, autoRepair: autoRepairMeta });
     resp.headers.set('X-Compile-Mode','dom');
     resp.headers.set('Cache-Control','no-store');
+    resp.headers.set('X-Runtime-Id', runtimeId);
     return resp;
   } catch(e){
     console.error('compile/dom error', e);
-    return json({ success:false, error:e.message }, { status:500 });
+    return json({ success:false, error:e.message, stack:(e.stack||'').split('\n').slice(0,10).join('\n') }, { status:500 });
   }
 }
