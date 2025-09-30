@@ -7,7 +7,7 @@
   let errorMsg = '';
   let expandedPrompt = '';
   let showAdvanced = false;
-  let generationType = 'component'; // 'component' | 'app' | 'feature'
+  let _generationType = 'component'; // 'component' | 'app' | 'feature'
 
   // Intelligence de détection contextuelle (bolt.new style)
   function analyzePromptContext(prompt) {
@@ -17,7 +17,7 @@
     // Détection type génération
     const appKeywords = ['site', 'application', 'app', 'dashboard', 'plateforme', 'système', 'crm', 'blog', 'e-commerce', 'marketplace'];
     const featureKeywords = ['page', 'section', 'module', 'fonctionnalité', 'workflow', 'processus'];
-    const componentKeywords = ['composant', 'bouton', 'carte', 'modal', 'input', 'formulaire', 'navbar', 'sidebar'];
+    const _componentKeywords = ['composant', 'bouton', 'carte', 'modal', 'input', 'formulaire', 'navbar', 'sidebar'];
     
     let detectedType = 'component';
     let complexity = 'simple';

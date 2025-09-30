@@ -41,7 +41,7 @@ export function validateApplicationFiles(obj){
       if(typeof v !== 'string' || !v.trim()) errors.push(`Fichier ${k} contenu vide`);
       if(/\0/.test(v)) errors.push(`Fichier ${k} contient caractères nuls`);
       if(k.length > 160) errors.push(`Nom fichier trop long: ${k}`);
-      if(!/^([A-Za-z0-9_.\-]+\/)*/.test(k)) errors.push(`Nom fichier invalide: ${k}`);
+      if(!/^([A-Za-z0-9_./-]+)*/.test(k)) errors.push(`Nom fichier invalide: ${k}`);
     }
   }
   return { ok: errors.length === 0, errors };

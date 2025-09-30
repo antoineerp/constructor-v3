@@ -31,7 +31,9 @@
       try {
         const { data: { session } } = await supabase.auth.getSession();
         token = session?.access_token || null;
-      } catch (e) { }
+      } catch (_e) { 
+        // Ignore session errors
+      }
       const headers = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch('/api/site/generate', {

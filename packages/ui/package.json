@@ -4,8 +4,16 @@
   "type": "module",
   "main": "./src/index.js",
   "exports": {
-    ".": "./src/index.js",
-    "./components/*": "./src/components/*"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "svelte": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./components/*": {
+      "types": "./dist/components/*.d.ts", 
+      "svelte": "./dist/components/*",
+      "default": "./dist/components/*"
+    }
   },
   "scripts": {
     "build": "svelte-package",

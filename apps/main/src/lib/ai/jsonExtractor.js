@@ -118,7 +118,7 @@ function repairEscapes(input){
   // Corriger séquences unicode tronquées (ex: \u12 ) -> retirer backslash pour éviter parse error
   out = out.replace(/\\u([0-9A-Fa-f]{0,3})([^0-9A-Fa-f])/g, (_m, hex, tail)=> hex.length===4? _m : hex+tail);
   // Backslash avant caractère non reconnu -> supprimer
-  out = out.replace(/\\(?!["\\\/bfnrtu]|u[0-9A-Fa-f]{4})/g,'');
+  out = out.replace(/\\(?!["\\bfnrtu/]|u[0-9A-Fa-f]{4})/g,'');
   // Fermer potentiellement une chaîne ouverte à la fin si nombre de quotes impair
   const dq = (out.match(/"/g)||[]).length;
   if(dq % 2 === 1){ out += '"'; }
