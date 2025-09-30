@@ -201,13 +201,13 @@ export async function validateFiles(files) {
         }
       } catch(_e){ /* ignore */ }
       try {
-        compile(content, { generate: 'ssr' });
+        compile(content, { generate: 'ssr', runes: false, compatibility: { componentApi: 4 } });
         ssrOk = true;
       } catch (e) {
         diagnostics.push({ severity: 'error', phase: 'ssr', source: 'svelte-compiler', message: e.message });
       }
       try {
-        compile(content, { generate: 'dom' });
+        compile(content, { generate: 'dom', runes: false, compatibility: { componentApi: 4 } });
         domOk = true;
       } catch (e) {
         diagnostics.push({ severity: 'error', phase: 'dom', source: 'svelte-compiler', message: e.message });

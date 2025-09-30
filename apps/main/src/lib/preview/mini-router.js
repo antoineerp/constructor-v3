@@ -170,7 +170,7 @@ export function mountPreviewRouter({ modules, target }) {
           const wrapperSource = `<script>\n${imports.join('\n')}\nexport let params;\nexport let data;\n</script>\n${openTags}<Page {params} {data}/> ${closeTags}`;
           // Compilation dynamique client
           const { compile } = await import('svelte/compiler');
-          const { js } = compile(wrapperSource, { generate:'dom', format:'esm', filename:'__preview_wrapper.svelte' });
+          const { js } = compile(wrapperSource, { generate:'dom', format:'esm', filename:'__preview_wrapper.svelte', runes: false, compatibility: { componentApi: 4 } });
           blobWrapperUrl = URL.createObjectURL(new Blob([js.code], { type:'text/javascript' }));
           // Invalidation anciennes versions de la même baseKey
             for(const k of compositeCache.keys()){

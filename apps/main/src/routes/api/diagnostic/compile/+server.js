@@ -110,7 +110,9 @@ export async function GET() {
         generate: 'dom', 
         filename: 'Test.svelte',
         css: 'injected',
-        dev: false 
+        dev: false,
+        runes: false,
+        compatibility: { componentApi: 4 }
       });
       
       diagnostics.runtime.simpleCompile = {
@@ -141,7 +143,9 @@ export async function GET() {
     try {
       const ssrCompiled = compile(testCode, { 
         generate: 'ssr', 
-        filename: 'Test.svelte'
+        filename: 'Test.svelte',
+        runes: false,
+        compatibility: { componentApi: 4 }
       });
       
       diagnostics.runtime.ssrCompile = {

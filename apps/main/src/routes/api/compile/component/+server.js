@@ -202,7 +202,7 @@ export async function POST(event) {
     for(const [depPath, depCode] of Object.entries(dependencies)){
       if(!depPath.endsWith('.svelte')) continue;
       try {
-        const c = compile(depCode, { generate:'ssr', hydratable:true, filename: depPath });
+        const c = compile(depCode, { generate:'ssr', hydratable:true, filename: depPath, runes:false, compatibility: { componentApi: 4 } });
         if(c.css?.code){ const sig = c.css.code.trim(); if(!depCssBlocks.includes(sig)) depCssBlocks.push(sig); }
         const transformed = transformEsmToCjs(c.js.code);
         const factory = new Function('module','exports','require','__import', transformed + '\n;');
@@ -404,7 +404,7 @@ export async function POST(event) {
               const repairedAfterUnknown = injectUnknownComponentPlaceholders(repairedAfterLib, meta);
               repairedSource = repairedAfterUnknown;
               let repairedCompiled;
-              try { repairedCompiled = compile(repairedSource, { generate:'ssr', hydratable:true, filename:'Component.svelte' }); } catch(reCompErr){
+              try { repairedCompiled = compile(repairedSource, { generate:'ssr', hydratable:true, filename:'Component.svelte', runes:false, compatibility: { componentApi: 4 } }); } catch(reCompErr){
                 autoRepairMeta.compileError = reCompErr.message;
               }
               if(repairedCompiled){

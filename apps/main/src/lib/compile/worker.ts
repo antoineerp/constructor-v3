@@ -14,6 +14,8 @@ self.onmessage = async (e: MessageEvent) => {
       generate: 'dom',
       css: true,
       dev: true,
+      runes: false,
+      compatibility: { componentApi: 4 },
       ...options
     });
     self.postMessage({ id, ok: true, js: compiled.js.code, css: compiled.css?.code, warnings: compiled.warnings });

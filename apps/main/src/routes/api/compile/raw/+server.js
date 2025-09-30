@@ -37,7 +37,7 @@ export async function POST({ request }) {
           working = rewrites.code;
         } catch(e){ /* ignore rewrite errors */ }
       }
-      const c = compile(working, { generate, hydratable:true, filename });
+      const c = compile(working, { generate, hydratable:true, filename, runes: false, compatibility: { componentApi: 4 } });
       return json({ success:true, js: c.js?.code || null, css: c.css?.code || null, warnings: c.warnings||[], rewrites, ast: undefined });
     } catch(e){
       const loc = e.start ? { line:e.start.line, column:e.start.column } : null;

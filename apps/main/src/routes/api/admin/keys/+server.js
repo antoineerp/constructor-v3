@@ -158,8 +158,3 @@ export async function PUT({ request }) {
     return json({ success: false, error: e.message }, { status: 500 });
   }
 }
-
-// Export des clés pour utilisation par d'autres services
-export function getCurrentKeys() {
-  return loadKeys();
-}
