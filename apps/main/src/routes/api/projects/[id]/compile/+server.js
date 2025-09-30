@@ -293,6 +293,10 @@ export async function POST(event){
       const exportDefaultRe = /export\s+default\s+/;
       for(const [modPath, codeOrig] of rewritten.entries()){
         let code = codeOrig;
+        // Remplacer les imports internes Svelte par des références au mini runtime global
+        code = code.replace(/import\s+\*\s+as\s+\$\s+from\s+['"]svelte\/internal\/client['"];?/g, 'const $ = window.__SvelteMiniRuntime;')
+                   .replace(/import\s+['"]svelte\/internal\/disclose-version['"];?/g,'')
+                   .replace(/import\s+['"]svelte\/internal\/flags\/legacy['"];?/g,'');
         const deps = [];
         const paramNames = [];
         const replacements = [];
@@ -351,6 +355,21 @@ export async function POST(event){
       loaderLines.push(`const __reg = new Map();`);
       loaderLines.push(`function __define(id,deps,factory){ __reg.set(id,{deps,factory,instance:null}); }`);
       loaderLines.push(`async function __require(id){ const rec = __reg.get(id); if(!rec) { if(id.startsWith('svelte/')) return {}; throw new Error('Module '+id+' introuvable'); } if(rec.instance) return rec.instance; const depVals = []; for(const d of rec.deps){ if(__reg.has(d)) depVals.push(await __require(d)); else if(d.startsWith('svelte/')) { depVals.push({}); } else { try { depVals.push(await import(d)); } catch{ depVals.push({}); } } } const module = { exports:{} }; const res = await rec.factory(...depVals, module.exports, module); rec.instance = module.exports || res; return rec.instance; }`);
+      // Mini runtime DOM (très simplifié) pour supporter le code généré Svelte 5 dans sandbox
+      loaderLines.push(`if(!window.__SvelteMiniRuntime){
+  window.__SvelteMiniRuntime = {
+    from_html(tpl){ const t=document.createElement('template'); t.innerHTML=tpl.trim(); return ()=> t.content.firstElementChild.cloneNode(true); },
+    child(node, text){ if(!node) return null; if(text) return node.firstChild; return node.firstElementChild||node.firstChild; },
+    sibling(node, idx){ if(!node||!node.parentNode) return null; let cur=node.parentNode.firstChild; let i=0; while(cur && i<idx){ cur=cur.nextSibling; i++; } return cur; },
+    index: Symbol('index'),
+    each(container, _flag, listGetter, _indexSym, callback){ const arr=listGetter()||[]; for(let i=0;i<arr.length;i++){ callback(container, { get value(){return arr[i];} }); } },
+    reset(_n){ /* noop in simplified runtime */ },
+    template_effect(fn){ try { fn(); } catch(e){ console.warn('template_effect error', e); } },
+    set_attribute(el, k, v){ if(el) try{ el.setAttribute(k, v); }catch{} },
+    set_text(node, txt){ if(node) node.textContent = txt==null?'':String(txt); },
+    append(parent, n){ if(parent && n) parent.appendChild(n); }
+  };
+}`);
       for(const def of moduleDefs){
         loaderLines.push(`__define(${JSON.stringify(def.path)}, ${JSON.stringify(def.deps)}, async function(${[...def.params,'exports','module'].join(',')}){\n${def.body}\n});`);
       }
