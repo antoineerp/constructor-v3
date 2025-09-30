@@ -115,8 +115,15 @@ export async function POST(event) {
     logCtx.error = e.message;
     logCtx.stackTop = (e.stack||'').split('\n')[0];
     logCtx.ms = Date.now()-t0;
-    console.error('[compile/dom fatal]', logCtx, e);
-    const resp = json({ success:false, error:e.message, stack:(e.stack||'').split('\n').slice(0,10).join('\n'), rid }, { status:500 });
+    console.error('[compile/dom fatal]', logCtx);
+    console.error('[compile/dom stack]', e.stack);
+    const resp = json({ 
+      success:false, 
+      error:e.message, 
+      stage:'fatal', 
+      debug: process.env.NODE_ENV==='development' ? e.stack : undefined,
+      rid 
+    }, { status:500 });
     resp.headers.set('X-Request-Id', rid);
     return resp;
   }

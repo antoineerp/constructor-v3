@@ -290,14 +290,16 @@ export async function POST(event){
       // Attribution identifiants courts (bare specifiers)
       const idMap = new Map(); let iMod = 0;
       for(const k of rewritten.keys()) idMap.set(k, `@m${iMod++}`);
-      // Lecture du runtime client svelte interne (best-effort)
+      // Lecture du runtime client svelte interne (best-effort) - MISE À JOUR SVELTE 5
       function readFirst(paths){ for(const pth of paths){ try { return fs.readFileSync(path.resolve(pth), 'utf-8'); } catch(_e){} } return null; }
       let svelteClient = readFirst([
-        'node_modules/svelte/internal/client.js',
-        'node_modules/svelte/internal/client/index.js'
+        'node_modules/svelte/src/internal/client/index.js', // Svelte 5
+        'node_modules/svelte/internal/client.js',           // Svelte 4 fallback
+        'node_modules/svelte/internal/client/index.js'      // Svelte 4 fallback
       ]) || 'export const noop=()=>{};';
       let svelteInternal = readFirst([
-        'node_modules/svelte/internal/index.js',
+        'node_modules/svelte/src/internal/index.js',        // Svelte 5
+        'node_modules/svelte/internal/index.js',            // Svelte 4 fallback
         'node_modules/svelte/internal.js'
       ]) || 'export const noop=()=>{};';
       // Shim fallback si la version interne n'expose pas les helpers attendus (from_html etc.)
@@ -306,13 +308,19 @@ export async function POST(event){
         return src + `\n// --- injected shim ---\nexport function from_html(t){const tpl=document.createElement('template');tpl.innerHTML=t.trim();return ()=>tpl.content.firstElementChild?tpl.content.firstElementChild.cloneNode(true):tpl.content.cloneNode(true);}\nexport function child(n,text){if(!n) return null;return text? n.firstChild : (n.firstElementChild||n.firstChild);}\nexport function sibling(node, idx){if(!node||!node.parentNode) return null;let cur=node.parentNode.firstChild;let i=0;while(cur&&i<idx){cur=cur.nextSibling;i++;}return cur;}\nexport const index = Symbol('index');\nexport function each(container,_flag,listGetter,_indexSym,cb){const arr=listGetter()||[];for(let i=0;i<arr.length;i++){cb(container,{get value(){return arr[i];}});} }\nexport function reset(_n){}\nexport function template_effect(fn){try{fn();}catch(e){console.warn('template_effect error',e);} }\nexport function set_attribute(el,k,v){ if(el) try{el.setAttribute(k,v);}catch{} }\nexport function set_text(node,txt){ if(node) node.textContent = txt==null?'':String(txt);}\nexport function append(parent,n){ if(parent&&n) parent.appendChild(n);}\n`;
       }
       svelteClient = ensureClientShim(svelteClient);
-      const importMap = { imports: { 'svelte/internal/client': 'data:application/javascript;base64,' + Buffer.from(svelteClient,'utf-8').toString('base64'), 'svelte/internal': 'data:application/javascript;base64,' + Buffer.from(svelteInternal,'utf-8').toString('base64') } };
+      const importMap = { imports: { 
+        'svelte/internal/client': 'data:application/javascript;base64,' + Buffer.from(svelteClient,'utf-8').toString('base64'), 
+        'svelte/internal': 'data:application/javascript;base64,' + Buffer.from(svelteInternal,'utf-8').toString('base64'),
+        // Svelte 5 modules spécifiques  
+        'svelte/internal/disclose-version': 'data:application/javascript;base64,' + Buffer.from('console.log("svelte version disclosed");','utf-8').toString('base64'),
+        'svelte/internal/flags/legacy': 'data:application/javascript;base64,' + Buffer.from('export const legacy = false;','utf-8').toString('base64')
+      } };
       // Réécriture des imports internes en idMap + génération data URLs
       const importPattern = /import\s+[^;]+?from\s+['"]([^'"\n]+)['"];?|import\s+['"]([^'"\n]+)['"];?/g;
       for(const [modPath, codeIn] of rewritten.entries()){
         let code = codeIn
-          .replace(/import\s+['"]svelte\/internal\/disclose-version['"];?/g,'')
-          .replace(/import\s+['"]svelte\/internal\/flags\/legacy['"];?/g,'');
+          .replace(/import\s+['"]svelte\/internal\/disclose-version['"];?\n?/g,'')
+          .replace(/import\s+['"]svelte\/internal\/flags\/legacy['"];?\n?/g,'');
         code = code.replace(importPattern, (full,g1,g2)=>{
           const spec = g1||g2; if(!spec) return full;
             if(spec.startsWith('.') || spec.startsWith('src/')){
@@ -358,6 +366,13 @@ export async function POST(event){
     setCached(hash, result, 2*60*1000); // 2 min
   return json({ success:true, projectHash: hash, requestCount: globalThis.__COMPILE_REQS, ...result });
   } catch(e){
-    return json({ success:false, error:e.message }, { status:500 });
+    console.error('[compile/projects/'+projectId+'] Fatal error:', {
+      error: e.message,
+      stack: e.stack?.split('\n').slice(0,5).join('\n'),
+      projectId,
+      hasFiles: !!projectFiles && Object.keys(projectFiles).length,
+      timestamp: new Date().toISOString()
+    });
+    return json({ success:false, error:e.message, debug: process.env.NODE_ENV==='development' ? e.stack : undefined }, { status:500 });
   }
 }

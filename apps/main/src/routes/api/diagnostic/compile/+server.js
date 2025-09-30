@@ -1,0 +1,127 @@
+import { json } from '@sveltejs/kit';
+import { compile } from 'svelte/compiler';
+import fs from 'fs';
+import path from 'path';
+
+// GET /api/diagnostic/compile
+// Endpoint diagnostic pour identifier les problèmes de compilation Svelte
+export async function GET() {
+  const diagnostics = {
+    timestamp: new Date().toISOString(),
+    svelte: {},
+    modules: {},
+    runtime: {},
+    issues: []
+  };
+
+  try {
+    // 1. Vérifier la version Svelte
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.resolve('node_modules/svelte/package.json'), 'utf-8'));
+      diagnostics.svelte.version = pkg.version;
+      diagnostics.svelte.name = pkg.name;
+    } catch(e) {
+      diagnostics.issues.push('Cannot read svelte package.json: ' + e.message);
+    }
+
+    // 2. Vérifier les modules internes disponibles
+    const internalPaths = [
+      'node_modules/svelte/src/internal/client/index.js',
+      'node_modules/svelte/src/internal/index.js', 
+      'node_modules/svelte/src/internal/disclose-version.js',
+      'node_modules/svelte/internal/client.js',
+      'node_modules/svelte/internal/index.js'
+    ];
+
+    diagnostics.modules.available = {};
+    for(const p of internalPaths) {
+      try {
+        const fullPath = path.resolve(p);
+        diagnostics.modules.available[p] = {
+          exists: fs.existsSync(fullPath),
+          size: fs.existsSync(fullPath) ? fs.statSync(fullPath).size : 0
+        };
+      } catch(e) {
+        diagnostics.modules.available[p] = { exists: false, error: e.message };
+      }
+    }
+
+    // 3. Test de compilation simple
+    const testCode = `<script>let count = 0;</script><h1>Test {count}</h1><button on:click={() => count++}>+</button>`;
+    
+    try {
+      const compiled = compile(testCode, { 
+        generate: 'dom', 
+        filename: 'Test.svelte',
+        css: 'injected',
+        dev: false 
+      });
+      
+      diagnostics.runtime.simpleCompile = {
+        success: true,
+        jsSize: compiled.js.code.length,
+        cssSize: compiled.css?.code?.length || 0,
+        hasImports: /import\s/.test(compiled.js.code)
+      };
+
+      // Analyser les imports générés
+      const imports = [];
+      const importRegex = /import\s+[^;]+?from\s+['"]([^'"\n]+)['"];?/g;
+      let m;
+      while((m = importRegex.exec(compiled.js.code))) {
+        imports.push(m[1]);
+      }
+      diagnostics.runtime.detectedImports = imports;
+
+    } catch(e) {
+      diagnostics.runtime.simpleCompile = {
+        success: false,
+        error: e.message
+      };
+      diagnostics.issues.push('Simple compilation failed: ' + e.message);
+    }
+
+    // 4. Test compilation SSR
+    try {
+      const ssrCompiled = compile(testCode, { 
+        generate: 'ssr', 
+        filename: 'Test.svelte'
+      });
+      
+      diagnostics.runtime.ssrCompile = {
+        success: true,
+        jsSize: ssrCompiled.js.code.length
+      };
+    } catch(e) {
+      diagnostics.runtime.ssrCompile = {
+        success: false,
+        error: e.message  
+      };
+      diagnostics.issues.push('SSR compilation failed: ' + e.message);
+    }
+
+    // 5. Vérifier les variables globales de cache
+    diagnostics.runtime.globalState = {
+      compileRequests: globalThis.__COMPILE_REQS || 0,
+      runtimeBundles: globalThis.__RUNTIME_BUNDLES?.size || 0,
+      tailwindCache: globalThis.__TAILWIND_CSS_CACHE?.size || 0
+    };
+
+    // 6. Résumé des problèmes
+    if(diagnostics.issues.length === 0) {
+      diagnostics.status = 'healthy';
+    } else {
+      diagnostics.status = 'issues_detected';
+    }
+
+    return json(diagnostics);
+
+  } catch(e) {
+    return json({
+      ...diagnostics,
+      status: 'error',
+      error: e.message,
+      stack: e.stack
+    }, { status: 500 });
+  }
+}
