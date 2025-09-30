@@ -19,6 +19,51 @@
     toastTimer = setTimeout(()=> toast = null, ttl);
   }
 
+  async function repairAllFiles() {
+    if (!siteFiles || siteGenerating) return;
+    
+    siteGenerating = true;
+    let repairedCount = 0;
+    
+    try {
+      for (const [filename, content] of Object.entries(siteFiles)) {
+        if (filename.endsWith('.svelte')) {
+          try {
+            const repairRes = await fetch('/api/repair/auto', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                filename,
+                code: content,
+                maxPasses: 2,
+                allowCatalog: true
+              })
+            });
+            
+            const repairData = await repairRes.json();
+            if (repairData.success && repairData.fixedCode && repairData.fixedCode !== content) {
+              siteFiles[filename] = repairData.fixedCode;
+              repairedCount++;
+            }
+          } catch (e) {
+            console.warn('Repair failed for', filename, e.message);
+          }
+        }
+      }
+      
+      if (repairedCount > 0) {
+        showToast(`${repairedCount} fichier(s) réparé(s) automatiquement`, 'success');
+        siteFiles = { ...siteFiles }; // Force reactivity
+      } else {
+        showToast('Aucune réparation nécessaire', 'success');
+      }
+    } catch (e) {
+      showToast('Erreur lors de la réparation: ' + e.message, 'error');
+    } finally {
+      siteGenerating = false;
+    }
+  }
+
   async function generateSite() {
     if (!sitePrompt.trim() || siteGenerating) return;
     siteError = '';
@@ -39,7 +84,13 @@
       const res = await fetch('/api/site/generate', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ query: sitePrompt.trim(), simpleMode, generationProfile, provider })
+        body: JSON.stringify({ 
+          query: sitePrompt.trim(), 
+          simpleMode, 
+          generationProfile, 
+          provider,
+          autoRepair: true // Force l'auto-réparation
+        })
       });
       const data = await res.json();
       if (!res.ok || !data.success){
@@ -97,10 +148,19 @@
     </div>
     <div class="mb-4">
       <h3 class="text-sm font-semibold mb-1">Fichiers générés ({Object.keys(siteFiles||{}).length})</h3>
-      <div class="flex flex-wrap gap-2">
-        {#each Object.keys(siteFiles||{}) as f}
-          <button class="text-xs px-2 py-1 border rounded {siteSelectedFile===f?'bg-indigo-50 border-indigo-500':'bg-white'}" on:click={()=>siteSelectedFile=f}>{f}</button>
-        {/each}
+      <div class="flex items-center gap-2 mb-2">
+        <div class="flex flex-wrap gap-2 flex-1">
+          {#each Object.keys(siteFiles||{}) as f}
+            <button class="text-xs px-2 py-1 border rounded {siteSelectedFile===f?'bg-indigo-50 border-indigo-500':'bg-white'}" on:click={()=>siteSelectedFile=f}>{f}</button>
+          {/each}
+        </div>
+        <button 
+          class="text-xs px-3 py-1 bg-orange-500 text-white rounded hover:bg-orange-600" 
+          on:click={repairAllFiles}
+          title="Réparer automatiquement les erreurs de syntaxe"
+        >
+          🔧 Réparer
+        </button>
       </div>
     </div>
     {#if siteCapabilities.length}

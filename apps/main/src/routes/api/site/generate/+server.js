@@ -26,7 +26,7 @@ export async function POST(event) {
   const { request, locals } = event;
   try {
     const body = await request.json();
-  const { query, projectId, regenerateFile, simpleMode, generationProfile = 'safe', provider='openai', chatContext = [] } = body;
+  const { query, projectId, regenerateFile, simpleMode, generationProfile = 'safe', provider='openai', chatContext = [], autoRepair = false } = body;
     // Flags optionnels pour alléger la génération (ex: { auth:false, docs:false, datatable:false })
     const featureFlags = { auth:true, docs:true, datatable:true, ...(body?.features||{}) };
     // Récupération token Supabase (passé côté client via Authorization: Bearer <access_token>)
@@ -461,6 +461,45 @@ Ancienne version:
     }
   } catch(e){
     console.warn('validateFiles global failed', e.message);
+  }
+
+  // Auto-réparation automatique des fichiers avec erreurs
+  if(autoRepair && fullValidation){
+    for(const [filename, val] of Object.entries(fullValidation)){
+      const errors = val.diagnostics.filter(d => d.severity === 'error');
+      if(errors.length > 0 && filename.endsWith('.svelte')){
+        try {
+          const repairResponse = await fetch('/api/repair/auto', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filename,
+              code: files[filename],
+              maxPasses: 2,
+              allowCatalog: true
+            })
+          });
+          
+          const repairData = await repairResponse.json();
+          if(repairData.success && repairData.fixedCode && repairData.fixedCode !== files[filename]){
+            files[filename] = repairData.fixedCode;
+            console.log(`Auto-repaired ${filename} (${errors.length} errors → ${repairData.finalDiagnostics.length} errors)`);
+            
+            // Re-valider le fichier réparé
+            try {
+              const revalidation = await validateFiles({ [filename]: files[filename] });
+              if(fullValidation && revalidation[filename]){
+                fullValidation[filename] = revalidation[filename];
+              }
+            } catch(e){
+              console.warn('Revalidation failed for', filename, e.message);
+            }
+          }
+        } catch(e){
+          console.warn('Auto-repair failed for', filename, e.message);
+        }
+      }
+    }
   }
   try {
     if(!ephemeral && isSupabaseEnabled){
