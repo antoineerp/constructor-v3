@@ -68,7 +68,7 @@ export async function GET({ url, request }) {
   const routesList = Object.keys(routeMap).sort((a,b)=> a.localeCompare(b));
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Aperçu Sandbox</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="/tailwind.css" data-local="1" />
 <style>body{font-family:system-ui, sans-serif;padding:1rem;background:#f1f5f9;} .container{max-width:1100px;margin:0 auto;} pre{background:#0f172a;color:#e2e8f0;padding:1rem;border-radius:.5rem;overflow:auto;font-size:.8rem;} .routes{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem} .routes a{font-size:.7rem;padding:.3rem .55rem;border:1px solid #cbd5e1;border-radius:.4rem;background:#fff;text-decoration:none;color:#334155} .routes a.active{background:#6366f1;color:#fff;border-color:#6366f1} .routes a:hover{border-color:#6366f1}</style>
 </head><body><div class="container">
 <div class="routes">

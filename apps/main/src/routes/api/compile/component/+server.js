@@ -508,8 +508,8 @@ window.addEventListener('unhandledrejection',ev=>surface(ev.reason||ev,'Unhandle
       hydrationScript = `<!-- dom compile error: ${domCompileError} -->`;
     }
   // Pour production: on pourrait retirer le CDN Tailwind; on garde un flag simple (pas d'env server ici, heuristique: ajouter data-cdn-warning pour debug)
-  const tailwindCdn = '<script src="https://cdn.tailwindcss.com" data-cdn="1"></script>';
-  const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />\n${tailwindCdn}${importMap}${depCssTag}${ css?.code ? `\n<style>${css.code}</style>`:'' }${ !css?.code && domCssCode ? `\n<style>${domCssCode}</style>`:''}</head><body class="p-4">${metaComment}\n${wrapStart}${htmlBody}</div>${hydrationScript}</body></html>`;
+  const tailwindLink = '<link rel="stylesheet" href="/tailwind.css" data-local="1" />';
+  const html = `<!DOCTYPE html><html><head><meta charset='utf-8'>\n<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />\n${tailwindLink}${importMap}${depCssTag}${ css?.code ? `\n<style>${css.code}</style>`:'' }${ !css?.code && domCssCode ? `\n<style>${domCssCode}</style>`:''}</head><body class="p-4">${metaComment}\n${wrapStart}${htmlBody}</div>${hydrationScript}</body></html>`;
 
     if(debug){
       if(debugStages) debugStages.finalSource = source;
@@ -523,8 +523,8 @@ window.addEventListener('unhandledrejection',ev=>surface(ev.reason||ev,'Unhandle
 
     const csp = [
       "default-src 'none'",
-      "style-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.tailwindcss.com",
-      "script-src 'unsafe-inline' blob: https://cdn.tailwindcss.com",
+      "style-src 'unsafe-inline' https://cdnjs.cloudflare.com 'self'",
+      "script-src 'unsafe-inline' blob:",
       "font-src https://cdnjs.cloudflare.com",
       "img-src data: blob:",
       "connect-src 'none'",

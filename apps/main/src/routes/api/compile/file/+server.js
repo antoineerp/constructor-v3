@@ -38,7 +38,7 @@ export async function GET({ url, request }) {
     } catch(e){ return json({ success:false, error:'Évaluation impossible: '+e.message }, { status:500 }); }
     let rendered;
     try { rendered = Component.render({}); } catch(e){ return json({ success:false, error:'Rendu échoué: '+e.message }, { status:500 }); }
-    const html = `<!DOCTYPE html><html><head><meta charset='utf-8'/><script src="https://cdn.tailwindcss.com"></script></head><body class='p-4'>${rendered.html}</body></html>`;
+  const html = `<!DOCTYPE html><html><head><meta charset='utf-8'/><link rel="stylesheet" href="/tailwind.css" /></head><body class='p-4'>${rendered.html}</body></html>`;
     return new Response(html, { headers:{ 'Content-Type':'text/html; charset=utf-8' } });
   } catch(e){
     console.error('compile/file error', e);

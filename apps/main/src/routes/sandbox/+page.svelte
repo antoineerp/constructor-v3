@@ -125,9 +125,9 @@
         const importMap = needsInternal ? `\n<script type=\"importmap\">${JSON.stringify({ imports:{ 'svelte/internal':'https://cdn.jsdelivr.net/npm/svelte@4.2.0/internal/index.js','svelte/internal/':'https://cdn.jsdelivr.net/npm/svelte@4.2.0/internal/' } })}<\/script>`: '';
         const missingDepHint = /import\s+.+\.svelte['"]/.test(rawJs) ? '<div class=\"text-[10px] text-amber-600 mb-2\">(Attention: les dépendances .svelte ne sont pas encore chargées côté DOM compile)</div>' : '';
   const html = String.raw`<!DOCTYPE html><html><head><meta charset='utf-8' />
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob: https://cdn.tailwindcss.com; style-src 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com; img-src data: blob:; font-src https://cdnjs.cloudflare.com; connect-src 'none';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline' https://cdnjs.cloudflare.com 'self'; img-src data: blob:; font-src https://cdnjs.cloudflare.com; connect-src 'none';">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
-<script src="https://cdn.tailwindcss.com"><\/script>${importMap}${css}
+<link rel="stylesheet" href="/tailwind.css" data-local="1" />${importMap}${css}
 </head><body class="p-2">
 ${missingDepHint}<div id="app"></div>
 <script>(function(){try{const js=decodeURIComponent(escape(atob('${b64}')));const blob=new Blob([js],{type:'text/javascript'});const u=URL.createObjectURL(blob);import(u).then(m=>{const App=window.__App||m.default;if(!App) throw new Error('App introuvable');new App({target:document.getElementById('app'), props:{ name:'Sandbox' }});}).catch(e=>{document.body.innerHTML='<pre style="color:#b91c1c;font:12px monospace;white-space:pre-wrap">'+e.message+'</pre>';});}catch(e){document.body.innerHTML='<pre style="color:#b91c1c">'+e.message+'</pre>';}})();<\/script>

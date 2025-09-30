@@ -746,7 +746,7 @@
         const bootParts = [];
         bootParts.push('<!DOCTYPE html><html><head><meta charset="utf-8" />');
         bootParts.push('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />');
-        bootParts.push('<scr'+'ipt src="https://cdn.tailwindcss.com"></scr'+'ipt>');
+  bootParts.push('<link rel="stylesheet" href="/tailwind.css" data-local="1" />');
         if(payload.css) bootParts.push(payload.css);
         bootParts.push('</head><body class="p-4"><div id="app"></div>');
         bootParts.push('<scr'+'ipt>(function(){');

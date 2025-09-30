@@ -350,7 +350,7 @@ export async function POST(event){
       } catch(_e){ /* SSR failure tolérée */ }
       const importMapJson = JSON.stringify(importMap, null, 2);
       const entryId = idMap.get(entryModule);
-      result.runtimeHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Sandbox Runtime ESM</title><script src="https://cdn.tailwindcss.com"></script>${cssTag}<script type='importmap'>${importMapJson}</script></head><body><div id='app'>${ssrHtml || 'Initialisation…'}</div><script type='module'>import App from '${entryId}';\ntry { const C = App.default || App; new C({ target: document.getElementById('app'), hydrate: ${ssrHtml? 'true':'false'} }); } catch(e){ console.error(e); document.getElementById('app').innerHTML='<pre style=\\"color:#b91c1c\\">'+(e.message||e)+'</pre>'; }</script></body></html>`;
+      result.runtimeHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Sandbox Runtime ESM</title><link rel="stylesheet" href="/tailwind.css" />${cssTag}<script type='importmap'>${importMapJson}</script></head><body><div id='app'>${ssrHtml || 'Initialisation…'}</div><script type='module'>import App from '${entryId}';\ntry { const C = App.default || App; new C({ target: document.getElementById('app'), hydrate: ${ssrHtml? 'true':'false'} }); } catch(e){ console.error(e); document.getElementById('app').innerHTML='<pre style=\\"color:#b91c1c\\">'+(e.message||e)+'</pre>'; }</script></body></html>`;
     }
   } catch(e){
     result.runtimeHtml = `<!DOCTYPE html><html><body><pre style='color:#b91c1c'>Runtime bundle error: ${String(e).replace(/</g,'&lt;')}</pre></body></html>`;

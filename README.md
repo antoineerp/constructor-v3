@@ -182,6 +182,11 @@ les couleurs pour du bleu ?"
 ### Frontend
 - **SvelteKit 2.5+** - Framework principal avec SSR
 - **TailwindCSS** - Styling utilitaire et responsive
+  - (CDN supprimé) Utilisation d'une feuille locale `static/tailwind.css`. Pour régénérer :
+    ```bash
+    pnpm dlx tailwindcss -c apps/main/tailwind.config.js -i apps/main/src/app.css -o apps/main/static/tailwind.css --minify
+    ```
+    Intégration future: ajouter une tâche Turbo dédiée (ex: `build:tailwind`).
  - **Storybook** - Documentation interactive des composants (port 6006)
 
 ### Embeddings & Réutilisation de code
