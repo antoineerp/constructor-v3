@@ -39,7 +39,7 @@ export async function POST(event){
   } catch(_e) {
     return json({ success:false, error:'Invalid JSON body' }, { status:400 });
   }
-  const { entries = [], files: injectedFiles, file, autoFix } = body;
+  const { entries = [], files: injectedFiles, file, autoFix, external } = body;
   try {
     let projectFiles = injectedFiles;
     if(!projectFiles){
@@ -325,8 +325,8 @@ export async function POST(event){
       ]) || 'export const noop=()=>{};';
       // Shim fallback si la version interne n'expose pas les helpers attendus (from_html etc.)
       function ensureClientShim(src){
-        if(/from_html\s*\(/.test(src)) return src; // déjà présent
-        return src + `\n// --- injected shim ---\nexport function from_html(t){const tpl=document.createElement('template');tpl.innerHTML=t.trim();return ()=>tpl.content.firstElementChild?tpl.content.firstElementChild.cloneNode(true):tpl.content.cloneNode(true);}\nexport function child(n,text){if(!n) return null;return text? n.firstChild : (n.firstElementChild||n.firstChild);}\nexport function sibling(node, idx){if(!node||!node.parentNode) return null;let cur=node.parentNode.firstChild;let i=0;while(cur&&i<idx){cur=cur.nextSibling;i++;}return cur;}\nexport const index = Symbol('index');\nexport function each(container,_flag,listGetter,_indexSym,cb){const arr=listGetter()||[];for(let i=0;i<arr.length;i++){cb(container,{get value(){return arr[i];}});} }\nexport function reset(_n){}\nexport function template_effect(fn){try{fn();}catch(e){console.warn('template_effect error',e);} }\nexport function set_attribute(el,k,v){ if(el) try{el.setAttribute(k,v);}catch{} }\nexport function set_text(node,txt){ if(node) node.textContent = txt==null?'':String(txt);}\nexport function append(parent,n){ if(parent&&n&&typeof parent.appendChild==='function') try{parent.appendChild(n);}catch(e){console.warn('appendChild failed:',e);} }\n`;
+        if(/from_html\s*\(/.test(src) && /export function get\s*\(/.test(src)) return src; // shim déjà enrichi
+        return src + `\n// --- injected shim ---\n// Shim minimal étendu pour satisfaire le runtime compilé (Svelte 5 fonctionnel)\nexport function from_html(t){const tpl=document.createElement('template');tpl.innerHTML=t.trim();return ()=>tpl.content.firstElementChild?tpl.content.firstElementChild.cloneNode(true):tpl.content.cloneNode(true);}\nexport function child(n,text){if(!n) return null;return text? n.firstChild : (n.firstElementChild||n.firstChild);}\nexport function sibling(node, idx){if(!node||!node.parentNode) return null;let cur=node.parentNode.firstChild;let i=0;while(cur&&i<idx){cur=cur.nextSibling;i++;}return cur;}\nexport const index = Symbol('index');\nexport function each(container,_flag,listGetter,_indexSym,cb){const arr=listGetter()||[];for(let i=0;i<arr.length;i++){cb(container,{get value(){return arr[i];}});} }\nexport function reset(_n){}\nexport function template_effect(fn){try{fn();}catch(e){console.warn('template_effect error',e);} }\nexport function set_attribute(el,k,v){ if(el) try{el.setAttribute(k,v);}catch{} }\nexport function set_text(node,txt){ if(node) node.textContent = txt==null?'':String(txt);}\nexport function append(parent,n){ if(!parent||!n) return; if(parent.nodeType===Node.DOCUMENT_NODE) parent = parent.body || parent.documentElement; if(parent&&typeof parent.appendChild==='function'){ try{ parent.appendChild(n); }catch(e){ console.warn('appendChild failed:',e); } } }\nexport function get(x){ try { return (x && typeof x==='object' && 'value' in x) ? x.value : x; } catch { return x; } }\n`;
       }
       svelteClient = ensureClientShim(svelteClient);
       const importMap = { imports: { 
@@ -379,7 +379,14 @@ export async function POST(event){
       } catch(_e){ /* SSR failure tolérée */ }
       const importMapJson = JSON.stringify(importMap, null, 2);
       const entryId = idMap.get(entryModule);
-      result.runtimeHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Sandbox Runtime ESM</title><link rel="stylesheet" href="/tailwind.css" />${cssTag}<script type='importmap'>${importMapJson}</script></head><body><div id='app'>${ssrHtml || 'Initialisation…'}</div><script type='module'>import App from '${entryId}';\ntry { const C = App.default || App; new C({ target: document.getElementById('app'), hydrate: ${ssrHtml? 'true':'false'} }); } catch(e){ console.error(e); document.getElementById('app').innerHTML='<pre style=\\"color:#b91c1c\\">'+(e.message||e)+'</pre>'; }</script></body></html>`;
+      if(external){
+        // Mode CDN externe: ne pas injecter les data:URL internes pour svelte/internal, utiliser esm.sh
+        const cdnImportMap = { imports: { 'svelte': 'https://esm.sh/svelte@5', 'svelte/': 'https://esm.sh/svelte@5/' } };
+        const cdnMapJson = JSON.stringify(cdnImportMap);
+        result.runtimeHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Sandbox Runtime ESM External</title><link rel="stylesheet" href="/tailwind.css" />${cssTag}<script type='importmap'>${cdnMapJson}</script></head><body><div id='app'>${ssrHtml || ''}</div><script type='module'>import AppMod from '${entryId}';\nconst mountEl = document.getElementById('app');\nfunction mount(mod){ if(!mod) throw new Error('Export composant introuvable'); const isClass = typeof mod==='function' && mod.prototype && (mod.prototype.$destroy||mod.prototype.$set); if(isClass){ new mod({ target: mountEl, hydrate: ${ssrHtml? 'true':'false'} }); } else if(typeof mod==='function'){ mod(mountEl); } else { throw new Error('Type export inattendu'); } }\ntry { mount((AppMod && AppMod.default) ? AppMod.default : AppMod); } catch(e){ console.error('[runtime mount error]', e); if(mountEl) mountEl.innerHTML='<pre style=\\"color:#b91c1c;white-space:pre-wrap;font:12px monospace\\">'+(e.stack||e.message||e)+'</pre>'; }</script></body></html>`;
+      } else {
+        result.runtimeHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Sandbox Runtime ESM</title><link rel="stylesheet" href="/tailwind.css" />${cssTag}<script type='importmap'>${importMapJson}</script></head><body><div id='app'>${ssrHtml || 'Initialisation…'}</div><script type='module'>import AppMod from '${entryId}';\nconst mountEl = document.getElementById('app');\ntry {\n  const mod = (AppMod && AppMod.default) ? AppMod.default : AppMod;\n  if(!mod) throw new Error('Export composant introuvable');\n  const looksLikeClass = typeof mod === 'function' && mod.prototype && (mod.prototype.$destroy || mod.prototype.$set);\n  if(looksLikeClass){\n    new mod({ target: mountEl, hydrate: ${ssrHtml? 'true':'false'} });\n  } else if (typeof mod === 'function') {\n    mod(mountEl);\n  } else {\n    throw new Error('Type export inattendu');\n  }\n} catch(e){ console.error('[runtime mount error]', e); if(mountEl) mountEl.innerHTML='<pre style=\\"color:#b91c1c;white-space:pre-wrap;font:12px monospace\\">'+(e.stack||e.message||e)+'</pre>'; }</script></body></html>`;
+      }
     }
   } catch(e){
     result.runtimeHtml = `<!DOCTYPE html><html><body><pre style='color:#b91c1c'>Runtime bundle error: ${String(e).replace(/</g,'&lt;')}</pre></body></html>`;

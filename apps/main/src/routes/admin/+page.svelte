@@ -86,8 +86,9 @@
   let fastStatus = 'idle'; // idle|compiling|error|ok
   let importWarnings = [];
   let rewritesMeta = null;
-  // Génération site multipage (Phase 1)
-  let siteGenLoading = false; let siteGenError=''; let siteRichness=null;
+  // Génération site multipage (Phase 1) + Enrichissement (Phase 2)
+  let siteGenLoading = false; let siteGenError=''; let siteRichness=null; let siteSpec=null;
+  let siteEnrichLoading=false; let siteEnrichError=''; let siteEnrichPasses=0; let siteLastDeficits=[]; let sitePreviousRichness=null;
   async function generateSite(){
     siteGenLoading = true; siteGenError=''; siteRichness=null;
     try {
@@ -95,7 +96,7 @@
       const r = await fetch('/api/generate/site2pass', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ prompt: basePrompt, targetPages:4 }) });
       const j = await r.json();
       if(!r.ok || !j.success) throw new Error(j.error||('HTTP '+r.status));
-      siteRichness = j.richness;
+      siteRichness = j.richness; siteSpec = j.spec || null; siteEnrichPasses=0; siteLastDeficits=[]; sitePreviousRichness=null; siteEnrichError='';
       // Injecter Router comme code principal + pages comme dependencies
       if(j.files){
         let rootCode = j.files['Router.svelte'];
@@ -112,6 +113,35 @@
       }
     } catch(e){ siteGenError = e.message; pushToast('Gen site échec: '+e.message,'error'); }
     finally { siteGenLoading=false; }
+  }
+  async function enrichSite(){
+    if(!siteSpec){ pushToast('Aucun site à enrichir','warning'); return; }
+    siteEnrichLoading=true; siteEnrichError='';
+    try {
+      siteEnrichPasses++;
+      // Construire objet files minimal: Router + pages
+      const files = { 'Router.svelte': previewCode };
+      for(const [path, code] of Object.entries(dependencies)){
+        if(path.startsWith('pages/')) files[path] = code;
+      }
+      const r = await fetch('/api/generate/siteEnrich', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ spec: siteSpec, files, target:{ minSectionsPerPage:6, minScore:160 } }) });
+      const j = await r.json();
+      if(!r.ok || !j.success) throw new Error(j.error||('HTTP '+r.status));
+      sitePreviousRichness = j.previousRichness || siteRichness;
+      siteRichness = j.richness || siteRichness;
+      siteSpec = j.spec || siteSpec;
+      siteLastDeficits = j.deficits || [];
+      if(j.updatedFiles){
+        let newRoot = previewCode; const deps = { ...dependencies };
+        for(const [k,v] of Object.entries(j.updatedFiles)){
+          if(k==='Router.svelte'){ newRoot = v; continue; }
+          deps[k.startsWith('pages/')? k : 'pages/'+k] = v;
+        }
+        dependencies = deps; previewCode = newRoot;
+      }
+      pushToast('Enrichissement complet (score '+(siteRichness?.score||'?')+')','success');
+    } catch(e){ siteEnrichError = e.message; pushToast('Enrichissement échec: '+e.message,'error'); }
+    finally { siteEnrichLoading=false; }
   }
   // Infos stack / squelette UI (placeholder: à relier à une source côté serveur si dispo)
   let uiStackChoice = null; // sera potentiellement récupéré via un endpoint futur
@@ -646,6 +676,11 @@
         {#if siteRichness}
           <span class="px-2 py-1 bg-gray-200 rounded">Richesse score: {siteRichness.score}</span>
           <span class="text-gray-500">{siteRichness.metrics.pages}p / {siteRichness.metrics.sections}s / {siteRichness.metrics.images}img</span>
+          <button class="ml-3 px-3 py-1.5 rounded bg-indigo-600 text-white disabled:opacity-50" disabled={siteEnrichLoading} on:click={enrichSite}> {siteEnrichLoading ? 'Enrichissement…' : 'Enrichir (Phase 2)'} </button>
+          {#if siteEnrichError}<span class="text-red-600 ml-2">{siteEnrichError}</span>{/if}
+          {#if sitePreviousRichness && siteRichness}
+            <span class="ml-2 text-[10px] text-gray-500">Δ {(siteRichness.score - sitePreviousRichness.score) >=0 ? '+' : ''}{siteRichness.score - sitePreviousRichness.score}</span>
+          {/if}
         {/if}
       </div>
       {#if uiStackChoice || uiBlueprintRef}
