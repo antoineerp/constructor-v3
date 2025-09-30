@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
 
   import Button from '$lib/Button.svelte';
   import Card from '$lib/Card.svelte';
@@ -37,9 +37,7 @@
   let previewHeuristics = [];
   let iframeKey = 0; // force reload iframe
   let fastPreview = true; // active le mode compilation rapide worker
-  let faithfulPreview = false; // build fidèle serveur
   let fastStatus = 'idle'; // idle|compiling|error|ok
-  let faithfulStatus = 'idle';
   let importWarnings = [];
   let rewritesMeta = null;
 
@@ -53,32 +51,25 @@
     return compileRapidFn;
   }
 
+  let lastFastBlob = null;
   async function runFastPreview(){
-    fastStatus = 'compiling';
-    importWarnings = []; rewritesMeta=null;
+    fastStatus = 'compiling'; importWarnings = []; rewritesMeta=null;
     try {
       const rapid = await ensureRapid();
       if(!rapid) throw new Error('compileRapid non chargé');
       const res = await rapid(previewCode, 'Component.svelte');
-      if(!res.ok){ throw new Error(res.error||'Erreur compileRapid'); }
-      // Insérer le JS compilé dans une iframe sandbox simple
-      const jsCode = res.js || '';
+      if(!res.ok) throw new Error(res.error||'Erreur compileRapid');
+      let jsCode = res.js || '';
       const cssCode = res.css || '';
-      const html = [
-        '<!DOCTYPE html><html><head><meta charset="utf-8"><style>', cssCode, '</style></head><body>',
-        '<div id="app"></div>',
-        '<scr' + 'ipt type="module">',
-        jsCode,
-        '\n;try{const C=Component; new C({ target: document.getElementById("app"), props:{ label:"Fast" } });}catch(e){ document.body.innerHTML="<pre>"+e.message+"</pre>"; }',
-        '</scr' + 'ipt></body></html>'
-      ].join('');
+      // Neutralise imports relatifs pour éviter erreurs de résolution en sandbox rapide
+      jsCode = jsCode.replace(/import\s+[^;]+?from\s+['"](\.\.\/|\.\/)[^'"\n]+['"];?/g, '// [fast-rewrite] relative import supprimé');
+      const bootstrap = `\n;(()=>{function pickExport(mod){let C=mod.Component||mod.default||mod.App||mod; if(C&&C.default) C=C.default; return C;} try{const C=pickExport(globalThis); if(typeof C!=='function') throw new Error('Export composant introuvable'); new C({ target: document.getElementById('app'), props:{ label:'Fast'} });}catch(e){ const pre=document.createElement('pre'); pre.style.cssText='color:#b91c1c;font:12px monospace;white-space:pre-wrap;padding:8px'; pre.textContent='Fast preview error: '+(e.message||e); document.body.innerHTML=''; document.body.appendChild(pre);} })();`;
+      if(lastFastBlob){ try { URL.revokeObjectURL(lastFastBlob); } catch{} }
+      const html = ['<!DOCTYPE html><html><head><meta charset="utf-8"><style>', cssCode, '</style></head><body>','<div id="app"></div>','<scr'+'ipt type="module">',jsCode,bootstrap,'</scr'+'ipt></body></html>'].join('');
       const blobHtml = new Blob([html], { type:'text/html' });
-      const url = URL.createObjectURL(blobHtml);
-      fastIframeSrc = url;
-      fastStatus = 'ok';
-    } catch(e){
-      fastStatus = 'error'; fastError = e.message;
-    }
+      lastFastBlob = URL.createObjectURL(blobHtml);
+      fastIframeSrc = lastFastBlob; fastStatus='ok';
+    } catch(e){ fastStatus='error'; fastError=e.message; }
   }
 
   let fastIframeSrc = '';
@@ -103,7 +94,7 @@
       }
       const j = await r.json();
       // Inject listener pour relayer les erreurs d'hydratation vers parent
-  const inject = `<scr` + `ipt>window.addEventListener('component-hydration-error', e => { parent.postMessage({ type: 'hydration-error', message: (e.detail&&e.detail.message)||e.detail||'Hydration error' }, '*'); });</scr` + `ipt>`;
+  const inject = `<scr` + `ipt>(function(){try{if(window.__HYDRATION_BRIDGE)return;window.__HYDRATION_BRIDGE=1;window.addEventListener('component-hydration-error',function(e){try{parent&&parent.postMessage&&parent.postMessage({type:'hydration-error',message:(e.detail&&e.detail.message)||e.detail||'Hydration error'},'*');}catch(_e){}});}catch(_e){}})();</scr` + `ipt>`;
       previewHtml = (j.html || '') + inject;
       previewHeuristics = j.meta?.heuristics || [];
       previewSsrJs = j.ssrJs || '';
@@ -135,9 +126,12 @@
   let overlayVisible = false;
   function showHydrationError(msg){ hydrationMessage = msg; overlayVisible = true; const el = document.getElementById('hydration-overlay'); const msgEl = document.getElementById('hydration-overlay-msg'); if(el&&msgEl){ msgEl.textContent = msg; el.classList.remove('hidden'); } }
   function hideOverlay(){ overlayVisible=false; const el = document.getElementById('hydration-overlay'); if(el){ el.classList.add('hidden'); } }
+  let messageHandler;
   onMount(()=>{
-    window.addEventListener('message', (e)=>{ if(e.data && e.data.type==='hydration-error'){ showHydrationError(e.data.message); } });
+    messageHandler = (e)=>{ try { if(e.data && e.data.type==='hydration-error'){ showHydrationError(e.data.message); } } catch{} };
+    window.addEventListener('message', messageHandler);
   });
+  onDestroy(()=>{ if(messageHandler) window.removeEventListener('message', messageHandler); if(lastFastBlob){ try{ URL.revokeObjectURL(lastFastBlob);}catch{} } });
 
   // ====== IA ======
   import AiStatusBadge from '$lib/AiStatusBadge.svelte';
@@ -246,7 +240,7 @@
         </div>
         
         <div class="flex items-center space-x-4">
-          <div class="hidden sm:block"><AiStatusBadge {loading}={aiLoading} providers={aiMap} /></div>
+          <div class="hidden sm:block"><AiStatusBadge loading={aiLoading} providers={aiMap} /></div>
           <Button variant="secondary" size="sm" on:click={loadAIStatus} title="Rafraîchir statut IA">
             <i class="fas fa-download mr-2"></i>
             Exporter Données
@@ -514,7 +508,6 @@
               <details class="mt-2 text-[10px]">
                 <summary class="cursor-pointer text-gray-600">Voir JS SSR brut (tronc.)</summary>
                       <label class="flex items-center gap-1"><input type="checkbox" bind:checked={fastPreview}> <span>Fast preview</span></label>
-                      <label class="flex items-center gap-1"><input type="checkbox" bind:checked={faithfulPreview}> <span>Aperçu fidèle</span></label>
                 <pre class="mt-1 max-h-40 overflow-auto bg-gray-900 text-[10px] text-gray-100 p-2 rounded">{rawJsPreview}</pre>
                       {#if fastPreview}
                         <button class="px-3 py-1.5 rounded bg-indigo-600 text-white disabled:opacity-40" on:click={runFastPreview} disabled={fastStatus==='compiling'}>{fastStatus==='compiling'?'Fast...':'Fast DOM'}</button>
