@@ -22,26 +22,40 @@ export async function GET() {
         'node_modules/svelte/package.json',
         'node_modules/.ignored/svelte/package.json',
         path.resolve(process.cwd(), 'node_modules/svelte/package.json'),
-        path.resolve(process.cwd(), 'apps/main/node_modules/.ignored/svelte/package.json')
+        path.resolve(process.cwd(), 'apps/main/node_modules/.ignored/svelte/package.json'),
+        path.resolve('/var/task/node_modules/svelte/package.json'), // Vercel serverless
+        path.resolve(__dirname, '../../../node_modules/svelte/package.json') // Relative fallback
       ];
+      
+      diagnostics.svelte.attemptedPaths = [];
       
       for (const pkgPath of possiblePaths) {
         try {
-          pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-          diagnostics.svelte.version = pkg.version;
-          diagnostics.svelte.name = pkg.name;
-          diagnostics.svelte.resolvedPath = pkgPath;
-          break;
+          diagnostics.svelte.attemptedPaths.push({ path: pkgPath, exists: fs.existsSync(pkgPath) });
+          if (fs.existsSync(pkgPath)) {
+            pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+            diagnostics.svelte.version = pkg.version;
+            diagnostics.svelte.name = pkg.name;
+            diagnostics.svelte.resolvedPath = pkgPath;
+            break;
+          }
         } catch(e) {
+          diagnostics.svelte.attemptedPaths[diagnostics.svelte.attemptedPaths.length - 1].error = e.message;
           continue;
         }
       }
       
       if (!pkg) {
-        diagnostics.issues.push('Cannot find svelte package.json in any known location');
+        diagnostics.issues.push('Svelte package not found in production environment - move svelte from devDependencies to dependencies');
+        diagnostics.svelte.environment = {
+          cwd: process.cwd(),
+          __dirname: __dirname || 'not available',
+          nodeVersion: process.version,
+          platform: process.platform
+        };
       }
     } catch(e) {
-      diagnostics.issues.push('Cannot read svelte package.json: ' + e.message);
+      diagnostics.issues.push('Svelte detection failed: ' + e.message);
     }
 
     // 2. Vérifier les modules internes disponibles - avec les bons chemins

@@ -30,6 +30,14 @@
   
   let lineCount = (previewCode.match(/\n/g)||[]).length + 1;
   $: lineCount = (previewCode.match(/\n/g)||[]).length + 1;
+  
+  function setExampleCode() {
+    onSetExample('<' + 'script>\n  let t = new Date().toLocaleTimeString();\n</' + 'script>\n<p>Horloge: {t}</p>');
+  }
+  
+  function setMinimalCode() {
+    onSetExample('<h1>Hello</h1>');
+  }
 </script>
 
 <Card title="Preview Composant" subtitle="Compilation SSR + hydratation en direct">
@@ -148,10 +156,10 @@
       
       <div class="mt-2 flex gap-2 text-[10px] text-gray-500">
         <button class="underline" on:click={onCopyHtml}>Copier HTML</button>
-        <button class="underline" on:click={() => onSetExample('<script>\n let t = new Date().toLocaleTimeString();</script>\n<p>Horloge: {t}</p>')}>
+        <button class="underline" on:click={setExampleCode}>
           Exemple simple
         </button>
-        <button class="underline" on:click={() => onSetExample('<h1>Hello</h1>')}>
+        <button class="underline" on:click={setMinimalCode}>
           Minimal
         </button>
         {#if previewSsrJs && previewDomJs}
