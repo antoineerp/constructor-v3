@@ -123,93 +123,37 @@
   let lineCount = (previewCode.match(/\n/g)||[]).length + 1;
   let fastError = '';
   async function runPreview(){
+    if(previewAbort){ try { previewAbort.abort(); } catch{} }
+    previewAbort = new AbortController();
+    const signal = previewAbort.signal;
     previewLoading = true; previewError=''; previewHeuristics=[]; rawError=''; rawJsPreview='';
-    
-    // Timeout pour éviter les boucles infinies
-    const timeoutId = setTimeout(() => {
-      previewLoading = false;
-      previewError = 'Timeout: La compilation a pris trop de temps (>30s)';
-    }, 30000);
-    
+    const started = Date.now();
+    const timeout = setTimeout(()=>{ if(!signal.aborted){ previewError = 'Timeout (>20s)'; previewLoading=false; pushToast('Timeout compilation','error'); } }, 20000);
     try {
-      if(previewDiagnostic){
+      if(previewDiagnostic && !signal.aborted){
         try {
-          const rRaw = await fetch('/api/compile/raw', { 
-            method:'POST', 
-            headers:{'Content-Type':'application/json','Cache-Control':'no-store'}, 
-            body: JSON.stringify({ code: previewCode, generate:'ssr' }) 
-          });
-          if(!rRaw.ok){
-            try { 
-              const j = await rRaw.json(); 
-              rawError = '[raw] '+(j.error||`HTTP ${rRaw.status}`); 
-            } catch { 
-              rawError=`[raw] Erreur HTTP ${rRaw.status}`; 
-            }
-          } else {
-            const jRaw = await rRaw.json(); 
-            rawJsPreview = (jRaw.js||'').slice(0,3000);
-            if(jRaw.rewrites){ 
-              rewritesMeta = jRaw.rewrites; 
-              importWarnings = jRaw.rewrites.warnings||[]; 
-            }
-          }
-        } catch(diagError) {
-          rawError = '[raw] ' + diagError.message;
-        }
+          const rRaw = await fetch('/api/compile/raw', { method:'POST', headers:{'Content-Type':'application/json','Cache-Control':'no-store'}, body: JSON.stringify({ code: previewCode, generate:'ssr' }), signal });
+          if(rRaw.ok){ const jRaw = await rRaw.json(); rawJsPreview = (jRaw.js||'').slice(0,3000); if(jRaw.rewrites){ rewritesMeta=jRaw.rewrites; importWarnings=jRaw.rewrites.warnings||[]; } } else { try { const j=await rRaw.json(); rawError='[raw] '+(j.error||rRaw.status); } catch { rawError='[raw] HTTP '+rRaw.status; } }
+        } catch(e){ if(!signal.aborted) rawError='[raw] '+e.message; }
       }
-
-      const r = await fetch('/api/compile/component', { 
-        method:'POST', 
-        headers:{ 'Content-Type':'application/json','Cache-Control':'no-store' }, 
-        body: JSON.stringify({ 
-          code: previewCode, 
-          debug:true, 
-          strict: previewStrict, 
-          enableRendererNormalization:false 
-        }) 
-      });
-      
-      clearTimeout(timeoutId);
-      
+      if(signal.aborted) return;
+      const r = await fetch('/api/compile/component', { method:'POST', headers:{'Content-Type':'application/json','Cache-Control':'no-store'}, body: JSON.stringify({ code: previewCode, debug:true, strict: previewStrict, enableRendererNormalization:false }), signal });
+      if(signal.aborted) return;
       if(!r.ok){
-        let errorMsg = `HTTP ${r.status}`;
-        try { 
-          const txt = await r.text();
-          try { 
-            const j = JSON.parse(txt); 
-            errorMsg = j.error || j.message || errorMsg; 
-          } catch { 
-            errorMsg = txt.slice(0,200) || errorMsg; 
-          }
-        } catch { 
-          errorMsg = `Erreur réseau: ${r.status} ${r.statusText}`; 
-        }
-        previewError = errorMsg;
+        let msg = 'HTTP '+r.status;
+        try { const txt = await r.text(); try { const j=JSON.parse(txt); msg = j.error||j.message||msg; } catch { msg = txt.slice(0,180)||msg; } } catch{}
+        previewError = msg; pushToast('Erreur: '+msg,'error');
         return;
       }
-      
       const j = await r.json();
-      if(!j.success) {
-        previewError = j.error || 'Compilation échoué';
-        return;
-      }
-      
-      // Inject listener pour relayer les erreurs d'hydratation vers parent
-      const inject = `<scr` + `ipt>(function(){try{if(window.__HYDRATION_BRIDGE)return;window.__HYDRATION_BRIDGE=1;window.addEventListener('component-hydration-error',function(e){try{parent&&parent.postMessage&&parent.postMessage({type:'hydration-error',message:(e.detail&&e.detail.message)||e.detail||'Hydration error'},'*');}catch(_e){}});}catch(_e){}})();</scr` + `ipt>`;
-      previewHtml = (j.html || '') + inject;
-      previewHeuristics = j.meta?.heuristics || [];
-      previewSsrJs = j.ssrJs || '';
-      previewDomJs = j.domJs || '';
-      iframeKey++; // changer clé pour recharger
-    } catch(e){
-      clearTimeout(timeoutId);
-      previewError = `Erreur: ${e.message}`;
-      console.error('Preview compilation error:', e);
-    } finally {
-      clearTimeout(timeoutId);
-      previewLoading = false;
-    }
+      if(!j.success){ previewError = j.error||'Compilation échouée'; pushToast('Compilation échouée','error'); return; }
+      const inject = `<scr`+`ipt>(function(){try{if(window.__HYDRATION_BRIDGE)return;window.__HYDRATION_BRIDGE=1;document.addEventListener('component-hydration-error',function(e){try{parent&&parent.postMessage&&parent.postMessage({type:'hydration-error',message:(e.detail&&e.detail.message)||e.detail||'Hydration error'},'*');}catch(_e){}});}catch(_e){}})();</scr`+`ipt>`;
+      previewHtml = (j.html||'') + inject;
+      previewHeuristics = j.meta?.heuristics||[];
+      previewSsrJs = j.ssrJs||''; previewDomJs = j.domJs||''; iframeKey++;
+      const dur = Date.now()-started; if(dur>1500) pushToast('Compile '+dur+'ms','info');
+    } catch(e){ if(!signal.aborted){ previewError = e.name==='AbortError' ? 'Annulé' : e.message; pushToast('Exception: '+previewError,'error'); } }
+    finally { clearTimeout(timeout); if(!signal.aborted) previewLoading=false; }
   }
 
   // Diff SSR vs Fast (DOM) – pagination
@@ -364,6 +308,17 @@
   }
   function shortId(id){ return id ? String(id).slice(0,8) : ''; }
   function formatBytes(n){ if(!n && n!==0) return ''; const u=['B','KB','MB','GB']; let i=0, v=n; while(v>=1024 && i<u.length-1){ v/=1024; i++; } return (i? v.toFixed(1): v)+' '+u[i]; }
+
+  let lastBlobUrl = '';
+  async function savePreviewToBlob(){
+    try {
+      const body = { content: previewHtml || '<!--vide-->', path: 'previews/preview-'+Date.now()+'.html', contentType:'text/html' };
+      const r = await fetch('/api/blob/put', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const j = await r.json();
+      if(!r.ok || !j.success){ pushToast('Échec blob: '+(j.error||r.status),'error'); return; }
+      lastBlobUrl = j.url; pushToast('Preview sauvegardée','success');
+    } catch(e){ pushToast('Blob err: '+e.message,'error'); }
+  }
 </script>
 
 <svelte:head>
@@ -718,3 +673,24 @@
     </Button>
   </div>
 </Modal>
+
+<!-- Ajout bandeau erreur preview -->
+{#if activeTab==='preview'}
+  {#if previewError}
+    <div class="max-w-7xl mx-auto px-4 -mt-4 mb-4">
+      <div class="p-3 rounded border border-red-300 bg-red-50 text-red-700 text-xs flex items-start gap-3">
+        <i class="fas fa-triangle-exclamation mt-0.5"></i>
+        <div class="flex-1">
+          <strong class="font-semibold">Erreur Preview:</strong> {previewError}
+          {#if rawError}<div class="mt-1 opacity-80">{rawError}</div>{/if}
+          <div class="mt-1 flex gap-2 flex-wrap">
+            <button class="underline" on:click={runPreview}>Relancer</button>
+            <button class="underline" on:click={savePreviewToBlob}>Sauvegarder sur Blob</button>
+            {#if lastBlobUrl}<a class="underline text-blue-700" href={lastBlobUrl} target="_blank" rel="noopener">Ouvrir Blob</a>{/if}
+          </div>
+        </div>
+  <button class="text-xs" on:click={()=> previewError=''}>&times;</button>
+      </div>
+    </div>
+  {/if}
+{/if}
