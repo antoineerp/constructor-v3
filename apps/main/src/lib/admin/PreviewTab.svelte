@@ -257,7 +257,7 @@
           title="Preview composant"
           class="w-full h-72 border rounded bg-white"
           srcdoc={previewHtml}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts"
           referrerpolicy="no-referrer"
           on:load={() => { /* load capturé via addEventListener */ }}
         ></iframe>

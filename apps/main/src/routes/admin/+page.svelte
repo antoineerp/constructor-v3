@@ -186,7 +186,7 @@
     addStage('REQ_START');
     previewLoading = true; previewError=''; previewHeuristics=[]; rawError=''; rawJsPreview='';
     const started = Date.now();
-    const timeout = setTimeout(()=>{ if(!signal.aborted){ previewError = 'Timeout (>20s)'; previewLoading=false; pushToast('Timeout compilation','error'); } }, 20000);
+  const timeout = setTimeout(()=>{ if(!signal.aborted){ previewError = 'Timeout (>10s)'; previewLoading=false; pushToast('Timeout compilation','error'); } }, 10000);
     try {
       if(previewDiagnostic && !signal.aborted){
         try {

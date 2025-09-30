@@ -487,13 +487,27 @@ export async function POST(event) {
     const needsInternal = domJsCode && /svelte\/internal/.test(domJsCode);
     let importMap = '';
     if(needsInternal){
+      const fsMod = await import('node:fs');
       let internalClient=''; let internalCore='';
-      try { internalClient = (await import('node:fs')).readFileSync('node_modules/svelte/internal/client.js','utf-8'); } catch{ internalClient='export const noop=()=>{};'; }
-      try { internalCore = (await import('node:fs')).readFileSync('node_modules/svelte/internal/index.js','utf-8'); } catch{ internalCore='export const noop=()=>{};'; }
+      try { internalClient = fsMod.readFileSync('node_modules/svelte/internal/client.js','utf-8'); } catch{ internalClient='export const noop=()=>{};'; }
+      try { internalCore = fsMod.readFileSync('node_modules/svelte/internal/index.js','utf-8'); } catch{ internalCore='export const noop=()=>{};'; }
       const map = { imports: {
         'svelte/internal/client': 'data:application/javascript;base64,'+Buffer.from(internalClient,'utf-8').toString('base64'),
         'svelte/internal': 'data:application/javascript;base64,'+Buffer.from(internalCore,'utf-8').toString('base64')
       }};
+      try {
+        // Détecter sous-modules utilisés (ex: disclose-version, flags/legacy)
+        const submods = Array.from(new Set([...(domJsCode||'').matchAll(/['"]svelte\/internal\/(.+?)['"]/g)].map(m=> m[1])));
+        for(const sm of submods){
+          const key = 'svelte/internal/'+sm;
+            if(!map.imports[key]){
+              try {
+                const code = fsMod.readFileSync('node_modules/svelte/internal/'+sm,'utf-8');
+                map.imports[key] = 'data:application/javascript;base64,'+Buffer.from(code,'utf-8').toString('base64');
+              } catch { /* ignore missing */ }
+            }
+        }
+      } catch { /* ignore parse errors */ }
       importMap = `\n<script type="importmap">${JSON.stringify(map)}</script>`;
     }
     const wrapStart = canRequire ? '<div id="__component_root">' : '<div id="__component_root" data-no-ssr="1">';
@@ -502,10 +516,10 @@ export async function POST(event) {
     if(canRequire && domJsCode){
       const b64 = Buffer.from(domJsCode,'utf-8').toString('base64');
       const propsB64 = Buffer.from(JSON.stringify(globalThis.__LAST_COMPONENT_PROPS__||{}),'utf-8').toString('base64');
-  hydrationScript = `<script>(function(){const ROOT_ID='__component_root';let __hydrationSignal=0;function post(type,msg){try{parent&&parent.postMessage&&parent.postMessage({type,message:msg},'*');}catch(_e){}}function surface(err,label){console.error(label,err);var r=document.getElementById(ROOT_ID);if(r){r.setAttribute('data-hydration-error', err.message||String(err));r.setAttribute('data-hydration-status','error');r.innerHTML='<pre style=\\"color:#b91c1c;font:11px/1.4 monospace;white-space:pre-wrap;padding:8px;border:1px solid #fca5a5;background:#fef2f2;border-radius:4px;\\">Hydration error: '+(err.message||String(err)).replace(/</g,'&lt;')+'</pre>';document.dispatchEvent(new CustomEvent('component-hydration-error',{detail:{message:err.message,label}}));post('hydration-error',err.message||String(err));}}
+  hydrationScript = `<script>(function(){const ROOT_ID='__component_root';let __hydrationSignal=0;function post(type,msg){try{parent&&parent.postMessage&&parent.postMessage({type,message:msg},'*');}catch(_e){}}function surface(err,label){console.error(label,err);var r=document.getElementById(ROOT_ID);if(r){r.setAttribute('data-hydration-error', err.message||String(err));r.setAttribute('data-hydration-status','error');r.innerHTML='<pre style=\"color:#b91c1c;font:11px/1.4 monospace;white-space:pre-wrap;padding:8px;border:1px solid #fca5a5;background:#fef2f2;border-radius:4px;\">Hydration error: '+(err.message||String(err)).replace(/</g,'&lt;')+'</pre>';document.dispatchEvent(new CustomEvent('component-hydration-error',{detail:{message:err.message,label}}));post('hydration-error',err.message||String(err));}}
 setTimeout(function(){if(!__hydrationSignal){post('hydration-pending','Hydratation non confirmée');}},3000);
 try{const js=atob('${b64}');const blob=new Blob([js],{type:'text/javascript'});const u=URL.createObjectURL(blob);const props=JSON.parse(atob('${propsB64}'));
-import(u).then(m=>{try{const C=m.default||m;const root=document.getElementById(ROOT_ID);if(!C){throw new Error('Aucun export default trouvé');} if(typeof C!=='function'){throw new Error('Export default invalide (type '+(typeof C)+')');} if(root){new C({target:root, hydrate:true, props});root.setAttribute('data-hydration-status','ok');__hydrationSignal=1;post('hydration-ok','ok');}}catch(e){surface(e,'Hydration construct error');}}).catch(e=>surface(e,'Hydration import fail'));
+import(u).then(m=>{try{const root=document.getElementById(ROOT_ID);if(!root) throw new Error('Root introuvable');let C=m.default||m; if(!C) throw new Error('Aucun export default trouvé'); let mounted=false; if(typeof C==='function'){ try { C(root,{ props }); mounted=true; } catch(fnErr){ try { new C({ target:root, hydrate:true, props }); mounted=true; } catch(ctorErr){ throw fnErr; } } } else if(C && typeof C.mount==='function'){ C.mount(root); mounted=true; } if(!mounted) throw new Error('Impossible de monter export'); root.setAttribute('data-hydration-status','ok');__hydrationSignal=1;post('hydration-ok','ok'); }catch(e){ surface(e,'Hydration mount error'); }}).catch(e=>surface(e,'Hydration import fail'));
 window.addEventListener('unhandledrejection',ev=>surface(ev.reason||ev,'Unhandled promise rejection'));
 }catch(e){surface(e,'Hydration bootstrap error');}})();</script>`;
     } else if(!canRequire && domCompileError){
