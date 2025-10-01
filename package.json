@@ -55,7 +55,7 @@
     "svelte-preprocess": "^5.1.4",
     "tailwind-merge": "^2.5.2",
     "tailwind-variants": "^0.2.1",
-    "tailwindcss": "^3.4.0",
+    "tailwindcss": "^4.1.14",
     "turbo": "^2.5.8",
     "typescript": "5.9.2",
     "typescript-eslint": "^8.8.0",
@@ -78,5 +78,10 @@
   "type": "module",
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "@monaco-editor/loader": "^1.5.0",
+    "@skeletonlabs/skeleton": "^3.2.2",
+    "@skeletonlabs/tw-plugin": "^0.4.1"
   }
 }
