@@ -110,6 +110,9 @@ importers:
       '@fortawesome/fontawesome-free':
         specifier: ^7.0.1
         version: 7.0.1
+      '@monaco-editor/loader':
+        specifier: ^1.5.0
+        version: 1.5.0
       '@vercel/blob':
         specifier: ^0.23.0
         version: 0.23.4
@@ -117,7 +120,7 @@ importers:
         specifier: ^3.10.1
         version: 3.10.1
       monaco-editor:
-        specifier: ^0.52.0
+        specifier: ^0.52.2
         version: 0.52.2
       openai:
         specifier: ^4.67.0
@@ -753,6 +756,9 @@ packages:
     resolution: {integrity: sha512-7SbOa11tXUS95T3fReL+dwDs5FyJtCEqrqG3inRziDws346SYLsxOQ6HmX+4BkIsQh1R8U3XNa+EMmdMt38lMA==}
     peerDependencies:
       svelte: '>=3 <5'
+
+  '@monaco-editor/loader@1.5.0':
+    resolution: {integrity: sha512-hKoGSM+7aAc7eRTRjpqAZucPmoNOC4UUbknb/VNoTkEIkCPhqV8LfbsgM1webRM7S/z21eHEx9Fkwx8Z/C/+Xw==}
 
   '@nodelib/fs.scandir@2.1.5':
     resolution: {integrity: sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==}
@@ -3557,6 +3563,9 @@ packages:
   stackback@0.0.2:
     resolution: {integrity: sha512-1XMJE5fQo1jGH6Y/7ebnwPOBEkIEnT4QF32d5R1+VXdXveM0IBMJt8zfaxX1P3QhVwrYe+576+jkANtSS2mBbw==}
 
+  state-local@1.0.7:
+    resolution: {integrity: sha512-HTEHMNieakEnoe33shBYcZ7NX83ACUjCu8c40iOGEZsngj9zRnkqS9j1pqQPXwobB0ZcVTk27REb7COQ0UR59w==}
+
   std-env@3.9.0:
     resolution: {integrity: sha512-UGvjygr6F6tpH7o2qyqR6QYpwraIjKSdtzyBdyytFOHmPZY917kwdwLG0RbOjWOnKmnm3PeHjaoLLMie7kPLQw==}
 
@@ -4572,6 +4581,10 @@ snapshots:
       focus-trap: 7.6.5
       nanoid: 5.1.6
       svelte: 5.39.6
+
+  '@monaco-editor/loader@1.5.0':
+    dependencies:
+      state-local: 1.0.7
 
   '@nodelib/fs.scandir@2.1.5':
     dependencies:
@@ -7621,6 +7634,8 @@ snapshots:
   source-map@0.6.1: {}
 
   stackback@0.0.2: {}
+
+  state-local@1.0.7: {}
 
   std-env@3.9.0: {}
 

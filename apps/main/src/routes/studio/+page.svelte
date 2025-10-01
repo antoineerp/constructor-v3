@@ -14,6 +14,7 @@
   import SiteGenerator from '$lib/SiteGenerator.svelte';
   import ChatGenerator from '$lib/ChatGenerator.svelte';
   import PreviewFrame from '$lib/components/PreviewFrame.svelte';
+  import MonacoEditor from '$lib/components/MonacoEditor.svelte';
   
   // Configuration globale
   let provider = 'openai';
@@ -39,9 +40,33 @@
   let selectedFile = null;
   let generationInProgress = false;
   
+  // Fonction pour détecter le langage depuis l'extension
+  function getLanguageFromFilename(filename) {
+    const ext = filename.split('.').pop()?.toLowerCase();
+    const langMap = {
+      'svelte': 'svelte',
+      'ts': 'typescript',
+      'js': 'javascript',
+      'json': 'json',
+      'html': 'html',
+      'css': 'css',
+      'scss': 'scss',
+      'md': 'markdown',
+      'yml': 'yaml',
+      'yaml': 'yaml',
+      'cjs': 'javascript',
+      'mjs': 'javascript',
+      'jsx': 'javascript',
+      'tsx': 'typescript'
+    };
+    return langMap[ext] || 'plaintext';
+  }
+
   // Sandbox rapide
   let sandboxCode = `<script>
-  export let name = 'Test';
+  import { Button } from '@skeletonlabs/skeleton';
+  
+  export let name = 'Constructor v3';
   let count = 0;
 <\/script>
 
@@ -103,12 +128,6 @@
       </a>
     </svelte:fragment>
   </AppBar>
-  </header>
-  
-  <!-- Navigation par onglets -->
-  <nav class="bg-white border-b">
-    <div class="max-w-7xl mx-auto px-4">
-      <div class="flex gap-1">
   
   <!-- Navigation par onglets avec Skeleton TabGroup -->
   <div class="bg-surface-100 border-b border-surface-300">
@@ -200,14 +219,41 @@
               {#if selectedFile}
                 <div class="border-b border-surface-300 p-3 flex items-center justify-between">
                   <span class="text-sm font-medium">{selectedFile}</span>
-                  <button 
-                    class="btn btn-sm variant-ghost-surface"
-                    on:click={() => navigator.clipboard.writeText(generatedFiles[selectedFile])}
-                  >
-                    📋 Copier
-                  </button>
+                  <div class="flex gap-2">
+                    <button 
+                      class="btn btn-sm variant-ghost-surface"
+                      on:click={() => navigator.clipboard.writeText(generatedFiles[selectedFile])}
+                    >
+                      📋 Copier
+                    </button>
+                    <button 
+                      class="btn btn-sm variant-filled-primary"
+                      on:click={() => {
+                        const newFiles = { ...generatedFiles };
+                        newFiles[selectedFile] = generatedFiles[selectedFile];
+                        generatedFiles = newFiles;
+                      }}
+                    >
+                      💾 Sauver
+                    </button>
+                  </div>
                 </div>
-                <pre class="p-4 text-xs overflow-auto max-h-[600px] bg-surface-100"><code>{generatedFiles[selectedFile]}</code></pre>
+                <MonacoEditor
+                  value={generatedFiles[selectedFile]}
+                  language={getLanguageFromFilename(selectedFile)}
+                  theme="vs-dark"
+                  height="600px"
+                  options={{
+                    readOnly: false,
+                    minimap: { enabled: true },
+                    wordWrap: 'on',
+                    formatOnPaste: true,
+                    formatOnType: true
+                  }}
+                  on:change={(e) => {
+                    generatedFiles[selectedFile] = e.detail.value;
+                  }}
+                />
               {:else}
                 <div class="p-8 text-center text-surface-600">
                   Sélectionnez un fichier pour voir son contenu
@@ -258,11 +304,21 @@
             <header class="card-header">
               <h3 class="h3">Éditeur Svelte</h3>
             </header>
-            <textarea
+            <MonacoEditor
               bind:value={sandboxCode}
-              class="textarea w-full h-[500px] font-mono text-sm resize-none"
-              placeholder="Écrivez votre code Svelte ici..."
-            ></textarea>
+              language="svelte"
+              theme="vs-dark"
+              height="500px"
+              options={{
+                minimap: { enabled: true },
+                wordWrap: 'on',
+                automaticLayout: true,
+                suggestOnTriggerCharacters: true,
+                quickSuggestions: true,
+                snippetSuggestions: 'inline'
+              }}
+              on:change={(e) => sandboxCode = e.detail.value}
+            />
             <footer class="card-footer flex justify-end">
               <button class="btn variant-filled-primary">
                 🔄 Compiler & Prévisualiser
