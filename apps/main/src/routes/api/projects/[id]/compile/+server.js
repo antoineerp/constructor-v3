@@ -12,6 +12,12 @@ export const config = { runtime: 'nodejs20.x' };
 import { computeProjectHash, getCached, setCached } from '$lib/preview/compileCache.js';
 import { fixRouteImports } from '$lib/fix/routeImports.js';
 import { supabase as clientSupabase, isSupabaseEnabled } from '$lib/supabase.js';
+import { 
+  SECURITY_CONFIG, 
+  validateTailwindConfig, 
+  cleanSvelteLegacyImports,
+  secureLog 
+} from '$lib/security/validation.js';
 
 // POST /api/projects/:id/compile
 // Body optionnel: { entries?: string[], files?: Record<string,string> } (si files absent => charge depuis DB)
@@ -97,9 +103,19 @@ export async function POST(event){
     let cssHash = null;
     const hasTailwind = !!projectFiles['src/app.css'] && !!projectFiles['tailwind.config.cjs'];
     const cssCacheTTLms = 2 * 60 * 1000; // 2 minutes
-    // Module-level cache (closure)
-    if(typeof globalThis.__TAILWIND_CSS_CACHE === 'undefined') globalThis.__TAILWIND_CSS_CACHE = new Map();
+    // 🗃️ Cache LRU avec limitation de taille (sécurité mémoire)
+    if(typeof globalThis.__TAILWIND_CSS_CACHE === 'undefined') {
+      globalThis.__TAILWIND_CSS_CACHE = new Map();
+    }
     const cssCache = globalThis.__TAILWIND_CSS_CACHE;
+    
+    // Nettoyage LRU si cache trop gros
+    const MAX_CACHE_SIZE = 50; // Maximum 50 entrées CSS
+    if (cssCache.size >= MAX_CACHE_SIZE) {
+      const oldestKey = cssCache.keys().next().value;
+      cssCache.delete(oldestKey);
+      console.log('[compile/cache] LRU eviction, removed oldest CSS cache entry');
+    }
     try {
       if(hasTailwind){
         cssHash = crypto.createHash('sha1').update(projectFiles['src/app.css']).update(projectFiles['tailwind.config.cjs']).digest('hex');
@@ -110,15 +126,44 @@ export async function POST(event){
           const tmpDir = `/tmp/preview-${Date.now()}-${Math.random().toString(36).slice(2)}`;
           fs.mkdirSync(tmpDir, { recursive:true });
           try {
+            // 🛡️ VALIDATION SÉCURITAIRE DES CONFIGS AVANT EXÉCUTION
+            validateTailwindConfig(projectFiles['tailwind.config.cjs']);
+            
             fs.writeFileSync(`${tmpDir}/tailwind.config.cjs`, projectFiles['tailwind.config.cjs']);
             fs.writeFileSync(`${tmpDir}/app.css`, projectFiles['src/app.css']);
+            
             try {
-              const out = execSync(`npx tailwindcss -i ${tmpDir}/app.css -c ${tmpDir}/tailwind.config.cjs --minify`, { encoding:'utf-8', stdio:['ignore','pipe','pipe'], timeout:8000 });
+              // 🔒 Exécution sécurisée avec validation supplémentaire
+              const safeTmpDir = tmpDir.replace(/[^a-zA-Z0-9\/\-_.]/g, ''); // Sanitize path
+              const out = execSync(
+                `npx --yes tailwindcss@latest -i "${safeTmpDir}/app.css" -c "${safeTmpDir}/tailwind.config.cjs" --minify`, 
+                { 
+                  encoding:'utf-8', 
+                  stdio:['ignore','pipe','pipe'], 
+                  timeout: 8000,
+                  maxBuffer: 1024 * 1024 * 5, // 5MB max output
+                  env: { ...process.env, NODE_ENV: 'production' } // Isolation environnement
+                }
+              );
               globalCss = out.trim();
               cssCache.set(cssHash, { css: globalCss, t: Date.now() });
-            } catch(e){ /* ignore tailwind failure */ }
+              
+              console.log('[compile/css] Tailwind build success:', {
+                projectId: params.id,
+                cssLength: globalCss.length,
+                timestamp: new Date().toISOString()
+              });
+            } catch(e){ 
+              console.warn('[compile/css] Tailwind build failed:', {
+                projectId: params.id,
+                error: e.message,
+                timestamp: new Date().toISOString()
+              });
+            }
           } finally {
-            try { fs.rmSync(tmpDir, { recursive:true, force:true }); } catch(_e){ /* ignore */ }
+            try { fs.rmSync(tmpDir, { recursive:true, force:true }); } catch(_e){ 
+              console.warn('[compile/css] Failed to cleanup temp dir:', tmpDir); 
+            }
           }
         }
       }

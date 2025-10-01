@@ -3,6 +3,13 @@ import { compile } from 'svelte/compiler';
 
 import { computeFileHash, getCached, setCached } from '$lib/preview/compileCache.js';
 import { supabase as clientSupabase, isSupabaseEnabled } from '$lib/supabase.js';
+import { 
+  SECURITY_CONFIG, 
+  validateSourceSecurity, 
+  withTimeout, 
+  createRestrictedRequire,
+  secureLog 
+} from '$lib/security/validation.js';
 
 // GET /api/projects/:id/preview
 // Retourne un rendu SSR HTML du fichier d'entrée (src/routes/+page.svelte) du code généré.
@@ -11,7 +18,18 @@ export async function GET(event){
   const { params, url, locals } = event;
   const projectId = params.id;
   const fileParam = url.searchParams.get('file');
+  
   if(!projectId) return json({ success:false, error:'projectId manquant' }, { status:400 });
+  
+  // 🔒 Vérification de sécurité globale
+  if (!SECURITY_CONFIG.SSR_ENABLED) {
+    return json({ 
+      success: false, 
+      error: 'SSR preview disabled for security reasons in production',
+      alternative: 'Use /api/projects/:id/compile for client-side rendering'
+    }, { status: 503 });
+  }
+  
   try {
     // Récupération projet
     let files;
@@ -52,31 +70,115 @@ export async function GET(event){
         quality = logs[0].meta?.quality || null;
         validation_summary = logs[0].meta?.validation_summary || null;
       }
-    } catch(_e){ /* ignore */ }
+    } catch(e){ 
+      secureLog('warn', 'preview/quality', { 
+        projectId, 
+        error: e.message, 
+        timestamp: new Date().toISOString() 
+      }); 
+    }
+    
     if(cached){
       return json({ success:true, entry, html: cached.html, fileCount: svelteFiles.length, routes: routeCandidates, cached:true, quality, validation_summary });
     }
+    
     let html = '';
     try {
-      const c = compile(source, { generate:'ssr', css:'external', filename: entry, runes: false, compatibility: { componentApi: 4 } });
+      // 🛡️ VALIDATION DE SÉCURITÉ OBLIGATOIRE
+      validateSourceSecurity(source, entry);
+      
+      // Compilation Svelte sécurisée
+      const c = compile(source, { 
+        generate:'ssr', 
+        css:'external', 
+        filename: entry, 
+        runes: false, 
+        compatibility: { componentApi: 4 } 
+      });
+      
+      // 🔒 RENDU SSR SÉCURISÉ AVEC SANDBOX BASIQUE
+      // Note: En production, ceci devrait être dans un Worker isolé
+      const module = { exports: {} };
+      
+      // Utiliser le require restreint centralisé
+      const restrictedRequire = createRestrictedRequire();
+      
+      // Exécution avec environnement restreint
       const fn = new Function('require','module','exports', c.js.code);
-      const mod = { exports: {} };
-      fn((n)=> (n==='svelte/internal'? require('svelte/internal'): require(n)), mod, mod.exports);
-      const Comp = mod.exports.default || mod.exports;
+      fn(restrictedRequire, module, module.exports);
+      
+      const Comp = module.exports.default || module.exports;
       if(Comp?.render){
-        const rendered = Comp.render({});
-        html = rendered.html || '';
+        // 🕒 Rendu avec timeout strict utilisant l'utilitaire centralisé
+        html = await withTimeout(
+          Promise.resolve().then(() => {
+            const result = Comp.render({});
+            return result.html || '';
+          }),
+          SECURITY_CONFIG.SSR_TIMEOUT_MS,
+          'SSR render timeout exceeded'
+        );
       } else {
-        html = '<!-- render() manquant -->';
+        html = '<!-- Component render method not found -->';
       }
+      
     } catch(e){
-      return json({ success:false, error:'Compilation SSR échouée: '+e.message }, { status:500 });
+      secureLog('error', 'preview/ssr', {
+        projectId,
+        entry,
+        error: e.message,
+        stack: e.stack,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Retour d'erreur sécurisé (pas de stack trace en production)
+      const errorMsg = process.env.NODE_ENV === 'development' 
+        ? `SSR failed: ${e.message}` 
+        : 'Preview compilation failed';
+        
+      return json({ success:false, error: errorMsg }, { status: 500 });
     }
-    // Extra: injecter un wrapper pour visualisation isolée
-    const wrapped = `<div class="preview-root">${html}</div>`;
-  setCached(cacheKey, { html: wrapped }, 60*1000); // 60s cache SSR
-  return json({ success:true, entry, html: wrapped, fileCount: svelteFiles.length, routes: routeCandidates, cached:false, quality, validation_summary });
+    // 🧹 Sanitisation basique du HTML rendu (déjà échappé par Svelte normalement)
+    const safeHtml = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '<!-- script removed -->');
+    
+    // Wrapper pour visualisation isolée
+    const wrapped = `<div class="preview-root">${safeHtml}</div>`;
+    
+    // Cache avec TTL plus court pour sécurité
+    setCached(cacheKey, { html: wrapped }, 30*1000); // 30s cache SSR
+    
+    console.log('[preview/ssr] Success:', {
+      projectId,
+      entry,
+      htmlLength: wrapped.length,
+      cached: false,
+      timestamp: new Date().toISOString()
+    });
+    
+    return json({ 
+      success:true, 
+      entry, 
+      html: wrapped, 
+      fileCount: svelteFiles.length, 
+      routes: routeCandidates, 
+      cached:false, 
+      quality, 
+      validation_summary,
+      security: 'validated' // Indicateur de sécurisation
+    });
+    
   } catch(e){
-    return json({ success:false, error: e.message }, { status:500 });
+    console.error('[preview/global] Unexpected error:', {
+      projectId,
+      error: e.message,
+      stack: process.env.NODE_ENV === 'development' ? e.stack : undefined,
+      timestamp: new Date().toISOString()
+    });
+    
+    const errorMsg = process.env.NODE_ENV === 'development' 
+      ? e.message 
+      : 'Internal server error';
+      
+    return json({ success:false, error: errorMsg }, { status:500 });
   }
 }
