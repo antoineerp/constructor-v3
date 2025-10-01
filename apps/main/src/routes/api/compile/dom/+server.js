@@ -66,14 +66,11 @@ export async function POST(event) {
         hydratable: true,
         // Options Svelte 5
         runes: false,
-        legacy: false,
         // Désactiver les optimisations qui peuvent poser problème en serverless
         immutable: false,
         accessors: false,
         // Forcer la compatibilité
-        compatibility: { componentApi: 4 },
-        // Éviter les imports legacy
-        modernApi: true
+        compatibility: { componentApi: 4 }
       };
       
       compiled = compile(source, compileOptions);

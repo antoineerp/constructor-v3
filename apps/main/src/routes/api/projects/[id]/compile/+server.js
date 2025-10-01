@@ -139,10 +139,8 @@ export async function POST(event){
           generate:'dom', 
           filename: pathName, 
           css: 'injected', 
-          runes: false, 
-          legacy: false,
-          compatibility: { componentApi: 4 },
-          modernApi: true
+          runes: false,
+          compatibility: { componentApi: 4 }
         });
         
         // Post-traitement pour nettoyer les imports Svelte 5
@@ -233,10 +231,8 @@ export async function POST(event){
         generate:'dom', 
         filename:`__wrapper__${pattern}.svelte`, 
         css: 'injected', 
-        runes: false, 
-        legacy: false,
-        compatibility: { componentApi: 4 },
-        modernApi: true
+        runes: false,
+        compatibility: { componentApi: 4 }
       });
       
       // Post-traitement pour nettoyer les imports Svelte 5
@@ -260,10 +256,8 @@ export async function POST(event){
         generate:'dom', 
         filename:`__wrapper__/.svelte`, 
         css: 'injected', 
-        runes: false, 
-        legacy: false,
-        compatibility: { componentApi: 4 },
-        modernApi: true
+        runes: false,
+        compatibility: { componentApi: 4 }
       });
       
       // Post-traitement pour nettoyer les imports Svelte 5

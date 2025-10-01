@@ -12,9 +12,7 @@ export const config = { runtime: 'nodejs20.x' };
 function compileWithSvelte5Config(source, options = {}) {
   const defaultOptions = {
     runes: false,
-    legacy: false,
-    compatibility: { componentApi: 4 },
-    modernApi: true
+    compatibility: { componentApi: 4 }
   };
   
   const compileOptions = { ...defaultOptions, ...options };
