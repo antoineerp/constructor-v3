@@ -1,9 +1,7 @@
 <script>
+  // Tailwind CSS seulement (pour l'instant)
   import '../app.css';
   import '@fortawesome/fontawesome-free/css/all.min.css';
-  // Skeleton UI - Framework principal
-  import '@skeletonlabs/skeleton/styles/all.css';
-  import '@skeletonlabs/skeleton/themes/theme-skeleton.css';
   
   import { onMount } from 'svelte';
 

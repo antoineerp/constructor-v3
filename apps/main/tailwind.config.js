@@ -1,15 +1,11 @@
-import { skeleton } from '@skeletonlabs/tw-plugin';
-
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
     './src/**/*.{html,js,svelte,ts}',
     // Stories Storybook
     './src/**/*.stories.@(js|ts|svelte|mdx)',
-    './.storybook/**/*.{js,ts,svelte,mdx}',
-    '../../../packages/ui/src/**/*.{html,js,svelte,ts}',
-    // Skeleton UI
-    './node_modules/@skeletonlabs/skeleton/**/*.{html,js,svelte,ts}'
+    './.storybook/**/*.{js,ts,svelte|mdx}',
+    '../../../packages/ui/src/**/*.{html,js,svelte,ts}'
   ],
   theme: {
     extend: {
@@ -50,28 +46,7 @@ export default {
   },
   plugins: [
     require('@tailwindcss/forms'),
-    require('@tailwindcss/typography'),
-    skeleton({
-      themes: {
-        preset: [
-          {
-            name: 'skeleton',
-            enhancements: true
-          },
-          {
-            name: 'modern',
-            enhancements: true
-          },
-          {
-            name: 'rocket',
-            enhancements: true
-          },
-          {
-            name: 'seafoam',
-            enhancements: true
-          }
-        ]
-      }
-    })
+    require('@tailwindcss/typography')
+    // Skeleton plugin retiré temporairement
   ],
 }

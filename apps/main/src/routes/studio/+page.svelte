@@ -1,391 +1,247 @@
 <script>
   /**
-   * 🎨 Constructor V3 - Studio Unifié
-   * Page unique regroupant toutes les fonctionnalités :
-   * - Génération de projets complets (chat + site generator)
-   * - Explorateur de fichiers générés
-   * - Aperçu interactif (iframe sandbox)
-   * - Sandbox rapide pour tester des composants
-   * - Debug & meta informations
+   * 🎨 Constructor V3 - Studio Simple et Fonctionnel
+   * Version simplifiée qui MARCHE - pas de surengineering
    */
   
   import { onMount } from 'svelte';
-  import { AppBar, TabGroup, Tab } from '@skeletonlabs/skeleton';
   import SiteGenerator from '$lib/SiteGenerator.svelte';
-  import ChatGenerator from '$lib/ChatGenerator.svelte';
   import PreviewFrame from '$lib/components/PreviewFrame.svelte';
-  import MonacoEditor from '$lib/components/MonacoEditor.svelte';
   
   // Configuration globale
   let provider = 'openai';
   let generationProfile = 'safe';
   let simpleMode = false;
   
-  let availableProviders = [
-    { id: 'openai', label: 'OpenAI' },
-    { id: 'claude', label: 'Claude' }
-  ];
-  
-  let profiles = [
-    { id: 'safe', label: 'Safe' },
-    { id: 'enhanced', label: 'Enhanced' },
-    { id: 'external_libs', label: 'External Libs' }
-  ];
-  
   // État des onglets
-  let activeTab = 'generate'; // 'generate' | 'files' | 'preview' | 'sandbox' | 'debug'
+  let activeTab = 'generate';
   
   // État de la génération
   let generatedFiles = null;
   let selectedFile = null;
   let generationInProgress = false;
   
-  // Fonction pour détecter le langage depuis l'extension
-  function getLanguageFromFilename(filename) {
-    const ext = filename.split('.').pop()?.toLowerCase();
-    const langMap = {
-      'svelte': 'svelte',
-      'ts': 'typescript',
-      'js': 'javascript',
-      'json': 'json',
-      'html': 'html',
-      'css': 'css',
-      'scss': 'scss',
-      'md': 'markdown',
-      'yml': 'yaml',
-      'yaml': 'yaml',
-      'cjs': 'javascript',
-      'mjs': 'javascript',
-      'jsx': 'javascript',
-      'tsx': 'typescript'
-    };
-    return langMap[ext] || 'plaintext';
-  }
-
-  // Sandbox rapide
+  // Sandbox simple
   let sandboxCode = `<script>
-  import { Button } from '@skeletonlabs/skeleton';
-  
-  export let name = 'Constructor v3';
   let count = 0;
 <\/script>
 
-<div class="p-4">
-  <h2 class="text-xl font-bold mb-2">{name}</h2>
+<div class="p-8">
+  <h1 class="text-2xl font-bold mb-4">Test Constructor v3</h1>
   <button 
-    class="px-3 py-2 bg-blue-500 text-white rounded"
+    class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg"
     on:click={() => count++}
   >
-    Clics: {count}
+    Compteur: {count}
   </button>
 </div>`;
-  
-  // Fonction pour recevoir les fichiers générés
+
   function handleFilesGenerated(files) {
     generatedFiles = files;
-    selectedFile = Object.keys(files)[0]; // Sélectionner le premier fichier
-    activeTab = 'files'; // Passer à l'onglet fichiers
+    selectedFile = Object.keys(files)[0] || null;
+    activeTab = 'files';
+    generationInProgress = false;
+  }
+
+  function getFileLanguage(filename) {
+    const ext = filename.split('.').pop();
+    if (ext === 'svelte') return 'svelte';
+    if (ext === 'js' || ext === 'cjs') return 'javascript';
+    if (ext === 'ts') return 'typescript';
+    if (ext === 'json') return 'json';
+    if (ext === 'css') return 'css';
+    if (ext === 'html') return 'html';
+    return 'plaintext';
   }
 </script>
 
 <svelte:head>
-  <title>Constructor V3 - Studio</title>
+  <title>Studio - Constructor v3</title>
 </svelte:head>
-<div class="h-screen flex flex-col bg-surface-50">
-  <!-- Header avec Skeleton AppBar -->
-  <AppBar background="bg-surface-100" border="border-b border-surface-300">
-    <svelte:fragment slot="lead">
-      <strong class="text-xl text-primary-600">🎨 Constructor V3 Studio</strong>
-      <span class="badge variant-filled-primary ml-3">Unified</span>
-    </svelte:fragment>
-    
-    <svelte:fragment slot="trail">
-      <select 
-        bind:value={provider}
-        class="select select-sm variant-form-material"
-      >
-        {#each availableProviders as p}
-          <option value={p.id}>{p.label}</option>
-        {/each}
-      </select>
-      
-      <select 
-        bind:value={generationProfile}
-        class="select select-sm variant-form-material"
-      >
-        {#each profiles as p}
-          <option value={p.id}>{p.label}</option>
-        {/each}
-      </select>
-      
-      <label class="flex items-center gap-2">
-        <input type="checkbox" class="checkbox" bind:checked={simpleMode} />
-        <span class="text-sm">Mode simple</span>
-      </label>
-      
-      <a href="/" class="btn btn-sm variant-ghost-surface">
+
+<div class="min-h-screen bg-gradient-to-br from-gray-50 to-gray-200">
+  <!-- Header -->
+  <header class="bg-white shadow-sm border-b">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+      <h1 class="text-xl font-bold text-gray-900">Constructor v3</h1>
+      <a href="/" class="px-4 py-2 text-gray-600 hover:text-gray-900 border rounded-lg hover:bg-gray-50">
         ← Accueil
       </a>
-    </svelte:fragment>
-  </AppBar>
-  
-  <!-- Navigation par onglets avec Skeleton TabGroup -->
-  <div class="bg-surface-100 border-b border-surface-300">
+    </div>
+  </header>
+
+  <!-- Navigation par onglets -->
+  <div class="bg-white border-b">
     <div class="max-w-7xl mx-auto px-4">
-      <TabGroup>
-        <Tab bind:group={activeTab} name="generate" value="generate">
-          <span>🚀 Générer</span>
-        </Tab>
-        <Tab bind:group={activeTab} name="files" value="files" disabled={!generatedFiles}>
-          <span>📁 Fichiers {generatedFiles ? `(${Object.keys(generatedFiles).length})` : ''}</span>
-        </Tab>
-        <Tab bind:group={activeTab} name="preview" value="preview" disabled={!generatedFiles}>
-          <span>👁️ Aperçu</span>
-        </Tab>
-        <Tab bind:group={activeTab} name="sandbox" value="sandbox">
-          <span>🛠️ Sandbox</span>
-        </Tab>
-        <Tab bind:group={activeTab} name="debug" value="debug">
-          <span>🐛 Debug</span>
-        </Tab>
-      </TabGroup>
+      <nav class="flex space-x-8">
+        <button 
+          class="py-4 px-2 border-b-2 {activeTab === 'generate' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'} hover:text-gray-700"
+          on:click={() => activeTab = 'generate'}
+        >
+          🚀 Générer
+        </button>
+        <button 
+          class="py-4 px-2 border-b-2 {activeTab === 'files' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'} hover:text-gray-700"
+          on:click={() => activeTab = 'files'}
+        >
+          📁 Fichiers
+        </button>
+        <button 
+          class="py-4 px-2 border-b-2 {activeTab === 'preview' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'} hover:text-gray-700"
+          on:click={() => activeTab = 'preview'}
+        >
+          👁️ Aperçu
+        </button>
+        <button 
+          class="py-4 px-2 border-b-2 {activeTab === 'sandbox' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'} hover:text-gray-700"
+          on:click={() => activeTab = 'sandbox'}
+        >
+          🧪 Sandbox
+        </button>
+      </nav>
     </div>
   </div>
-      {#if activeTab === 'generate'}
-        <div class="space-y-6">
-          <div class="bg-white rounded-lg shadow-sm border p-6">
-            <h2 class="text-xl font-bold mb-4 text-gray-800">Génération par chat IA</h2>
-            <ChatGenerator 
-              {provider} 
-              {generationProfile}
-              on:filesGenerated={(e) => handleFilesGenerated(e.detail)}
-            />
-          </div>
-          
-          <div class="bg-white rounded-lg shadow-sm border p-6">
-            <h2 class="text-xl font-bold mb-4 text-gray-800">Génération de site complet</h2>
-            <SiteGenerator 
-              {provider} 
-  
+
   <!-- Contenu principal -->
-  <main class="flex-1 overflow-auto bg-surface-50">
-    <div class="max-w-7xl mx-auto px-4 py-6">
-      
-      <!-- Onglet Générer -->
-      {#if activeTab === 'generate'}
-        <div class="space-y-6">
-          <div class="card p-6 variant-ghost-surface">
-            <header class="card-header">
-              <h2 class="h2">Génération par chat IA</h2>
-            </header>
-            <section class="card-body">
-              <ChatGenerator 
-                {provider} 
-                {generationProfile}
-                on:filesGenerated={(e) => handleFilesGenerated(e.detail)}
-              />
-            </section>
-          </div>
-          
-          <div class="card p-6 variant-ghost-surface">
-            <header class="card-header">
-              <h2 class="h2">Génération de site complet</h2>
-            </header>
-            <section class="card-body">
-              <SiteGenerator 
-                {provider} 
-                {generationProfile} 
-                {simpleMode}
-                on:filesGenerated={(e) => handleFilesGenerated(e.detail)}
-              />
-            </section>
-          </div>
-        </div>
-      {/if}
-      
-      <!-- Onglet Fichiers -->
-      {#if activeTab === 'files'}
-        {#if generatedFiles}
-          <div class="grid grid-cols-12 gap-4 h-full">
-            <!-- Liste des fichiers -->
-            <div class="col-span-3 card p-4">
-              <h3 class="h3 mb-3">Fichiers générés</h3>
-              <div class="list-nav space-y-1">
-                {#each Object.keys(generatedFiles) as filename}
+  <main class="max-w-7xl mx-auto px-4 py-6">
+    
+    <!-- Onglet Génération -->
+    {#if activeTab === 'generate'}
+      <div class="bg-white shadow-sm border rounded-lg p-6">
+        <header class="p-4 border-b border-gray-200">
+          <h2 class="text-lg font-semibold">Générer un nouveau projet</h2>
+        </header>
+        <section class="p-4">
+          <SiteGenerator 
+            {provider}
+            {generationProfile}
+            {simpleMode}
+            on:filesGenerated={(e) => handleFilesGenerated(e.detail)}
+            on:generationStart={() => generationInProgress = true}
+          />
+        </section>
+      </div>
+    {/if}
+
+    <!-- Onglet Fichiers -->
+    {#if activeTab === 'files'}
+      {#if generatedFiles}
+        <div class="grid grid-cols-4 gap-4">
+          <!-- Liste des fichiers -->
+          <div class="bg-white shadow-sm border rounded-lg p-4">
+            <h3 class="font-medium mb-3">Fichiers générés</h3>
+            <ul class="space-y-1">
+              {#each Object.keys(generatedFiles) as filename}
+                <li>
                   <button
-                    class="btn w-full justify-start {selectedFile === filename ? 'variant-filled-primary' : 'variant-ghost-surface'}"
+                    class="w-full text-left p-2 rounded text-sm {selectedFile === filename ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-50'}"
                     on:click={() => selectedFile = filename}
                   >
-              {#if selectedFile}
-                <div class="border-b border-surface-300 p-3 flex items-center justify-between">
-                  <span class="text-sm font-medium">{selectedFile}</span>
-                  <div class="flex gap-2">
-                    <button 
-                      class="btn btn-sm variant-ghost-surface"
-                      on:click={() => navigator.clipboard.writeText(generatedFiles[selectedFile])}
-                    >
-                      📋 Copier
-                    </button>
-                    <button 
-                      class="btn btn-sm variant-filled-primary"
-                      on:click={() => {
-                        const newFiles = { ...generatedFiles };
-                        newFiles[selectedFile] = generatedFiles[selectedFile];
-                        generatedFiles = newFiles;
-                      }}
-                    >
-                      💾 Sauver
-                    </button>
-                  </div>
-                </div>
-                <MonacoEditor
-                  value={generatedFiles[selectedFile]}
-                  language={getLanguageFromFilename(selectedFile)}
-                  theme="vs-dark"
-                  height="600px"
-                  options={{
-                    readOnly: false,
-                    minimap: { enabled: true },
-                    wordWrap: 'on',
-                    formatOnPaste: true,
-                    formatOnType: true
-                  }}
-                  on:change={(e) => {
-                    generatedFiles[selectedFile] = e.detail.value;
-                  }}
-                />
-              {:else}
-                <div class="p-8 text-center text-surface-600">
-                  Sélectionnez un fichier pour voir son contenu
-                </div>
-              {/if}
-            </div>
+                    {filename}
+                  </button>
+                </li>
+              {/each}
+            </ul>
           </div>
-        {:else}
-          <div class="card p-12 text-center">
-            <p class="text-surface-600 mb-4">Aucun fichier généré pour le moment</p>
-            <button
-              class="btn variant-filled-primary"
-              on:click={() => activeTab = 'generate'}
-            >
-              Générer un projet
-            </button>
-          </div>
-        {/if}
-      {/if}
-      
-      <!-- Onglet Aperçu -->
-      {#if activeTab === 'preview'}
-        {#if generatedFiles}
-          <div class="card p-4">
-            <PreviewFrame 
-              files={generatedFiles}
-              title="Aperçu du projet généré"
-            />
-          </div>
-        {:else}
-          <div class="card p-12 text-center">
-            <p class="text-surface-600 mb-4">Aucun projet à prévisualiser</p>
-            <button
-              class="btn variant-filled-primary"
-              on:click={() => activeTab = 'generate'}
-            >
-              Générer un projet
-            </button>
-          </div>
-        {/if}
-      {/if}
-      
-      <!-- Onglet Sandbox -->
-      {#if activeTab === 'sandbox'}
-        <div class="grid grid-cols-2 gap-4">
-          <!-- Éditeur -->
-          <div class="card">
-            <header class="card-header">
-              <h3 class="h3">Éditeur Svelte</h3>
-            </header>
-            <MonacoEditor
-              bind:value={sandboxCode}
-              language="svelte"
-              theme="vs-dark"
-              height="500px"
-              options={{
-                minimap: { enabled: true },
-                wordWrap: 'on',
-                automaticLayout: true,
-                suggestOnTriggerCharacters: true,
-                quickSuggestions: true,
-                snippetSuggestions: 'inline'
-              }}
-              on:change={(e) => sandboxCode = e.detail.value}
-            />
-            <footer class="card-footer flex justify-end">
-              <button class="btn variant-filled-primary">
-                🔄 Compiler & Prévisualiser
-              </button>
-            </footer>
-          </div>
-          
-          <!-- Aperçu -->
-          <div class="card">
-            <header class="card-header">
-              <h3 class="h3">Aperçu</h3>
-            </header>
-            <section class="card-body p-4">
-              <PreviewFrame 
-                files={{ 'src/routes/+page.svelte': sandboxCode }}
-                title="Sandbox test"
-              />
-            </section>
-          </div>
-        </div>
-      {/if}
-      
-      <!-- Onglet Debug -->
-      {#if activeTab === 'debug'}
-        <div class="card p-6">
-          <header class="card-header">
-            <h2 class="h2">Informations de debug</h2>
-          </header>
-          <section class="card-body space-y-4">
-            <div>
-              <h3 class="h3 mb-2">Configuration</h3>
-              <pre class="code bg-surface-100 p-4 rounded">{JSON.stringify({ provider, generationProfile, simpleMode }, null, 2)}</pre>
-            </div>
-            {#if generatedFiles}
-              <div>
-                <h3 class="h3 mb-2">Fichiers générés ({Object.keys(generatedFiles).length})</h3>
-                <ul class="list">
-                  {#each Object.keys(generatedFiles) as filename}
-                    <li>
-                      <span class="badge variant-soft-surface">{filename}</span>
-                      <span class="text-sm text-surface-600">
-                        {generatedFiles[filename].length} caractères
-                      </span>
-                    </li>
-                  {/each}
-                </ul>
+
+          <!-- Contenu du fichier -->
+          <div class="col-span-3">
+            {#if selectedFile && generatedFiles[selectedFile]}
+              <header class="flex justify-between items-center p-4 border-b border-gray-200 bg-white rounded-t-lg">
+                <h4 class="font-medium">{selectedFile}</h4>
+                <span class="text-xs px-2 py-1 bg-gray-100 rounded">
+                  {getFileLanguage(selectedFile)}
+                </span>
+              </header>
+              <section class="bg-white rounded-b-lg">
+                <pre class="p-4 text-sm overflow-auto max-h-96 bg-gray-50"><code>{generatedFiles[selectedFile]}</code></pre>
+              </section>
+            {:else}
+              <div class="p-8 text-center text-gray-500 bg-white rounded-lg">
+                Sélectionnez un fichier
               </div>
             {/if}
-          </section>
+          </div>
+        </div>
+      {:else}
+        <div class="bg-white shadow-sm border rounded-lg p-12 text-center">
+          <p class="text-gray-600 mb-4">Aucun fichier généré</p>
+          <button
+            class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg"
+            on:click={() => activeTab = 'generate'}
+          >
+            Commencer la génération
+          </button>
         </div>
       {/if}
-      
-    </div>
-  </main>
-  
-  <!-- Footer -->
-  <footer class="bg-surface-100 border-t border-surface-300 py-3">
-    <div class="max-w-7xl mx-auto px-4 text-center text-sm text-surface-600">
-      Constructor V3 Studio - Architecture unifiée avec Skeleton UI
-    </div>
-  </footer>
-</div>
+    {/if}
 
-<style>
-  /* Styles personnalisés si nécessaire */
-  button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-</style>
+    <!-- Onglet Aperçu -->
+    {#if activeTab === 'preview'}
+      {#if generatedFiles}
+        <div class="bg-white shadow-sm border rounded-lg">
+          <header class="p-4 border-b border-gray-200">
+            <h3 class="text-lg font-semibold">Aperçu du projet</h3>
+          </header>
+          <section>
+            <PreviewFrame 
+              files={generatedFiles}
+              loading={generationInProgress}
+            />
+          </section>
+        </div>
+      {:else}
+        <div class="bg-white shadow-sm border rounded-lg p-12 text-center">
+          <p class="text-gray-600 mb-4">Pas d'aperçu disponible</p>
+          <button
+            class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg"
+            on:click={() => activeTab = 'generate'}
+          >
+            Générer un projet
+          </button>
+        </div>
+      {/if}
+    {/if}
+
+    <!-- Onglet Sandbox -->
+    {#if activeTab === 'sandbox'}
+      <div class="grid grid-cols-2 gap-4">
+        <!-- Éditeur simple -->
+        <div class="bg-white shadow-sm border rounded-lg">
+          <header class="p-4 border-b border-gray-200">
+            <h3 class="font-medium">Éditeur</h3>
+          </header>
+          <section>
+            <textarea
+              bind:value={sandboxCode}
+              class="w-full h-64 p-4 font-mono text-sm resize-none border-0 focus:ring-0"
+              placeholder="Écrivez votre code Svelte ici..."
+            />
+          </section>
+          <footer class="p-4 border-t border-gray-200">
+            <button 
+              class="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg"
+              on:click={() => {}}
+            >
+              ▶ Exécuter
+            </button>
+          </footer>
+        </div>
+
+        <!-- Résultat -->
+        <div class="bg-white shadow-sm border rounded-lg">
+          <header class="p-4 border-b border-gray-200">
+            <h3 class="font-medium">Résultat</h3>
+          </header>
+          <section>
+            <PreviewFrame 
+              files={{'App.svelte': sandboxCode}}
+              loading={false}
+            />
+          </section>
+        </div>
+      </div>
+    {/if}
+
+  </main>
+</div>
