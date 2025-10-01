@@ -4,41 +4,41 @@ export const config = { runtime: 'nodejs20.x' };
 
 /**
  * POST /api/projects/temporary/compile
- * Redirection vers le compilateur unifié avec format HTML
+ * Wrapper pour le compilateur principal
  * Body: { files: Record<string,string>, entries?: string[] }
  */
 export async function POST(event) {
-  const { request } = event;
-  
   try {
-    const body = await request.json();
+    const body = await event.request.json();
     
-    // Préparer le body avec format HTML
-    const compileBody = {
-      ...body,
-      format: 'html',
-      external: false
+    // Importer dynamiquement le module de compilation principal
+    const compileModule = await import('../[id]/compile/+server.js');
+    
+    // Créer un event avec un ID temporaire
+    const tempEvent = {
+      ...event,
+      params: { id: 'temporary-preview' },
+      request: new Request(event.request.url, {
+        method: 'POST',
+        headers: event.request.headers,
+        body: JSON.stringify({
+          ...body,
+          files: body.files || body,
+          format: 'html',
+          external: false
+        })
+      })
     };
     
-    // Appeler directement le compilateur unifié avec fetch interne
-    const compileUrl = new URL('/api/projects/temp-preview/compile', request.url);
-    const compileResponse = await fetch(compileUrl.toString(), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(compileBody)
-    });
-    
-    // Retourner la réponse telle quelle
-    const data = await compileResponse.json();
-    return json(data, { status: compileResponse.status });
+    // Appeler directement la fonction POST du compilateur
+    return await compileModule.POST(tempEvent);
     
   } catch (error) {
     console.error('[temporary/compile] Error:', error);
     return json({
       success: false,
-      error: error.message
+      error: error.message,
+      stack: error.stack
     }, { status: 500 });
   }
 }
