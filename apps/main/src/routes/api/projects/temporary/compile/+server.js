@@ -259,7 +259,7 @@ export async function POST({ request }) {
       rewritten.set(m.path, code);
     }
     
-    // 🎯 4. GÉNÉRATION HTML AVEC IMPORT MAP (RUNTIME SVELTE COMPLET)
+    // 🎯 4. GÉNÉRATION HTML AVEC DATA URLs (MODULES INLINE)
     const entryModule = rewritten.has(entry) ? entry : rewritten.keys().next().value;
     if (!entryModule) {
       return json({ success: false, error: 'No entry module found' }, { status: 500 });
@@ -267,17 +267,27 @@ export async function POST({ request }) {
     
     console.log('[temporary/compile] Entry module:', entryModule);
     
-    // Créer import map avec identifiants courts
-    const idMap = new Map();
-    let iMod = 0;
-    for (const modulePath of rewritten.keys()) {
-      idMap.set(modulePath, `m${iMod++}`);
+    // Créer data URLs pour chaque module
+    const moduleDataUrls = new Map();
+    for (const [modulePath, code] of rewritten) {
+      // Remplacer les imports relatifs par les chemins absolus
+      let finalCode = code;
+      for (const [otherPath] of rewritten) {
+        if (otherPath !== modulePath) {
+          finalCode = finalCode.replaceAll(`from "${otherPath}"`, `from "${otherPath}"`);
+          finalCode = finalCode.replaceAll(`from '${otherPath}'`, `from '${otherPath}'`);
+        }
+      }
+      
+      // Créer data URL
+      const dataUrl = `data:text/javascript;charset=utf-8,${encodeURIComponent(finalCode)}`;
+      moduleDataUrls.set(modulePath, dataUrl);
     }
     
-    // Construire l'import map JSON
+    // Construire l'import map avec data URLs
     const importMapObj = { imports: {} };
-    for (const [modulePath, shortId] of idMap) {
-      importMapObj.imports[modulePath] = `./${shortId}.js`;
+    for (const [modulePath, dataUrl] of moduleDataUrls) {
+      importMapObj.imports[modulePath] = dataUrl;
     }
     
     // Ajouter Svelte et Skeleton UI via CDN ESM
@@ -290,28 +300,6 @@ export async function POST({ request }) {
     importMapObj.imports['svelte/easing'] = 'https://esm.sh/svelte@5/easing';
     importMapObj.imports['@skeletonlabs/skeleton'] = 'https://esm.sh/@skeletonlabs/skeleton@3';
     
-    // Convertir les modules avec data URLs (inline)
-    const moduleScripts = [];
-    for (const [modulePath, code] of rewritten) {
-      const shortId = idMap.get(modulePath);
-      let rewrittenCode = code;
-      
-      // Remplacer tous les imports dans le code
-      for (const [origPath, origId] of idMap) {
-        if (origPath !== modulePath) {
-          rewrittenCode = rewrittenCode.replaceAll(`from "${origPath}"`, `from "./${origId}.js"`);
-          rewrittenCode = rewrittenCode.replaceAll(`from '${origPath}'`, `from './${origId}.js'`);
-        }
-      }
-      
-      // Créer un blob URL pour chaque module
-      moduleScripts.push({
-        id: shortId,
-        path: modulePath,
-        code: rewrittenCode
-      });
-    }
-    
     const html = `<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -319,7 +307,7 @@ export async function POST({ request }) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Preview - Constructor v3</title>
   
-  <!-- Import Map pour résolution des modules -->
+  <!-- Import Map avec Data URLs pour les modules -->
   <script type="importmap">
 ${JSON.stringify(importMapObj, null, 2)}
   </script>
@@ -342,21 +330,20 @@ ${JSON.stringify(importMapObj, null, 2)}
 <body>
   <div id="app"></div>
   
-  ${moduleScripts.map(m => `
-  <!-- Module: ${m.path} -->
-  <script type="module" id="${m.id}">
-${m.code}
-  </script>`).join('\n')}
-  
   <!-- Bootstrap l'application Svelte -->
   <script type="module">
-    import App from '${entryModule}';
-    console.log('[Preview] Mounting Svelte app from:', '${entryModule}');
-    const app = new App({ 
-      target: document.getElementById('app'),
-      props: { params: {}, data: {} }
-    });
-    console.log('[Preview] App mounted successfully!');
+    try {
+      const { default: App } = await import('${entryModule}');
+      console.log('[Preview] Mounting Svelte app from:', '${entryModule}');
+      const app = new App({ 
+        target: document.getElementById('app'),
+        props: { params: {}, data: {} }
+      });
+      console.log('[Preview] App mounted successfully!');
+    } catch (error) {
+      console.error('[Preview] Mount error:', error);
+      document.getElementById('app').innerHTML = '<div style="padding:20px;color:red;font-family:monospace;"><h2>❌ Erreur de montage</h2><pre>' + error.stack + '</pre></div>';
+    }
   </script>
 </body>
 </html>`;
