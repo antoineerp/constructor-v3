@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { POST as compileHandler } from '../../[id]/compile/+server.js';
 
 export const config = { runtime: 'nodejs20.x' };
 
@@ -10,9 +11,6 @@ export const config = { runtime: 'nodejs20.x' };
 export async function POST(event) {
   try {
     const body = await event.request.json();
-    
-    // Importer dynamiquement le module de compilation principal
-    const compileModule = await import('../[id]/compile/+server.js');
     
     // Créer un event avec un ID temporaire
     const tempEvent = {
@@ -31,7 +29,7 @@ export async function POST(event) {
     };
     
     // Appeler directement la fonction POST du compilateur
-    return await compileModule.POST(tempEvent);
+    return await compileHandler(tempEvent);
     
   } catch (error) {
     console.error('[temporary/compile] Error:', error);
