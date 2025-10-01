@@ -32,17 +32,19 @@ Utilise iframe sandbox pour exécuter le code généré par l'IA côté client u
       let endpoint, body;
       
       if (files) {
-        // Mode temporaire (comme notre SiteGenerator)
+        // Mode temporaire - appeler le compilateur avec id='temporary'
+        // L'endpoint [id] va gérer ce cas spécial
         endpoint = '/api/projects/temporary/compile';
         body = { 
           files, 
           entries: ['src/routes/+page.svelte'],
+          format: 'html', // Explicitement demander le format HTML
           external: false // Mode local avec data URLs 
         };
       } else {
         // Mode projet persisté
         endpoint = `/api/projects/${projectId}/compile`;
-        body = {};
+        body = { format: 'html' };
       }
       
       const res = await fetch(endpoint, {

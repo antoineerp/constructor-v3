@@ -43,7 +43,19 @@ export async function GET({ url, request }){
       }
       return json({ success:true, templates: mock, mock:true });
     }
+    
     const { client } = getAuthSupabase(request);
+    
+    // Vérifier que le client existe
+    if (!client) {
+      return json({ 
+        success: false, 
+        error: 'Supabase client not configured',
+        templates: [], // Retourner tableau vide au lieu d'erreur
+        mock: true 
+      });
+    }
+    
     const id = url.searchParams.get('id');
     if(id){
       const { data, error } = await client.from('templates').select('*').eq('id', id).single();

@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 
-import { supabase } from '$lib/supabase.js';
+// Supabase removed - using in-memory cache
+const analysesCache = new Map();
 
 // GET /api/files/analyses?hash=abc&hash=def ou POST { hashes: [] }
 // Retour: { analyses:[{hash,kind,summary,colors,components}], palette:{ colors:[...] } }
@@ -24,9 +25,9 @@ function unifyPalette(analyses){
 
 async function fetchAnalyses(hashes){
   if(!hashes.length) return [];
-  const { data, error } = await supabase.from('file_analyses').select('*').in('hash', hashes.slice(0,50));
-  if(error) throw new Error(error.message);
-  return (data||[]).map(r=> ({
+  // Use in-memory cache instead of Supabase
+  const results = hashes.slice(0,50).map(hash => analysesCache.get(hash)).filter(Boolean);
+  return results.map(r=> ({
     hash: r.hash,
     kind: r.kind,
     summary: r.analysis?.summary || r.analysis?.note || null,
