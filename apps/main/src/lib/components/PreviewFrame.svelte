@@ -32,6 +32,7 @@ Utilise iframe sandbox pour exécuter le code généré par l'IA côté client u
       let endpoint, body;
       
       if (files) {
+        console.log('[PreviewFrame] Loading with files:', Object.keys(files));
         // Mode temporaire - appeler le compilateur avec id='temporary'
         // L'endpoint [id] va gérer ce cas spécial
         endpoint = '/api/projects/temporary/compile';
@@ -47,6 +48,8 @@ Utilise iframe sandbox pour exécuter le code généré par l'IA côté client u
         body = { format: 'html' };
       }
       
+      console.log('[PreviewFrame] Calling:', endpoint, body);
+      
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -54,15 +57,18 @@ Utilise iframe sandbox pour exécuter le code généré par l'IA côté client u
       });
       
       const data = await res.json();
+      console.log('[PreviewFrame] Response:', data);
+      
       compileTime = Date.now() - startTime;
       
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Erreur de compilation');
+        throw new Error(data.error || `HTTP ${res.status}: ${data.details || 'Erreur de compilation'}`);
       }
       
       if (data.runtimeHtml) {
         previewHtml = data.runtimeHtml;
         renderStartTime = Date.now();
+        console.log('[PreviewFrame] HTML loaded, length:', previewHtml.length);
       } else {
         throw new Error('Aucun HTML runtime généré');
       }
