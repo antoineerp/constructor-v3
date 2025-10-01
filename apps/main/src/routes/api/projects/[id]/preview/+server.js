@@ -9,7 +9,7 @@ export async function GET(event){
   
   if(!projectId) return json({ success:false, error:'projectId manquant' }, { status:400 });
   
-  // � SSR DÉFINITIVEMENT DÉSACTIVÉ - Approche Bolt.new recommandée
+  // 🔒 SSR DÉFINITIVEMENT DÉSACTIVÉ - Approche Bolt.new recommandée
   return json({ 
     success: false, 
     error: 'SSR preview deprecated for security reasons',
