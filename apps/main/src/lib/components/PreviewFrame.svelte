@@ -10,10 +10,12 @@ Utilise iframe sandbox pour exécuter le code généré par l'IA côté client u
   export let loading = false;
   export let error = '';
   export let title = 'Application Preview';
+  export let svelteCode = '';
   
   let iframeEl;
   let previewHtml = '';
   let isFullscreen = false;
+  let iframeUrl = '';
   
   // Variables pour les stats de performance
   let compileTime = 0;
@@ -126,6 +128,13 @@ Utilise iframe sandbox pour exécuter le code généré par l'IA côté client u
       console.log(`[PreviewFrame] Render completed in ${renderTime}ms (compile: ${compileTime}ms)`);
     }
   }
+  
+  onMount(() => {
+    const html = `<!DOCTYPE html><html><head></head><body><div id=\"app\"></div></body></html>`;
+
+    const blob = new Blob([html], { type: 'text/html' });
+    iframeUrl = URL.createObjectURL(blob);
+  });
 </script>
 
 <div class="preview-frame-container" class:fullscreen={isFullscreen}>
@@ -241,87 +250,141 @@ Utilise iframe sandbox pour exécuter le code généré par l'IA côté client u
         </div>
       </div>
     {/if}
+    
+    <!-- Preview isolée via Blob URL -->
+    {#if svelteCode}
+      <div class="isolated-preview">
+        <iframe
+          src={iframeUrl}
+          sandbox="allow-scripts"
+          class="w-full h-full border rounded"
+          title="Preview"
+        ></iframe>
+      </div>
+    {/if}
   </div>
 </div>
 
 <style>
   .preview-frame-container {
-    @apply bg-white border rounded-lg shadow-sm overflow-hidden;
-    height: 500px;
+    background-color: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
     display: flex;
     flex-direction: column;
+    height: 500px;
   }
   
   .preview-frame-container.fullscreen {
-    @apply fixed inset-4 z-50 shadow-2xl;
+    position: fixed;
+    inset: 1rem;
+    z-index: 50;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
     height: auto;
   }
   
   .preview-header {
-    @apply flex items-center justify-between px-4 py-2 bg-gray-50 border-b;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 1rem;
+    background-color: #f9fafb;
+    border-bottom: 1px solid #e5e7eb;
   }
   
   .preview-status {
-    @apply flex items-center gap-2;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
   
   .status-indicator {
-    @apply w-2 h-2 rounded-full;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
   }
   
   .status-indicator.loading {
-    @apply bg-blue-500;
+    background-color: #3b82f6;
     animation: pulse 1.5s ease-in-out infinite;
   }
   
   .status-indicator.success {
-    @apply bg-green-500;
+    background-color: #4ade80;
   }
   
   .status-indicator.error {
-    @apply bg-red-500;
+    background-color: #f87171;
   }
   
   .status-indicator.idle {
-    @apply bg-gray-300;
+    background-color: #d1d5db;
   }
   
   .preview-controls {
-    @apply flex items-center gap-2;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
   
   .control-btn {
-    @apply w-8 h-8 flex items-center justify-center text-gray-600 hover:text-gray-800 hover:bg-gray-200 rounded transition-colors;
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #4b5563;
+    transition: background-color 0.2s, color 0.2s;
+    border-radius: 0.375rem;
+  }
+  
+  .control-btn:hover {
+    background-color: #e5e7eb;
+    color: #111827;
   }
   
   .control-btn:disabled {
-    @apply text-gray-400 hover:text-gray-400 hover:bg-transparent cursor-not-allowed;
+    color: #9ca3af;
+    cursor: not-allowed;
   }
   
   .preview-content {
-    @apply flex-1 relative;
+    flex: 1;
+    position: relative;
   }
   
   .preview-iframe {
-    @apply w-full h-full border-0;
+    width: 100%;
+    height: 100%;
+    border: 0;
   }
   
   .preview-placeholder {
-    @apply w-full h-full flex items-center justify-center;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   
   .preview-placeholder.error {
-    @apply bg-red-50;
+    background-color: #fee2e2;
   }
   
   .loading-animation,
   .error-content,
   .empty-content {
-    @apply text-center;
+    text-align: center;
   }
   
   .spinner {
-    @apply w-8 h-8 border-4 border-blue-200 border-t-blue-500 rounded-full mx-auto;
+    width: 2rem;
+    height: 2rem;
+    border: 0.25rem solid #e5e7eb;
+    border-top-color: #3b82f6;
+    border-radius: 9999px;
+    margin: 0 auto;
     animation: spin 1s linear infinite;
   }
   
@@ -332,5 +395,21 @@ Utilise iframe sandbox pour exécuter le code généré par l'IA côté client u
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
+  }
+  
+  .isolated-preview {
+    width: 100%;
+    height: 100%;
+    margin-top: 1rem;
+    border: 1px solid #ddd;
+    border-radius: 0.5rem;
+    overflow: hidden;
+  }
+  
+  iframe {
+    width: 100%;
+    height: 100%;
+    border: 1px solid #ddd;
+    border-radius: 8px;
   }
 </style>

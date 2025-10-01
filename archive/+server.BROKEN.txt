@@ -1,3 +1,6 @@
+// Ce fichier a été archivé car il est marqué comme "BROKEN" et n'est pas utilisé actuellement.
+// Déplacez-le dans le dossier archive pour référence future.
+
 import { json } from '@sveltejs/kit';
 import { compile } from 'svelte/compiler';
 

@@ -221,24 +221,21 @@
           <footer class="p-4 border-t border-gray-200">
             <button 
               class="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg"
-              on:click={() => {}}
+              on:click={() => {
+                // Ajoute le code du sandbox comme fichier généré et bascule sur l'aperçu SvelteKit natif
+                generatedFiles = { 'App.svelte': sandboxCode };
+                selectedFile = 'App.svelte';
+                activeTab = 'preview';
+              }}
             >
-              ▶ Exécuter
+              ▶ Exécuter (SvelteKit)
             </button>
           </footer>
         </div>
 
-        <!-- Résultat -->
-        <div class="bg-white shadow-sm border rounded-lg">
-          <header class="p-4 border-b border-gray-200">
-            <h3 class="font-medium">Résultat</h3>
-          </header>
-          <section>
-            <PreviewFrame 
-              files={{'App.svelte': sandboxCode}}
-              loading={false}
-            />
-          </section>
+        <!-- Résultat : remplacé par le rendu natif SvelteKit via l'onglet Aperçu -->
+        <div class="bg-white shadow-sm border rounded-lg flex items-center justify-center min-h-[200px] text-gray-400">
+          <span>Le rendu s'affichera dans l'onglet "Aperçu" après exécution.</span>
         </div>
       </div>
     {/if}
