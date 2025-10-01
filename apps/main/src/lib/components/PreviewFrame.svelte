@@ -92,16 +92,23 @@ Utilise iframe sandbox pour exécuter le code généré par l'IA côté client u
     loadPreview();
   }
   
-  // Auto-load au mount et quand les props changent
+  // Auto-load au mount seulement
   onMount(() => {
-    if (projectId || files) {
+    if (projectId || (files && Object.keys(files).length > 0)) {
       loadPreview();
     }
   });
   
-  // Reactive reload quand les props changent
-  $: if ((projectId || files) && !loading) {
-    loadPreview();
+  // Éviter les boucles infinies - seulement quand les données changent vraiment
+  let lastFilesHash = '';
+  $: {
+    if (files) {
+      const newHash = JSON.stringify(Object.keys(files).sort());
+      if (newHash !== lastFilesHash && !loading) {
+        lastFilesHash = newHash;
+        loadPreview();
+      }
+    }
   }
   
   // Mesurer le temps de rendu de l'iframe
@@ -143,6 +150,7 @@ Utilise iframe sandbox pour exécuter le code généré par l'IA côté client u
         class="control-btn" 
         on:click={refreshPreview}
         title="Recompiler"
+        aria-label="Recompiler l'aperçu"
         disabled={loading}
       >
         <i class="fas fa-sync-alt" class:fa-spin={loading}></i>
@@ -152,6 +160,7 @@ Utilise iframe sandbox pour exécuter le code généré par l'IA côté client u
         class="control-btn" 
         on:click={openInNewTab}
         title="Ouvrir dans un nouvel onglet"
+        aria-label="Ouvrir dans un nouvel onglet"
         disabled={!previewHtml}
       >
         <i class="fas fa-external-link-alt"></i>
@@ -161,6 +170,7 @@ Utilise iframe sandbox pour exécuter le code généré par l'IA côté client u
         class="control-btn" 
         on:click={toggleFullscreen}
         title={isFullscreen ? 'Quitter plein écran' : 'Plein écran'}
+        aria-label={isFullscreen ? 'Quitter plein écran' : 'Plein écran'}
       >
         <i class="fas {isFullscreen ? 'fa-compress' : 'fa-expand'}"></i>
       </button>
