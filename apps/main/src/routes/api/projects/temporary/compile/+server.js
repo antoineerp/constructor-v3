@@ -58,200 +58,130 @@ function basicSvelteClean(code) {
 }
 
 /**
- * Génère un HTML avec compilation Svelte côté client (vrai rendu dynamique)
- * Utilise le compilateur Svelte depuis CDN pour un rendu authentique
+ * Génère un HTML simple et propre pour l'aperçu (sans compilation complexe)
+ * Extrait le contenu visible du composant Svelte principal
  */
 function generateStandaloneHTML(svelteCode, allFiles) {
   // Extraire le CSS s'il existe
   const cssFile = allFiles['src/app.css'] || allFiles['app.css'] || '';
   const tailwindConfig = allFiles['tailwind.config.cjs'] || '';
   
-  // Préparer tous les fichiers pour la compilation
-  const filesForCompilation = JSON.stringify(allFiles).replace(/\\/g, '\\\\').replace(/`/g, '\\`');
+  // Extraire le HTML du composant Svelte (entre les balises <script> et <style>)
+  let htmlContent = svelteCode;
+  
+  // Supprimer les balises <script>
+  htmlContent = htmlContent.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+  
+  // Supprimer les balises <style>
+  htmlContent = htmlContent.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+  
+  // Nettoyer les directives Svelte pour un aperçu statique
+  htmlContent = htmlContent
+    .replace(/\{#if\s+.*?\}/g, '') // Supprimer {#if}
+    .replace(/\{:else\}/g, '') // Supprimer {:else}
+    .replace(/\{\/if\}/g, '') // Supprimer {/if}
+    .replace(/\{#each\s+.*?\s+as\s+.*?\}/g, '<div class="repeated-item">') // Remplacer {#each}
+    .replace(/\{\/each\}/g, '</div>') // Remplacer {/each}
+    .replace(/\{@html\s+.*?\}/g, '[HTML dynamique]') // Remplacer {@html}
+    .replace(/\{.*?\}/g, match => {
+      // Garder certaines expressions simples, sinon placeholder
+      if (match.includes('title') || match.includes('name')) {
+        return '<span class="text-gray-600">[Contenu dynamique]</span>';
+      }
+      return '';
+    })
+    .replace(/on:[a-z]+\s*=\s*["{][^"}>]*["}>]/gi, '') // Supprimer on:click etc
+    .replace(/bind:[a-z]+\s*=\s*["{][^"}>]*["}>]/gi, '') // Supprimer bind:
+    .replace(/use:[a-z]+/gi, ''); // Supprimer use:
   
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Aperçu Svelte Dynamique</title>
+  <title>Aperçu - Application générée</title>
   
-  <!-- Tailwind CSS depuis CDN pour le styling -->
+  <!-- Tailwind CSS depuis CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   
-  <!-- Configuration Tailwind si présente -->
-  ${tailwindConfig ? `<script>
-    tailwind.config = ${tailwindConfig.replace(/module\.exports\s*=/, '').replace(/;?\s*$/, '')};
-  </script>` : ''}
-  
   <style>
-    /* Reset et styles de base */
+    /* Reset */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { 
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
       line-height: 1.6;
+      background: #f9fafb;
     }
     
     /* CSS du projet */
     ${cssFile}
     
-    /* Styles de chargement et d'erreur */
-    .svelte-loading {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 50vh;
-      flex-direction: column;
-      gap: 1rem;
+    /* Style pour les items répétés */
+    .repeated-item {
+      margin-bottom: 1rem;
+      padding: 1rem;
+      background: white;
+      border-radius: 0.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
     
-    .svelte-spinner {
-      width: 40px;
-      height: 40px;
-      border: 4px solid #e5e7eb;
-      border-top: 4px solid #3b82f6;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-    
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-    
-    .svelte-error {
-      background: #fee2e2;
-      border: 1px solid #fecaca;
-      border-radius: 8px;
-      padding: 1.5rem;
-      margin: 1rem;
-      color: #dc2626;
-      font-family: 'Courier New', monospace;
+    /* Bannière d'info */
+    .preview-banner {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 0.75rem;
+      text-align: center;
+      font-size: 0.875rem;
+      box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+      z-index: 1000;
     }
   </style>
 </head>
 <body>
   <div id="app">
-    <div class="svelte-loading">
-      <div class="svelte-spinner"></div>
-      <p>🚀 Compilation Svelte en cours...</p>
-    </div>
+    ${htmlContent}
   </div>
-
-  <!-- Svelte Compiler depuis CDN -->
-  <script src="https://unpkg.com/svelte@5/compiler.js"></script>
   
-  <script type="module">
-    console.log('🎯 Démarrage compilation Svelte côté client');
+  <div class="preview-banner">
+    ⚡ Aperçu statique de votre application Svelte • 
+    <strong>Téléchargez le code</strong> pour un rendu complet avec interactivité
+  </div>
+  
+  <script>
+    // Ajouter un peu d'interactivité basique aux boutons
+    document.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        this.style.transform = 'scale(0.95)';
+        setTimeout(() => {
+          this.style.transform = 'scale(1)';
+        }, 100);
+        console.log('Bouton cliqué:', this.textContent);
+      });
+    });
     
-    // Files disponibles pour la compilation
-    const projectFiles = ${filesForCompilation};
-    
-    async function compileSvelteApp() {
-      try {
-        const appDiv = document.getElementById('app');
-        
-        // Vérifier que le compilateur Svelte est disponible
-        if (typeof svelte === 'undefined' || !svelte.compile) {
-          throw new Error('Compilateur Svelte non disponible');
-        }
-        
-        // Code Svelte principal à compiler
-        const mainComponent = \`${escapeCode(svelteCode)}\`;
-        
-        if (!mainComponent.trim()) {
-          throw new Error('Composant principal vide');
-        }
-        
-        console.log('📦 Compilation du composant principal...');
-        
-        // Compiler le composant Svelte
-        const compiled = svelte.compile(mainComponent, {
-          generate: 'dom',
-          dev: true,
-          css: 'injected'
         });
-        
-        if (!compiled.js) {
-          throw new Error('Échec de la compilation Svelte');
-        }
-        
-        console.log('✅ Compilation réussie, création du composant...');
-        
-        // Créer une fonction constructeur pour le composant
-        const componentCode = compiled.js.code;
-        
-        // Remplacer les imports par des mocks simples
-        const processedCode = componentCode
-          .replace(/import\\s+.*?from\\s+['"][^'"]*['"];?\\s*/g, '')
-          .replace(/export\\s+default\\s+/, 'return ');
-        
-        // Créer le composant dans un contexte sécurisé
-        const ComponentConstructor = new Function('console', 'document', 'window', processedCode);
-        const Component = ComponentConstructor(console, document, window);
-        
-        // Nettoyer l'app div et monter le composant
-        appDiv.innerHTML = '';
-        
-        // Créer une instance du composant
-        const instance = new Component({
-          target: appDiv,
-          props: {}
-        });
-        
-        console.log('🎉 Composant Svelte monté avec succès !');
-        
-        // Ajouter des informations de debug
-        const debugInfo = document.createElement('div');
-        debugInfo.innerHTML = \`
-          <div style="position: fixed; bottom: 10px; right: 10px; background: rgba(0,0,0,0.8); color: white; padding: 8px; border-radius: 4px; font-size: 12px; z-index: 9999;">
-            ✅ Svelte compilé côté client
-          </div>
-        \`;
-        document.body.appendChild(debugInfo);
-        
-        return instance;
-        
-      } catch (error) {
-        console.error('❌ Erreur compilation Svelte:', error);
-        
-        // Affichage d'erreur détaillé
-        document.getElementById('app').innerHTML = \`
-          <div class="svelte-error">
-            <h3>⚠️ Erreur de compilation Svelte</h3>
-            <p><strong>Message:</strong> \${error.message}</p>
-            <details style="margin-top: 1rem;">
-              <summary>Détails techniques</summary>
-              <pre style="margin-top: 0.5rem; font-size: 11px; overflow: auto;">\${error.stack || 'Pas de stack trace'}</pre>
-            </details>
-            <p style="margin-top: 1rem;">
-              <strong>💡 Solutions possibles:</strong><br>
-              • Vérifiez la syntaxe Svelte<br>
-              • Évitez les imports externes<br>
-              • Utilisez uniquement du code Svelte standard
-            </p>
-          </div>
-        \`;
-      }
-    }
     
-    // Lancer la compilation quand le DOM est prêt
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', compileSvelteApp);
-    } else {
-      compileSvelteApp();
-    }
+    // Simuler des inputs
+    document.querySelectorAll('input').forEach(input => {
+      input.addEventListener('input', function() {
+        console.log('Input:', this.value);
+      });
+    });
   </script>
 </body>
 </html>`;
 }
 
-/**
- * Échappe le code pour l'injection sécurisée dans le template
- */
-function escapeCode(code) {
-  return code
-    .replace(/\\/g, '\\\\')
+  </script>
+</body>
+</html>`;
+}
+
     .replace(/`/g, '\\`')
     .replace(/\$/g, '\\$');
 }
