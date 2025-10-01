@@ -50,7 +50,7 @@
   let isOffline = false;
   async function detectOffline(){
     try {
-      const r = await fetch('/api/openai/ping');
+      const r = await fetch('/api/openai/ping', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ prompt: 'test' }) });
       const j = await r.json();
       if(!j?.ok) isOffline = true;
     } catch(_e){ isOffline = true; }

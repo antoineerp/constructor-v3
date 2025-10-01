@@ -135,8 +135,21 @@ export async function POST(event){
     for(const [pathName, source] of svelteEntries){
       let css = ''; let jsCode = ''; let error = null;
       try {
-  const c = compile(source, { generate:'dom', filename: pathName, css: 'injected', runes: false, compatibility: { componentApi: 4 } });
+  const c = compile(source, { 
+          generate:'dom', 
+          filename: pathName, 
+          css: 'injected', 
+          runes: false, 
+          legacy: false,
+          compatibility: { componentApi: 4 },
+          modernApi: true
+        });
+        
+        // Post-traitement pour nettoyer les imports Svelte 5
         jsCode = c.js.code;
+        jsCode = jsCode.replace(/from ['"]svelte\/legacy['"]/g, 'from "svelte"');
+        jsCode = jsCode.replace(/import ['"]svelte\/legacy['"]/g, 'import "svelte"');
+        jsCode = jsCode.replace(/from ['"]svelte\/legacy\/(.+?)['"]/g, 'from "svelte/$1"');
         // Inclure le CSS séparément si présent
         if (c.css && c.css.code) {
           css = c.css.code;
@@ -216,10 +229,24 @@ export async function POST(event){
   const openTags = layouts.map((_,i)=> `<L${i} {params} {data}>`).join('');
   const closeTags = layouts.map((_,i)=> `</L${layouts.length-1 - i}>`).join('');
   const wrapperSource = `<script>\n${imports.join('\n')}\nexport let params;\nexport let data;\n</script>\n${openTags}<Page {params} {data}/> ${closeTags}`;
-  const cWrap = compile(wrapperSource, { generate:'dom', filename:`__wrapper__${pattern}.svelte`, css: 'injected', runes: false, compatibility: { componentApi: 4 } });
+  const cWrap = compile(wrapperSource, { 
+        generate:'dom', 
+        filename:`__wrapper__${pattern}.svelte`, 
+        css: 'injected', 
+        runes: false, 
+        legacy: false,
+        compatibility: { componentApi: 4 },
+        modernApi: true
+      });
+      
+      // Post-traitement pour nettoyer les imports Svelte 5
+      let cleanedWrapperCode = cWrap.js.code;
+      cleanedWrapperCode = cleanedWrapperCode.replace(/from ['"]svelte\/legacy['"]/g, 'from "svelte"');
+      cleanedWrapperCode = cleanedWrapperCode.replace(/import ['"]svelte\/legacy['"]/g, 'import "svelte"');
+      cleanedWrapperCode = cleanedWrapperCode.replace(/from ['"]svelte\/legacy\/(.+?)['"]/g, 'from "svelte/$1"');
       const codes = layouts.map(l=> projectFiles[l]||'').concat(projectFiles[pagePath]||'');
       const hash = hashStr(codes.join('\u0000'));
-      wrappers.push({ pattern, dynamic: hasDynamic, paramNames, hash, jsCode: cWrap.js.code });
+      wrappers.push({ pattern, dynamic: hasDynamic, paramNames, hash, jsCode: cleanedWrapperCode });
     } catch(e){
       wrappers.push({ pattern: pagePath, error: e.message });
     }
@@ -229,8 +256,23 @@ export async function POST(event){
     try {
       const entryMod = entry;
       const wrapperSource = `<script>import Page from '${entryMod}'; export let params; export let data;</script><Page {params} {data}/>`;
-  const cWrap = compile(wrapperSource, { generate:'dom', filename:`__wrapper__/.svelte`, css: 'injected', runes: false, compatibility: { componentApi: 4 } });
-      wrappers.push({ pattern:'/', dynamic:false, paramNames:[], hash: 'w0', jsCode: cWrap.js.code });
+      const cWrap = compile(wrapperSource, { 
+        generate:'dom', 
+        filename:`__wrapper__/.svelte`, 
+        css: 'injected', 
+        runes: false, 
+        legacy: false,
+        compatibility: { componentApi: 4 },
+        modernApi: true
+      });
+      
+      // Post-traitement pour nettoyer les imports Svelte 5
+      let fallbackCleanedCode = cWrap.js.code;
+      fallbackCleanedCode = fallbackCleanedCode.replace(/from ['"]svelte\/legacy['"]/g, 'from "svelte"');
+      fallbackCleanedCode = fallbackCleanedCode.replace(/import ['"]svelte\/legacy['"]/g, 'import "svelte"');
+      fallbackCleanedCode = fallbackCleanedCode.replace(/from ['"]svelte\/legacy\/(.+?)['"]/g, 'from "svelte/$1"');
+      
+      wrappers.push({ pattern:'/', dynamic:false, paramNames:[], hash: 'w0', jsCode: fallbackCleanedCode });
     } catch(_e){ /* ignore fallback failure */ }
   }
     // Récupération qualité la plus récente

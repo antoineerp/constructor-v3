@@ -66,11 +66,14 @@ export async function POST(event) {
         hydratable: true,
         // Options Svelte 5
         runes: false,
+        legacy: false,
         // Désactiver les optimisations qui peuvent poser problème en serverless
         immutable: false,
         accessors: false,
         // Forcer la compatibilité
-        compatibility: { componentApi: 4 }
+        compatibility: { componentApi: 4 },
+        // Éviter les imports legacy
+        modernApi: true
       };
       
       compiled = compile(source, compileOptions);
@@ -114,9 +117,20 @@ export async function POST(event) {
     const { js, css } = compiled;
     const runtimeId = crypto.createHash('sha1').update(js.code).digest('hex').slice(0,12);
     if(typeof globalThis.__RUNTIME_BUNDLES === 'undefined') globalThis.__RUNTIME_BUNDLES = new Map();
+    
+    // Post-traitement pour nettoyer les imports Svelte 5
+    let cleanedCode = js.code;
+    
+    // Remplacer svelte/legacy par svelte
+    cleanedCode = cleanedCode.replace(/from ['"]svelte\/legacy['"]/g, 'from "svelte"');
+    cleanedCode = cleanedCode.replace(/import ['"]svelte\/legacy['"]/g, 'import "svelte"');
+    
+    // Nettoyer les autres imports legacy problématiques
+    cleanedCode = cleanedCode.replace(/from ['"]svelte\/legacy\/(.+?)['"]/g, 'from "svelte/$1"');
+    
     const relImportRe = /import\s+[^;]*?from\s+['"](\.?\.\/[^^'"\n]+)['"];?|import\s+['"](\.?\.\/[^^'"\n]+)['"];?/g;
     let relCount = 0;
-    let transformed = js.code.replace(relImportRe, (full, g1, g2)=>{
+    let transformed = cleanedCode.replace(relImportRe, (full, g1, g2)=>{
       const spec = g1||g2; if(!spec) return full;
       relCount++;
       const clean = spec.replace(/^\.\//,'');

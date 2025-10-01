@@ -122,8 +122,20 @@
 <div class="p-4 border rounded bg-white shadow-sm mb-6">
   <h2 class="text-lg font-bold mb-2 flex items-center gap-2"><i class="fas fa-globe text-indigo-600"></i> Génération de site</h2>
   <div class="flex gap-2 mb-3">
-    <input type="text" bind:value={sitePrompt} placeholder="Décris ton site (ex: CRM bilingue avec dashboard)" class="flex-1 px-3 py-2 border rounded" />
-    <button class="px-4 py-2 bg-indigo-600 text-white rounded" on:click={generateSite} disabled={siteGenerating}>Générer</button>
+    <input type="text" bind:value={sitePrompt} placeholder="Décris ton site (ex: CRM bilingue avec dashboard)" class="flex-1 px-3 py-2 border rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+    <button 
+      class="px-4 py-2 rounded font-medium transition-colors"
+      class:bg-indigo-600={sitePrompt.trim() && !siteGenerating}
+      class:text-white={sitePrompt.trim() && !siteGenerating}
+      class:hover:bg-indigo-700={sitePrompt.trim() && !siteGenerating}
+      class:bg-gray-300={!sitePrompt.trim() || siteGenerating}
+      class:text-gray-500={!sitePrompt.trim() || siteGenerating}
+      class:cursor-not-allowed={!sitePrompt.trim() || siteGenerating}
+      on:click={generateSite} 
+      disabled={!sitePrompt.trim() || siteGenerating}
+    >
+      {siteGenerating ? 'Génération...' : 'Générer'}
+    </button>
   </div>
   {#if siteError}
     <div class="text-sm text-red-600 mb-2">{siteError}</div>

@@ -255,9 +255,15 @@
       on:keydown={(e) => e.key === 'Enter' && sendMessage()} 
     />
     <button 
-      class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50" 
+      class="px-4 py-2 rounded font-medium transition-colors"
+      class:bg-indigo-600={userPrompt.trim() && !loading}
+      class:text-white={userPrompt.trim() && !loading}
+      class:hover:bg-indigo-700={userPrompt.trim() && !loading}
+      class:bg-gray-300={!userPrompt.trim() || loading}
+      class:text-gray-500={!userPrompt.trim() || loading}
+      class:cursor-not-allowed={!userPrompt.trim() || loading}
       on:click={sendMessage} 
-      disabled={loading}
+      disabled={!userPrompt.trim() || loading}
     >
       {loading ? 'Génération...' : 'Générer'}
     </button>

@@ -8,6 +8,28 @@ import { rewriteImports } from '$lib/imports/rewrite';
 // Node 18 rejeté par Vercel (message "invalid runtime"), on passe à Node 20.
 export const config = { runtime: 'nodejs20.x' };
 
+// Fonction utilitaire pour compiler avec configuration Svelte 5 cohérente
+function compileWithSvelte5Config(source, options = {}) {
+  const defaultOptions = {
+    runes: false,
+    legacy: false,
+    compatibility: { componentApi: 4 },
+    modernApi: true
+  };
+  
+  const compileOptions = { ...defaultOptions, ...options };
+  const compiled = compile(source, compileOptions);
+  
+  // Post-traitement pour nettoyer les imports Svelte 5
+  if (compiled.js && compiled.js.code) {
+    compiled.js.code = compiled.js.code.replace(/from ['"]svelte\/legacy['"]/g, 'from "svelte"');
+    compiled.js.code = compiled.js.code.replace(/import ['"]svelte\/legacy['"]/g, 'import "svelte"');
+    compiled.js.code = compiled.js.code.replace(/from ['"]svelte\/legacy\/(.+?)['"]/g, 'from "svelte/$1"');
+  }
+  
+  return compiled;
+}
+
 // Endpoint: compile & SSR un snippet Svelte (avec dépendances .svelte fournies) + hydratation.
 // Body attendu: { code: string, dependencies?: { [path:string]: string }, debug?: boolean }
 export async function POST(event) {
@@ -154,7 +176,7 @@ export async function POST(event) {
 
     // Compiler composant principal (SSR) – avec tentative d'auto-réparation si erreur syntaxe
     let compiled;
-    try { compiled = compile(source, { generate:'ssr', hydratable:true, filename:'Component.svelte', runes:false, compatibility: { componentApi: 4 } }); }
+    try { compiled = compileWithSvelte5Config(source, { generate:'ssr', hydratable:true, filename:'Component.svelte' }); }
     catch(e){
       const loc = e.start ? { line:e.start.line, column:e.start.column } : null;
       const compileErrMsg = e.message || '';
@@ -177,7 +199,7 @@ export async function POST(event) {
               const repairedAfterLib = rewriteLibImports(repairedSource, meta, dependencies);
               const repairedAfterUnknown = injectUnknownComponentPlaceholders(repairedAfterLib, meta);
               source = repairedAfterUnknown;
-              compiled = compile(source, { generate:'ssr', hydratable:true, filename:'Component.svelte', runes:false, compatibility: { componentApi: 4 } });
+              compiled = compileWithSvelte5Config(source, { generate:'ssr', hydratable:true, filename:'Component.svelte' });
               try { autoRepairMeta.diff = { beforeHash: codeHash, changes: (repairJson.fixedCode !== originalSource ? '1+' : '0'), patchPreview: (repairJson.fixedCode.split('\n').slice(0,8).join('\n')) }; } catch {}
             } catch(reComp2){
               autoRepairMeta.compileError = reComp2.message;
@@ -202,7 +224,7 @@ export async function POST(event) {
     for(const [depPath, depCode] of Object.entries(dependencies)){
       if(!depPath.endsWith('.svelte')) continue;
       try {
-        const c = compile(depCode, { generate:'ssr', hydratable:true, filename: depPath, runes:false, compatibility: { componentApi: 4 } });
+        const c = compileWithSvelte5Config(depCode, { generate:'ssr', hydratable:true, filename: depPath });
         if(c.css?.code){ const sig = c.css.code.trim(); if(!depCssBlocks.includes(sig)) depCssBlocks.push(sig); }
         const transformed = transformEsmToCjs(c.js.code);
         const factory = new Function('module','exports','require','__import', transformed + '\n;');
@@ -212,7 +234,7 @@ export async function POST(event) {
 
     // Build DOM version pour hydratation
     let domJsCode=null, domCssCode='', domCompileError=null;
-    try { const domCompiled = compile(source, { generate:'dom', hydratable:true, filename:'Component.svelte', runes:false, compatibility: { componentApi: 4 } }); domJsCode = domCompiled.js.code; domCssCode = domCompiled.css?.code || ''; }
+    try { const domCompiled = compileWithSvelte5Config(source, { generate:'dom', hydratable:true, filename:'Component.svelte' }); domJsCode = domCompiled.js.code; domCssCode = domCompiled.css?.code || ''; }
     catch(e){ domCompileError = e.message; }
 
     // Require environment
@@ -404,7 +426,7 @@ export async function POST(event) {
               const repairedAfterUnknown = injectUnknownComponentPlaceholders(repairedAfterLib, meta);
               repairedSource = repairedAfterUnknown;
               let repairedCompiled;
-              try { repairedCompiled = compile(repairedSource, { generate:'ssr', hydratable:true, filename:'Component.svelte', runes:false, compatibility: { componentApi: 4 } }); } catch(reCompErr){
+              try { repairedCompiled = compileWithSvelte5Config(repairedSource, { generate:'ssr', hydratable:true, filename:'Component.svelte' }); } catch(reCompErr){
                 autoRepairMeta.compileError = reCompErr.message;
               }
               if(repairedCompiled){
