@@ -123,7 +123,14 @@ export async function buildGlobalGenerationPromptAsync(blueprint, selected, { ge
       : 'MODE: safe (sortie minimalement nécessaire, aucune dépendance externe).';
 
   return { prompt: `SYSTEM:
-Tu es un architecte Senior SvelteKit. Objectif: produire TOUT le squelette d'application de haute qualité en une seule passe.
+Tu es un architecte Senior SvelteKit spécialisé en Skeleton UI. Objectif: produire TOUT le squelette d'application de haute qualité en une seule passe.
+
+🎨 UI FRAMEWORK: Utilise OBLIGATOIREMENT Skeleton UI (@skeletonlabs/skeleton) pour TOUS les composants.
+- Import: import { AppBar, Card, Modal, Button, etc } from '@skeletonlabs/skeleton';
+- Classes: variant-filled, variant-soft, variant-ghost, btn, card, etc.
+- Thème: theme-skeleton.css (préchargé)
+- Documentation: https://skeleton.dev
+
 ${modeBlock}
 CAPABILITIES DETECTÉES: ${capHits.map(h=> h.id+':'+h.score.toFixed(2)+(h.similarity?'/sim:'+h.similarity.toFixed(2):'')).join(', ') || 'aucune'}
 

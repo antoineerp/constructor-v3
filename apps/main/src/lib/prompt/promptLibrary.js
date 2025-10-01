@@ -28,14 +28,21 @@ Retourne JSON: { "${filename}": "CONTENU" } sans texte additionnel.`,
   applicationBase: ({ query, maxFiles=20 }) => `Génère une application SvelteKit moderne et professionnelle basée sur: "${query}".
 Retourne STRICTEMENT un objet JSON { "filename":"CONTENU", ... } (aucun texte hors JSON).
 
+🎨 UI FRAMEWORK: Utilise SKELETON UI (@skeletonlabs/skeleton) pour TOUS les composants UI.
+- Import obligatoire: import { AppBar, Card, Button, Modal, etc } from '@skeletonlabs/skeleton';
+- Classes Skeleton: btn variant-filled, card, variant-soft, variant-ghost, etc.
+- Thème: '@skeletonlabs/skeleton/themes/theme-skeleton.css' (préchargé dans layout)
+- Documentation: https://skeleton.dev (composants natifs Svelte)
+- NE PAS créer de composants custom si Skeleton a déjà l'équivalent
+
 QUALITÉ NIVEAU PRODUCTION:
-- Design moderne avec gradients, ombres, espacements harmonieux
-- Couleurs cohérentes et palette attrayante
+- Design moderne avec composants Skeleton (AppBar, Card, Modal, etc.)
+- Couleurs cohérentes via classes Skeleton (surface-*, primary-*, etc.)
 - Icônes Font Awesome partout où pertinent (fas fa-*)
 - Images d'illustration (via Unsplash URLs dans <img src="https://images.unsplash.com/...">)
-- Micro-interactions et états hover/focus
-- Typography riche avec variété de tailles/poids de fonts
-- Layouts responsive et professional
+- Micro-interactions et états hover/focus avec variants Skeleton
+- Typography riche avec classes Skeleton (h1-h6, text-token)
+- Layouts responsive avec AppShell Skeleton
 
 CONTENU RICHE:
 - Données réalistes et pertinentes (pas de Lorem Ipsum)
@@ -61,18 +68,25 @@ STRUCTURE ATTENDUE:
 - src/lib/components/ (composants UI)
 - src/app.css (styles Tailwind + personnalisés)
 - tailwind.config.js (configuration couleurs)`,
-  applicationStrict: ({ query, maxFiles=20 }) => `Tu es un générateur SvelteKit senior.
+  applicationStrict: ({ query, maxFiles=20 }) => `Tu es un générateur SvelteKit senior spécialisé en Skeleton UI.
 Objectif: produire une base IMMÉDIATEMENT compilable pour: "${query}".
 Sortie: UNIQUE objet JSON strict.
+
+🎨 SKELETON UI OBLIGATOIRE:
+- Utilise @skeletonlabs/skeleton pour TOUS les composants (AppBar, Card, Button, Modal, Table, etc.)
+- Classes: btn variant-filled, card, variant-soft, surface-*, primary-*, etc.
+- Layout: Import '@skeletonlabs/skeleton/styles/skeleton.css' et theme CSS dans +layout.svelte
+- package.json: Inclure "@skeletonlabs/skeleton": "^3.2.2"
+
 Règles renforcées:
 - Max ${maxFiles} fichiers (priorité routes essentielles + layout + 1-2 composants réutilisables)
 - Fichiers obligatoires: package.json, src/routes/+layout.svelte, src/routes/+page.svelte, src/app.css
-- package.json minimal: scripts dev/build, dépendances sveltekit + tailwind
+- package.json minimal: scripts dev/build, dépendances sveltekit + tailwind + skeleton
 - ZÉRO texte hors JSON, ZÉRO commentaires hors code
 - Aucune chaîne "TODO" / "FIXME" / placeholder
 - Pas de code mort ni variables inutilisées évidentes
-- Styles via classes Tailwind exclusivement
-- Accessibilité: attributs aria-* pertinents pour navigation / boutons
+- Styles via classes Skeleton + Tailwind
+- Accessibilité: Skeleton components have built-in a11y
 - Si données mock: mettre dans src/lib/data/*.ts
 `
 };

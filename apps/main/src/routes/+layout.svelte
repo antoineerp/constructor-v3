@@ -1,6 +1,10 @@
 <script>
   import '../app.css';
   import '@fortawesome/fontawesome-free/css/all.min.css';
+  // Skeleton UI imports
+  import '@skeletonlabs/skeleton/styles/skeleton.css';
+  import '@skeletonlabs/skeleton/themes/theme-skeleton.css';
+  
   import { onMount } from 'svelte';
 
   // Supabase retiré : session désactivée

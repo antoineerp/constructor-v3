@@ -20,30 +20,30 @@ export interface StackDecision {
 }
 
 export function chooseStack(signals: StackSignals): StackDecision {
-  const score: Record<StackId, number> = { shadcn:0, skeleton:0, flowbite:0 };
-  const reasons: string[] = [];
+  const score: Record<StackId, number> = { shadcn:0, skeleton:5, flowbite:0 }; // Skeleton par défaut (+5)
+  const reasons: string[] = ['skeleton+5: Default Svelte-native UI framework'];
   const s = { ...signals };
 
   function add(id: StackId, pts: number, reason: string){ score[id]+=pts; reasons.push(`${id}+${pts}: ${reason}`); }
 
   switch(s.appType){
-    case 'dashboard': case 'saas': add('shadcn',3,'appType métier/dash'); break;
+    case 'dashboard': case 'saas': add('skeleton',3,'appType métier/dash (Skeleton themes)'); break;
     case 'docs': add('skeleton',3,'docs orienté thèmes'); break;
-    case 'landing': add('skeleton',2,'landing branding'); add('flowbite',1,'landing speed'); break;
-    case 'blog': add('flowbite',2,'blog rapide'); add('skeleton',1,'blog léger theming'); break;
+    case 'landing': add('skeleton',3,'landing branding'); add('flowbite',1,'landing speed'); break;
+    case 'blog': add('skeleton',2,'blog léger theming'); add('flowbite',1,'blog rapide'); break;
   }
-  if(s.needsTheming) add('skeleton',3,'tokens/themes forts');
-  if(s.complexForms) add('shadcn',3,'forms complexes (dialog/select)');
-  if(s.dataTables) add('shadcn',2,'tables/accès patterns');
-  if(s.speedFirst) add('flowbite',2,'time-to-ship');
-  if(s.ownTheCode) add('shadcn',2,'copie code composants');
+  if(s.needsTheming) add('skeleton',4,'tokens/themes forts (Skeleton best)');
+  if(s.complexForms) add('skeleton',2,'forms avec Skeleton native'); add('shadcn',1,'forms complexes');
+  if(s.dataTables) add('skeleton',2,'tables Skeleton'); add('shadcn',1,'tables/accès patterns');
+  if(s.speedFirst) add('skeleton',3,'time-to-ship avec Skeleton'); add('flowbite',1,'flowbite rapide');
+  if(s.ownTheCode) add('skeleton',3,'composants Skeleton modulaires'); add('shadcn',1,'copie code composants');
 
-  // Tie-breakers
+  // Tie-breakers - Skeleton wins by default
   const max = Math.max(score.shadcn, score.skeleton, score.flowbite);
-  let stack: StackId = 'shadcn';
-  if(score.shadcn === max) stack = 'shadcn';
-  else if(score.skeleton === max) stack = 'skeleton';
-  else stack = 'flowbite';
+  let stack: StackId = 'skeleton'; // Default to Skeleton
+  if(score.skeleton === max) stack = 'skeleton';
+  else if(score.shadcn === max) stack = 'shadcn';
+  else if(score.flowbite === max) stack = 'flowbite';
 
   return { stack, scores: score, signals: s, reasoning: reasons };
 }
