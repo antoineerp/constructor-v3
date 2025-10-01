@@ -29,25 +29,9 @@ export async function POST(event) {
   const { query, projectId, regenerateFile, simpleMode, generationProfile = 'safe', provider='openai', chatContext = [], autoRepair = false } = body;
     // Flags optionnels pour alléger la génération (ex: { auth:false, docs:false, datatable:false })
     const featureFlags = { auth:true, docs:true, datatable:true, ...(body?.features||{}) };
-    // Récupération token Supabase (passé côté client via Authorization: Bearer <access_token>)
-    const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
+    
+    // Note: Supabase auth removed - no user tracking for now
     let userId = null;
-    let serverSupabase = null;
-    if (authHeader?.toLowerCase().startsWith('bearer ') && isSupabaseEnabled) {
-      const token = authHeader.split(' ')[1];
-      // Créer une instance Supabase côté serveur avec le token
-      try {
-        const { createClient } = await import('@supabase/supabase-js');
-        serverSupabase = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
-          global: { headers: { Authorization: `Bearer ${token}` } }
-        });
-        const { data: { user }, error: userErr } = await serverSupabase.auth.getUser();
-        if (!userErr && user) userId = user.id;
-      } catch (e) {
-        console.warn('Impossible de récupérer user depuis token', e);
-      }
-    }
-    // Fallback: ne pas utiliser clientSupabase côté serveur pour auth sensible, mais permet encore la lecture si pas RLS stricte.
 
     if (!query && !projectId) {
       return json({ success:false, error:'query ou projectId requis' }, { status:400 });
