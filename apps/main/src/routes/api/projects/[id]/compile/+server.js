@@ -45,7 +45,7 @@ export async function POST(event){
   } catch(_e) {
     return json({ success:false, error:'Invalid JSON body' }, { status:400 });
   }
-  const { entries = [], files: injectedFiles, file, autoFix, external = false } = body;
+  const { entries = [], files: injectedFiles, file, autoFix, external = false, format = 'json' } = body;
   try {
     let projectFiles = injectedFiles;
     if(!projectFiles){
@@ -93,6 +93,15 @@ export async function POST(event){
     if(typeof globalThis.__COMPILE_REQS === 'undefined') globalThis.__COMPILE_REQS = 0;
     globalThis.__COMPILE_REQS++;
     if(cached){
+      // Support du format HTML pour iframe
+      if (format === 'html' && cached.runtimeHtml) {
+        return json({ 
+          success: true, 
+          runtimeHtml: cached.runtimeHtml,
+          projectHash: hash,
+          cached: true
+        });
+      }
       return json({ success:true, cached:true, projectHash: hash, requestCount: globalThis.__COMPILE_REQS, ...cached });
     }
   const modules = [];
@@ -481,6 +490,17 @@ export async function POST(event){
     result.runtimeHtml = `<!DOCTYPE html><html><body><pre style='color:#b91c1c'>Runtime bundle error: ${String(e).replace(/</g,'&lt;')}</pre></body></html>`;
   }
     setCached(hash, result, 2*60*1000); // 2 min
+  
+  // Support du format HTML pour iframe
+  if (format === 'html' && result.runtimeHtml) {
+    return json({ 
+      success: true, 
+      runtimeHtml: result.runtimeHtml,
+      projectHash: hash,
+      cached: false
+    });
+  }
+  
   return json({ success:true, projectHash: hash, requestCount: globalThis.__COMPILE_REQS, ...result });
   } catch(e){
     console.error('[compile/projects/'+projectId+'] Fatal error:', {
