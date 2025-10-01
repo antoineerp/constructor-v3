@@ -1,26 +1,128 @@
 import { json } from '@sveltejs/kit';
-import crypto from 'crypto';
-import fs from 'fs';
-import { execSync } from 'node:child_process';
-import path from 'path';
 import { compile } from 'svelte/compiler';
 
-// Force runtime Node.js pour éviter edge limitations
 export const config = { runtime: 'nodejs20.x' };
 
 /**
  * POST /api/projects/temporary/compile
- * Body: { files: Record<string, string>, entry?: string }
+ * Body: { files: Record<string, string> }
  * 
- * 🔥 VRAI COMPILATEUR - Génère un preview Svelte COMPLET avec:
- * - Tous les modules compilés
- * - Import map ESM
- * - Tailwind CSS build
- * - Skeleton UI support
- * - Routing multi-pages
+ * 🎯 COMPILATEUR SIMPLE QUI MARCHE
+ * - Compile UN fichier Svelte en DOM
+ * - Retourne HTML standalone avec CDN
+ * - Pas d'import map compliqué
+ * - Pas de modules multiples
  */
 export async function POST({ request }) {
-  const t0 = Date.now();
+  try {
+    const body = await request.json();
+    const { files } = body;
+    
+    if (!files || typeof files !== 'object') {
+      return json({ success: false, error: 'Missing files object' }, { status: 400 });
+    }
+    
+    // Trouver le fichier principal
+    const mainFile = files['src/routes/+page.svelte'] || 
+                     Object.keys(files).find(k => k.endsWith('+page.svelte')) ||
+                     Object.keys(files).find(k => k.endsWith('.svelte'));
+    
+    if (!mainFile) {
+      return json({ success: false, error: 'No Svelte file found' }, { status: 400 });
+    }
+    
+    const svelteCode = files[mainFile];
+    
+    console.log('[temporary/compile] Compiling:', mainFile);
+    
+    // Compiler le composant Svelte
+    const compiled = compile(svelteCode, {
+      generate: 'dom',
+      css: 'injected',
+      hydratable: false,
+      runes: false,
+      compatibility: { componentApi: 4 }
+    });
+    
+    // Nettoyer les imports Svelte 5 legacy
+    let jsCode = compiled.js.code;
+    jsCode = jsCode.replace(/from ['"]svelte\/legacy['"]/g, 'from "https://esm.sh/svelte@5"');
+    jsCode = jsCode.replace(/from ['"]svelte['"]/g, 'from "https://esm.sh/svelte@5"');
+    jsCode = jsCode.replace(/from ['"]svelte\/internal['"]/g, 'from "https://esm.sh/svelte@5/internal"');
+    jsCode = jsCode.replace(/from ['"]svelte\/store['"]/g, 'from "https://esm.sh/svelte@5/store"');
+    jsCode = jsCode.replace(/from ['"]svelte\/transition['"]/g, 'from "https://esm.sh/svelte@5/transition"');
+    jsCode = jsCode.replace(/from ['"]svelte\/motion['"]/g, 'from "https://esm.sh/svelte@5/motion"');
+    jsCode = jsCode.replace(/from ['"]svelte\/animate['"]/g, 'from "https://esm.sh/svelte@5/animate"');
+    jsCode = jsCode.replace(/from ['"]svelte\/easing['"]/g, 'from "https://esm.sh/svelte@5/easing"');
+    
+    // Remplacer imports Skeleton par CDN
+    jsCode = jsCode.replace(/from ['"]@skeletonlabs\/skeleton['"]/g, 'from "https://esm.sh/@skeletonlabs/skeleton@3"');
+    
+    // HTML standalone simple
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Preview - Constructor v3</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Skeleton UI CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@skeletonlabs/skeleton@3/themes/theme-skeleton.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@skeletonlabs/skeleton@3/styles/all.css">
+  
+  <!-- FontAwesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <style>
+    body { margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    #app { width: 100%; min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  
+  <script type="module">
+    // Code compilé Svelte
+    ${jsCode}
+    
+    // Monter le composant
+    try {
+      new Component({
+        target: document.getElementById('app'),
+        props: { params: {}, data: {} }
+      });
+      console.log('[Preview] ✅ App mounted successfully!');
+    } catch (e) {
+      console.error('[Preview] ❌ Mount error:', e);
+      document.getElementById('app').innerHTML = '<div style="padding: 2rem; color: red;">Erreur de montage: ' + e.message + '</div>';
+    }
+  </script>
+</body>
+</html>`;
+    
+    return json({
+      success: true,
+      runtimeHtml: html,
+      meta: {
+        file: mainFile,
+        compiledAt: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('[temporary/compile] Error:', error);
+    
+    return json({
+      success: false,
+      error: error.message,
+      stack: error.stack
+    }, { status: 500 });
+  }
+}
+
   
   try {
     // Parse le body
