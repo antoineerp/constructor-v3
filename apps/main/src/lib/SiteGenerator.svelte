@@ -13,6 +13,13 @@
   let siteError = '';
   let toast = null; let toastTimer;
 
+  // Variables pour l'aperçu interactif
+  let showCodeView = false;
+  let previewHtml = '';
+  let previewLoading = false;
+  let previewError = '';
+  let currentProjectId = null;
+
   function showToast(message, kind='error', ttl=5000){
     toast = { message, kind };
     clearTimeout(toastTimer);
@@ -117,6 +124,69 @@
       siteGenerating = false;
     }
   }
+
+  async function previewFullApp() {
+    if (!siteFiles || Object.keys(siteFiles).length === 0) {
+      showToast('Aucune application générée à prévisualiser', 'warn');
+      return;
+    }
+
+    previewLoading = true;
+    previewError = '';
+    previewHtml = '';
+
+    try {
+      // Si on a déjà un projectId (génération précédente), on l'utilise
+      // Sinon, on compile directement les fichiers
+      
+      const res = await fetch('/api/projects/temporary/compile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          files: siteFiles,
+          entries: ['src/routes/+page.svelte']
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Erreur de compilation');
+      }
+
+      if (data.runtimeHtml) {
+        previewHtml = data.runtimeHtml;
+        showToast('Aperçu généré avec succès !', 'success', 3000);
+      } else {
+        throw new Error('Aucun HTML généré par la compilation');
+      }
+
+    } catch (error) {
+      console.error('Erreur preview:', error);
+      previewError = error.message;
+      showToast('Erreur lors de la génération de l\'aperçu: ' + error.message, 'error');
+    } finally {
+      previewLoading = false;
+    }
+  }
+
+  function openInNewTab() {
+    if (!previewHtml) {
+      showToast('Aucun aperçu à ouvrir', 'warn');
+      return;
+    }
+    
+    const blob = new Blob([previewHtml], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    
+    // Nettoyer l'URL après un délai
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // Auto-génération de l'aperçu quand les fichiers changent
+  $: if (siteFiles && siteSelectedFile && !showCodeView && !previewHtml && !previewLoading) {
+    previewFullApp();
+  }
 </script>
 
 <div class="p-4 border rounded bg-white shadow-sm mb-6">
@@ -187,8 +257,85 @@
     {/if}
     {#if siteSelectedFile}
       <div class="mb-4">
-        <h3 class="text-sm font-semibold mb-1">Aperçu du fichier sélectionné</h3>
-        <pre class="text-xs bg-gray-50 p-2 rounded max-h-96 overflow-auto">{siteFiles[siteSelectedFile]}</pre>
+        <h3 class="text-sm font-semibold mb-1 flex items-center justify-between">
+          <span>Aperçu de l'application générée</span>
+          <div class="flex gap-2">
+            <button 
+              class="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+              on:click={previewFullApp}
+              title="Prévisualiser toute l'application"
+            >
+              🌐 Aperçu complet
+            </button>
+            <button 
+              class="text-xs px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600"
+              on:click={() => showCodeView = !showCodeView}
+              title="Basculer vue code/rendu"
+            >
+              {showCodeView ? '👁️ Voir rendu' : '📝 Voir code'}
+            </button>
+          </div>
+        </h3>
+        
+        {#if showCodeView}
+          <!-- Vue code traditionnel -->
+          <pre class="text-xs bg-gray-50 p-2 rounded max-h-96 overflow-auto">{siteFiles[siteSelectedFile]}</pre>
+        {:else}
+          <!-- Vue rendu interactif -->
+          {#if previewHtml}
+            <div class="border rounded bg-white">
+              <div class="px-2 py-1 bg-gray-100 text-xs text-gray-600 border-b flex items-center justify-between">
+                <span>Rendu interactif : {siteSelectedFile}</span>
+                <button 
+                  class="text-xs px-2 py-1 bg-emerald-500 text-white rounded hover:bg-emerald-600"
+                  on:click={openInNewTab}
+                  title="Ouvrir dans un nouvel onglet"
+                >
+                  ↗️ Nouveau tab
+                </button>
+              </div>
+              <iframe
+                srcdoc={previewHtml}
+                class="w-full h-96 border-0"
+                sandbox="allow-scripts allow-same-origin"
+                title="Aperçu de l'application"
+              ></iframe>
+            </div>
+          {:else if previewLoading}
+            <div class="h-96 border rounded bg-gray-50 flex items-center justify-center">
+              <div class="text-center">
+                <i class="fas fa-spinner fa-spin text-2xl text-blue-500 mb-2"></i>
+                <p class="text-sm text-gray-600">Compilation de l'aperçu en cours...</p>
+              </div>
+            </div>
+          {:else if previewError}
+            <div class="h-96 border rounded bg-red-50 flex items-center justify-center">
+              <div class="text-center text-red-600">
+                <i class="fas fa-exclamation-triangle text-2xl mb-2"></i>
+                <p class="text-sm">Erreur de compilation</p>
+                <p class="text-xs mt-1">{previewError}</p>
+                <button 
+                  class="mt-2 text-xs px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+                  on:click={previewFullApp}
+                >
+                  Réessayer
+                </button>
+              </div>
+            </div>
+          {:else}
+            <div class="h-96 border rounded bg-gray-50 flex items-center justify-center">
+              <div class="text-center">
+                <p class="text-sm text-gray-600 mb-2">Aucun aperçu généré</p>
+                <button 
+                  class="text-xs px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+                  on:click={previewFullApp}
+                >
+                  Générer l'aperçu
+                </button>
+              </div>
+            </div>
+          {/if}
+        {/if}
       </div>
     {/if}
   {/if}
